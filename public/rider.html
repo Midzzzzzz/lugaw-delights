@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lugaw Delights – Riders</title>
+<meta name="app-role" content="rider">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+.narrow{max-width:520px}
+.section-title{font-size:1.3rem;color:var(--brand-deep);margin:18px 0 8px;display:flex;align-items:center;gap:8px}
+.collect{font-family:var(--display);font-size:1.2rem;font-weight:800;color:var(--brand-deep)}
+.list{display:grid;gap:12px}
+.contract{white-space:pre-wrap;max-height:55vh;overflow:auto;border:2px solid var(--line);border-radius:12px;padding:14px;background:var(--bg);font-size:.9rem;line-height:1.55}
+.sigpad{width:100%;height:auto;aspect-ratio:3/1;background:#fff;border:2px dashed var(--line);border-radius:12px;touch-action:none;cursor:crosshair}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <img src="logo.jpg" alt="Lugaw Delights logo">
+    <div class="who"><h1>Lugaw Delights Riders</h1><p class="tag" id="tagline">Deliver comfort in a bowl. Keep the full delivery fee on every trip.</p></div>
+    <button class="btn ghost small" id="signOut" hidden>Sign out</button>
+  </header>
+  <div id="setup"></div>
+
+  <!-- Signed out -->
+  <div id="authView" class="narrow" hidden>
+    <div class="tabs" style="position:static;border:0"><button class="on" data-tab="login">Sign in</button><button data-tab="register">Register as rider</button></div>
+
+    <form class="stack card" id="loginForm" novalidate>
+      <label class="f" for="l-email">Email<input id="l-email" type="email" autocomplete="email"></label>
+      <label class="f" for="l-pass">Password<input id="l-pass" type="password" autocomplete="current-password"></label>
+      <p class="err" id="l-err" hidden></p>
+      <button class="btn big" type="submit">Sign in</button>
+      <button class="btn ghost small" type="button" id="forgot" style="justify-self:start">Forgot password?</button>
+    </form>
+
+    <form class="stack card" id="regForm" novalidate hidden>
+      <p style="margin:0">Fill this in, then bring your <b>driver's license, OR/CR, and NBI or barangay clearance</b> to the shop so we can verify you. You can accept orders once we approve you.</p>
+      <label class="f" for="r-name">Full name<input id="r-name" autocomplete="name" maxlength="80"></label>
+      <label class="f" for="r-phone">Mobile number<input id="r-phone" type="tel" inputmode="tel" maxlength="20" placeholder="09XX XXX XXXX"></label>
+      <div class="group" role="radiogroup" aria-labelledby="areaLabel"><span id="areaLabel">Preferred delivery area</span>
+        <div class="seg" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr))">
+          <input type="radio" name="r-area" id="area-lb" value="Los Baños"><label for="area-lb">Los Baños</label>
+          <input type="radio" name="r-area" id="area-bay" value="Bay"><label for="area-bay">Bay</label>
+          <input type="radio" name="r-area" id="area-both" value="Los Baños & Bay"><label for="area-both">Both Los Baños &amp; Bay</label>
+        </div>
+        <p class="muted" style="margin:2px 0 0;font-size:.85rem">Lugaw Delights delivery service is currently limited to Los Baños and Bay, Laguna.</p>
+      </div>
+      <label class="f" for="r-vehicle">Vehicle
+        <select id="r-vehicle"><option>Motorcycle</option><option>Bicycle</option><option>E-bike</option><option>On foot</option></select></label>
+      <label class="f" for="r-plate">Plate number (if any)<input id="r-plate" maxlength="20"></label>
+      <label class="f" for="r-license">Driver's license number (if any)<input id="r-license" maxlength="40"></label>
+      <div class="payout" id="regPay"></div>
+      <label class="f" for="r-email">Email (you'll sign in with this)<input id="r-email" type="email" autocomplete="email"></label>
+      <label class="f" for="r-pass">Password (6+ characters)<input id="r-pass" type="password" autocomplete="new-password"></label>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:.9rem"><input type="checkbox" id="r-agree" style="margin-top:4px">
+        <span>I agree to follow the rider rules and allow Lugaw Delights to keep my details to manage deliveries.</span></label>
+      <p class="err" id="r-err" hidden></p>
+      <button class="btn big" type="submit">Submit application</button>
+    </form>
+  </div>
+
+  <!-- Signed in, not approved -->
+  <div id="waitView" class="narrow card" hidden></div>
+
+  <!-- Approved, agreement not signed yet -->
+  <div id="contractView" class="card" hidden style="max-width:760px;display:grid;gap:12px">
+    <h2 style="color:var(--brand)">Rider Agreement</h2>
+    <p style="margin:0">You're approved! Before you can take orders, please read this agreement carefully and sign it.</p>
+    <div id="contractText" class="contract"></div>
+    <label class="f" for="c-name">Type your full name<input id="c-name" maxlength="80" autocomplete="name"></label>
+    <div class="group"><span>Sign here with your finger or mouse</span>
+      <canvas id="sigPad" width="600" height="200" class="sigpad" aria-label="Signature pad"></canvas>
+      <button class="btn ghost small" type="button" id="sigClear" style="justify-self:start">Clear signature</button></div>
+    <label style="display:flex;gap:8px;align-items:flex-start;font-size:.95rem"><input type="checkbox" id="c-agree" style="margin-top:4px">
+      <span>I have read and understood this agreement, and I sign it freely.</span></label>
+    <p class="err" id="c-err" hidden></p>
+    <button class="btn big" id="c-sign">Sign agreement</button>
+  </div>
+
+  <!-- Rider who registered before payout accounts existed -->
+  <form id="payView" class="narrow card stack" novalidate hidden>
+    <h2 style="color:var(--brand)">Add your payout account</h2>
+    <p style="margin:0">Tell us where to send your delivery earnings at the end of the day. You can only set this once; to change it later, ask the owner.</p>
+    <div class="payout" id="riderPay"></div>
+    <p class="err" id="p-err" hidden></p>
+    <button class="btn big" type="submit">Save payout account</button>
+  </form>
+
+  <!-- Approved rider -->
+  <div id="riderView" hidden>
+    <div class="card btnrow" style="justify-content:space-between">
+      <div><b id="riderName"></b><div class="muted" id="riderMeta" style="font-size:.88rem"></div>
+        <span class="btnrow" style="margin-top:6px"><button class="btn ghost small" id="myDetails">My details</button><button class="btn ghost small" id="myContract">My agreement</button></span></div>
+      <label class="switch"><input type="checkbox" id="online"><span id="onlineLabel">Offline</span></label>
+    </div>
+    <!-- Rider edits their own mobile number and payout account -->
+    <form class="card stack" id="detailsForm" novalidate hidden>
+      <h2 style="color:var(--brand)">My details</h2>
+      <label class="f" for="d-phone">Mobile number<input id="d-phone" type="tel" inputmode="tel" maxlength="20" placeholder="09XX XXX XXXX"></label>
+      <div class="payout" id="editPay"></div>
+      <label class="f" for="d-pass">Your password (to confirm it's really you)<input id="d-pass" type="password" autocomplete="current-password"></label>
+      <p class="muted" style="margin:0;font-size:.85rem">If you change your payout account, the shop will call you to confirm before sending money.</p>
+      <p class="err" id="d-err" hidden></p>
+      <div class="btnrow"><button class="btn" type="submit">Save</button><button class="btn ghost small" type="button" id="detailsCancel">Cancel</button></div>
+    </form>
+    <div class="stats">
+      <div class="stat"><b id="sTrips">0</b><span>Trips today</span></div>
+      <div class="stat"><b id="sEarn">₱0</b><span>Earned today</span></div>
+      <div class="stat"><b id="sCash">₱0</b><span>Cash to hand over</span></div>
+      <div class="stat"><b id="sOwed">₱0</b><span>Shop owes you</span></div>
+    </div>
+    <p class="notice" id="soundNote"><button class="btn small" id="soundBtn">Turn on order alerts</button> <span class="muted">Plays a sound when a new order is ready.</span></p>
+
+    <h2 class="section-title">My deliveries</h2>
+    <div class="list" id="mine"></div>
+
+    <h2 class="section-title">Orders waiting for a rider <span class="pill new num" id="waitCount">0</span></h2>
+    <div class="list" id="open"></div>
+  </div>
+  <footer>Need help? Call the shop: <span id="shopPhone" class="num"></span> · <a href="index.html">Order food</a></footer>
+</div>
+
+<script type="module">
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { CONTRACT_VERSION, riderContract, agreementHTML } from "./contract.js";
+import { auth, db, isConfigured, SHOP, phoneKey, hasPayout, payoutText, readPayout, peso, esc, STATUS, fmtTime, todayKey, mapsLink, itemsHTML, compressPhoto, PROOF_KINDS, friendlyError, setupNotice, enableSound, chime } from "./common.js";
+
+const $=s=>document.querySelector(s);
+$("#shopPhone").textContent=SHOP.phone;
+$("#setup").innerHTML=setupNotice();
+let me=null, rider=null, agreement, subs=[], seenOpen=new Set(), firstOpenLoad=true, openOrders=[];
+const show=v=>["authView","waitView","payView","contractView","riderView"].forEach(id=>$("#"+id).hidden=id!==v);
+
+if(isConfigured) onAuthStateChanged(auth, u=>{
+  subs.forEach(f=>f()); subs=[]; stopWork(); rider=undefined; agreement=undefined; contacts={};
+  me = u && !u.isAnonymous ? u : null;
+  $("#signOut").hidden=!me;
+  if(!me){ show("authView"); return; }
+  subs.push(onSnapshot(doc(db,"riders",me.uid), s=>{ rider=s.exists()?s.data():null; route(); },
+    e=>{ show("waitView"); $("#waitView").textContent=friendlyError(e); }));
+  // The signed rider agreement (null = not signed yet)
+  subs.push(onSnapshot(doc(db,"agreements",me.uid), s=>{ agreement=s.exists()?s.data():null; route(); },
+    e=>{ show("waitView"); $("#waitView").textContent=friendlyError(e); }));
+});
+// Which screen to show: waiting for approval, the agreement to sign, or deliveries
+function route(){
+  if(rider===null){ stopWork(); show("waitView"); $("#waitView").innerHTML=`<h2>No rider profile</h2><p>This account isn't registered as a rider. Sign out and use <b>Register as rider</b>.</p>`; return; }
+  if(!rider) return; // still loading
+  if(rider.status!=="approved"){ stopWork(); showWaiting(); return; }
+  if(!hasPayout(rider)){ stopWork(); show("payView"); return; }
+  if(agreement===undefined){ show("waitView"); $("#waitView").innerHTML=`<p class="muted">Loading…</p>`; return; }
+  if(!agreement || agreement.version!==CONTRACT_VERSION){ stopWork(); showContract(); return; }
+  show("riderView"); renderProfile();
+  if(!workSubs.length) startWork();
+}
+$("#signOut").onclick=()=>signOut(auth);
+
+// ---------- Sign in / register ----------
+document.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{
+  document.querySelectorAll("[data-tab]").forEach(x=>x.classList.toggle("on",x===b));
+  $("#loginForm").hidden=b.dataset.tab!=="login"; $("#regForm").hidden=b.dataset.tab!=="register";
+});
+const err=(id,m)=>{ $(id).textContent=m||""; $(id).hidden=!m; };
+$("#loginForm").onsubmit=async e=>{
+  e.preventDefault(); err("#l-err");
+  try{ await signInWithEmailAndPassword(auth,$("#l-email").value.trim(),$("#l-pass").value); }
+  catch(x){ err("#l-err",friendlyError(x)); }
+};
+$("#forgot").onclick=async()=>{
+  const em=$("#l-email").value.trim(); if(!em) return err("#l-err","Type your email above first.");
+  try{ await sendPasswordResetEmail(auth,em); err("#l-err","Password reset link sent to "+em+"."); }catch(x){ err("#l-err",friendlyError(x)); }
+};
+$("#regForm").onsubmit=async e=>{
+  e.preventDefault(); err("#r-err");
+  const v=id=>$(id).value.trim();
+  const data={ name:v("#r-name"), phone:v("#r-phone"), area:document.querySelector('input[name="r-area"]:checked')?.value||"", vehicle:$("#r-vehicle").value, plate:v("#r-plate"), license:v("#r-license") };
+  const miss=[]; if(!data.name) miss.push("full name"); if(!phoneKey(data.phone)) miss.push("valid mobile number (09XX XXX XXXX)");
+  const pay=payoutFrom("r"); if(pay.miss) miss.push(...pay.miss); else Object.assign(data,pay.data);
+  if(!data.area) miss.push("preferred delivery area"); if(!v("#r-email")) miss.push("email"); if($("#r-pass").value.length<6) miss.push("password of 6+ characters");
+  if(miss.length) return err("#r-err","Please add your "+miss.join(", ")+".");
+  if(!$("#r-agree").checked) return err("#r-err","Please tick the agreement box.");
+  try{
+    const cred=await createUserWithEmailAndPassword(auth,v("#r-email"),$("#r-pass").value);
+    await setDoc(doc(db,"riders",cred.user.uid),{...data,email:v("#r-email"),status:"pending",online:false,createdAt:serverTimestamp()});
+  }catch(x){ err("#r-err",friendlyError(x)); }
+};
+
+function showWaiting(){
+  show("waitView");
+  const msg={
+    pending:["Application received","Thanks, "+esc(rider.name)+"! Bring your driver's license, OR/CR, and NBI or barangay clearance to the shop. Once we approve you, this page will show orders automatically."],
+    rejected:["Application not approved","Sorry, we can't take you on as a rider right now. Call the shop if you have questions."],
+    suspended:["Account paused","Your rider account is paused. Please talk to the shop owner."]
+  }[rider.status]||["Account on hold","Please contact the shop."];
+  $("#waitView").innerHTML=`<h2 style="color:var(--brand)">${msg[0]}</h2><p>${msg[1]}</p><p class="muted">Shop: ${esc(SHOP.phone)}</p>`;
+}
+
+// ---------- Rider agreement ----------
+// Shown once the owner approves the rider; orders only appear after it's signed.
+// The exact text shown is saved with the signature.
+let shownContract="", sigDrawn=false;
+function showContract(){
+  if(!$("#contractView").hidden) return; // already showing: keep what they've typed and drawn
+  show("contractView");
+  shownContract=riderContract(rider);
+  $("#contractText").textContent=shownContract;
+  $("#c-name").value=""; $("#c-agree").checked=false; $("#c-err").hidden=true; clearSig();
+}
+const pad=$("#sigPad"), ctx=pad.getContext("2d");
+function clearSig(){ ctx.fillStyle="#fff"; ctx.fillRect(0,0,pad.width,pad.height); sigDrawn=false; }
+clearSig();
+let drawing=false;
+const at=e=>{ const r=pad.getBoundingClientRect(); return [(e.clientX-r.left)*pad.width/r.width,(e.clientY-r.top)*pad.height/r.height]; };
+pad.addEventListener("pointerdown",e=>{ drawing=true; pad.setPointerCapture(e.pointerId); const [x,y]=at(e); ctx.beginPath(); ctx.moveTo(x,y); });
+pad.addEventListener("pointermove",e=>{
+  if(!drawing) return;
+  const [x,y]=at(e); ctx.lineTo(x,y); ctx.strokeStyle="#111"; ctx.lineWidth=3; ctx.lineCap="round"; ctx.lineJoin="round"; ctx.stroke(); sigDrawn=true;
+});
+["pointerup","pointercancel","pointerleave"].forEach(ev=>pad.addEventListener(ev,()=>{ drawing=false; }));
+$("#sigClear").onclick=clearSig;
+const norm=s=>String(s||"").trim().replace(/\s+/g," ").toLowerCase();
+$("#c-sign").onclick=async()=>{
+  const err=m=>{ $("#c-err").textContent=m; $("#c-err").hidden=false; };
+  const name=$("#c-name").value.trim().replace(/\s+/g," ");
+  if(norm(name)!==norm(rider.name)) return err(`Type your full name exactly as registered: ${rider.name}`);
+  if(!sigDrawn) return err("Please sign in the box with your finger or mouse.");
+  if(!$("#c-agree").checked) return err("Please tick the box to confirm you have read and agree.");
+  $("#c-sign").disabled=true; $("#c-err").hidden=true;
+  try{
+    await setDoc(doc(db,"agreements",me.uid),{ riderUid:me.uid, version:CONTRACT_VERSION, signedName:name, contractText:shownContract,
+      signature:pad.toDataURL("image/png"), phone:rider.phone||"", license:rider.license||"", plate:rider.plate||"",
+      vehicle:rider.vehicle||"", signedAt:serverTimestamp() });
+  }catch(x){ err(friendlyError(x)); }
+  finally{ $("#c-sign").disabled=false; }
+};
+// Open the rider's own signed copy
+$("#myContract").onclick=()=>{
+  if(!agreement) return;
+  const w=window.open("","_blank"); if(!w) return;
+  w.document.open(); w.document.write(agreementHTML(agreement)); w.document.close();
+};
+
+// ---------- Payout account ----------
+// The same fields on the registration form (prefix "r") and the add-payout screen ("p")
+function payoutFields(p){
+  return `<div class="group" role="radiogroup" aria-labelledby="${p}-payLabel"><span id="${p}-payLabel">Where should we send your earnings?</span>
+    <div class="seg">
+      <input type="radio" name="${p}-pay" id="${p}-pay-gc" value="GCash"><label for="${p}-pay-gc">GCash</label>
+      <input type="radio" name="${p}-pay" id="${p}-pay-bank" value="Bank"><label for="${p}-pay-bank">Bank account</label>
+    </div></div>
+  <label class="f" for="${p}-payBank" data-bank hidden>Bank name<input id="${p}-payBank" maxlength="60" placeholder="e.g. BDO, BPI, Landbank"></label>
+  <label class="f" for="${p}-payNumber"><span data-num-label>GCash number</span><input id="${p}-payNumber" inputmode="numeric" maxlength="24" placeholder="09XX XXX XXXX"></label>
+  <label class="f" for="${p}-payName">Account name (as shown in GCash or the bank)<input id="${p}-payName" maxlength="80"></label>
+  <p class="muted" style="margin:0;font-size:.85rem">The shop sends your delivery fees here at the end of the day. Use an account in your own name.</p>`;
+}
+function setupPayout(box,p){
+  box.innerHTML=payoutFields(p);
+  box.addEventListener("change",()=>{
+    const bank=box.querySelector(`input[name="${p}-pay"]:checked`)?.value==="Bank";
+    box.querySelector("[data-bank]").hidden=!bank;
+    box.querySelector("[data-num-label]").textContent=bank?"Account number":"GCash number";
+    box.querySelector(`#${p}-payNumber`).placeholder=bank?"Numbers only":"09XX XXX XXXX";
+  });
+}
+const payoutFrom=p=>readPayout(document.querySelector(`input[name="${p}-pay"]:checked`)?.value,
+  $(`#${p}-payName`).value, $(`#${p}-payNumber`).value, $(`#${p}-payBank`).value);
+setupPayout($("#regPay"),"r"); setupPayout($("#riderPay"),"p"); setupPayout($("#editPay"),"d");
+
+// ---------- My details: the rider updates their mobile number and payout account ----------
+$("#myDetails").onclick=()=>{
+  err("#d-err"); $("#d-pass").value=""; $("#d-phone").value=rider.phone||"";
+  const box=$("#editPay"), m=rider.payMethod||"GCash";
+  box.querySelector(`input[name="d-pay"][value="${m}"]`).checked=true;
+  $("#d-payName").value=rider.payName||""; $("#d-payNumber").value=rider.payNumber||""; $("#d-payBank").value=rider.payBank||"";
+  box.dispatchEvent(new Event("change"));
+  $("#detailsForm").hidden=false; $("#detailsForm").scrollIntoView({behavior:"smooth",block:"start"});
+};
+$("#detailsCancel").onclick=()=>{ $("#detailsForm").hidden=true; };
+$("#detailsForm").onsubmit=async e=>{
+  e.preventDefault(); err("#d-err");
+  const phone=$("#d-phone").value.trim(), pay=payoutFrom("d"), miss=[];
+  if(!phoneKey(phone)) miss.push("valid mobile number (09XX XXX XXXX)");
+  if(pay.miss) miss.push(...pay.miss);
+  if(miss.length) return err("#d-err","Please add your "+miss.join(", ")+".");
+  if(!$("#d-pass").value) return err("#d-err","Type your password to confirm.");
+  const upd={};
+  if(phone!==rider.phone) upd.phone=phone;
+  const payChanged=["payMethod","payName","payNumber","payBank"].some(k=>pay.data[k]!==(rider[k]||""));
+  if(payChanged) Object.assign(upd,pay.data,{payUpdatedAt:serverTimestamp()});
+  if(!Object.keys(upd).length){ $("#detailsForm").hidden=true; return; }
+  const b=e.submitter; if(b) b.disabled=true;
+  try{
+    await reauthenticateWithCredential(me, EmailAuthProvider.credential(me.email,$("#d-pass").value));
+    await updateDoc(doc(db,"riders",me.uid),upd);
+    $("#detailsForm").hidden=true;
+  }catch(x){ err("#d-err",friendlyError(x)); }
+  finally{ if(b) b.disabled=false; $("#d-pass").value=""; }
+};
+$("#payView").onsubmit=async e=>{
+  e.preventDefault(); err("#p-err");
+  const pay=payoutFrom("p"); if(pay.miss) return err("#p-err","Please add your "+pay.miss.join(", ")+".");
+  const b=e.submitter; if(b) b.disabled=true;
+  try{ await updateDoc(doc(db,"riders",me.uid),{...pay.data,payUpdatedAt:serverTimestamp()}); }
+  catch(x){ err("#p-err",friendlyError(x)); }
+  finally{ if(b) b.disabled=false; }
+};
+
+// ---------- Rider work ----------
+function renderProfile(){
+  $("#riderName").textContent=rider.name;
+  $("#riderMeta").textContent=`${rider.vehicle}${rider.plate?" · "+rider.plate:""} · ${rider.area} · Earnings to ${payoutText(rider)}`;
+  $("#online").checked=!!rider.online; $("#onlineLabel").textContent=rider.online?"Available":"Offline";
+}
+$("#online").onchange=async e=>{
+  try{ await updateDoc(doc(db,"riders",me.uid),{online:e.target.checked}); }catch(x){ e.target.checked=!e.target.checked; }
+};
+$("#soundBtn").onclick=()=>{ if(enableSound()){ chime(); $("#soundNote").innerHTML=`<span class="muted">Order alerts are on. Keep this page open.</span>`; } };
+
+// My orders come from a few small queries (active, delivered today, not yet
+// settled with the shop) so the page never loads a rider's whole history.
+let workSubs=[], mineBy={}, day=null, contacts={};
+const myOrders=()=>{ const m=new Map(); Object.values(mineBy).forEach(l=>l.forEach(o=>m.set(o.id,o))); return [...m.values()]; };
+function watchMine(key, ...filters){
+  workSubs.push(onSnapshot(query(collection(db,"orders"),where("riderUid","==",me.uid),...filters), s=>{
+    mineBy[key]=s.docs.map(d=>({id:d.id,...d.data()})); render();
+  }, e=>{ $("#mine").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; }));
+}
+function stopWork(){ workSubs.forEach(f=>f()); workSubs=[]; mineBy={}; }
+setInterval(()=>{ if(workSubs.length && day!==todayKey()) startWork(); }, 60000); // new day: reset today's trips
+function startWork(){
+  stopWork(); firstOpenLoad=true; seenOpen=new Set(); day=todayKey();
+  watchMine("assigned", where("status","==","assigned"));
+  watchMine("picked", where("status","==","picked_up"));
+  watchMine("today", where("deliveredDate","==",day));
+  watchMine("unsettled", where("settled","==",false));
+  workSubs.push(onSnapshot(query(collection(db,"orders"),where("status","==","ready")), s=>{
+    openOrders=s.docs.map(d=>({id:d.id,...d.data()})).filter(o=>!o.riderUid)
+      .sort((a,b)=>(a.createdAt?.seconds||0)-(b.createdAt?.seconds||0));
+    const fresh=openOrders.some(o=>!seenOpen.has(o.id));
+    openOrders.forEach(o=>seenOpen.add(o.id));
+    if(fresh && !firstOpenLoad && rider?.online) chime();
+    firstOpenLoad=false; render();
+  }, e=>{ $("#open").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; }));
+}
+
+// Customer name and number, readable only after this rider accepts the order
+function loadContact(id){
+  if(contacts[id]) return;
+  contacts[id]="loading";
+  getDoc(doc(db,"contacts",id)).then(s=>{ contacts[id]=s.exists()?s.data():{name:"",phone:""}; render(); })
+    .catch(()=>{ delete contacts[id]; });
+}
+
+function card(o, kind){
+  const fee=peso(o.deliveryFee), food=peso(o.subtotal);
+  const cash = o.payment==="Cash"
+    ? (o.riderPaid
+      ? `<div><span class="pill go">You paid the shop ${food}</span> Collect <span class="collect">${peso(o.total)}</span> cash from the customer. ${food} pays you back and ${fee} is your fee.</div>`
+      : `<div><b>Pay the shop ${food}</b> when you pick up the food. Then collect <span class="collect">${peso(o.total)}</span> cash from the customer: ${food} pays you back and ${fee} is your fee.</div>`)
+    : `<div><span class="pill go">Paid by GCash</span> Collect nothing. The shop pays your ${fee} fee.</div>`;
+  let actions="";
+  if(kind==="open") actions=`<button class="btn big" data-act="accept" data-id="${o.id}">Accept delivery · earn ${peso(o.deliveryFee)}</button>`;
+  if(o.status==="assigned") actions=`<div class="btnrow">${o.payment==="Cash"
+       ? `<span class="muted">At the shop, pay ${food}. The seller confirms your payment, then this order moves to <b>On the way</b>.</span>`
+       : `<button class="btn ok" data-act="picked" data-id="${o.id}">Picked up from shop</button>`}
+     <button class="btn ghost small" data-act="release" data-id="${o.id}">I can't take this</button></div>`;
+  if(o.status==="picked_up") actions=!o.hasPin ? `<button class="btn big ok" data-act="delivered" data-id="${o.id}">Delivered</button>` // older orders have no code
+    : `<label class="f" for="pin-${o.id}">Customer's 4-digit delivery code
+      <input id="pin-${o.id}" data-pin-for="${o.id}" data-focus-key="pin-${o.id}" type="text" inputmode="numeric" maxlength="4" autocomplete="off"
+        value="${esc(pinDraft[o.id]||"")}" placeholder="Ask the customer" style="font-size:1.3rem;letter-spacing:.3em;max-width:10em"></label>
+    <p class="muted" style="margin:0;font-size:.85rem">Hand over the food first. The customer sees the code on their order screen. No code? Call the shop.</p>
+    <button class="btn big ok" data-act="delivered" data-id="${o.id}">Delivered</button>`;
+  const c=contacts[o.id];
+  const contact = kind==="open" ? "" : `<b>Customer</b><span>${c&&c!=="loading"
+    ? `${esc(c.name)} · <a class="num" href="tel:${esc(String(c.phone).replace(/[^\d+]/g,""))}">${esc(c.phone)}</a>` : `<span class="muted">Loading…</span>`}</span>`;
+  return `<div class="order ${kind==="open"?"alert":""}">
+    <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${STATUS[o.status]?.tone}">${esc(STATUS[o.status]?.label)}</span></div>
+    <div class="kv"><b>Pick up</b><span>${esc(SHOP.pickupAddress)}</span>
+      <b>Deliver to</b><span>${esc(o.address)} · <a href="${mapsLink(o.address)}" target="_blank" rel="noopener">Map</a></span>
+      ${contact}${o.notes?`<b>Notes</b><span>${esc(o.notes)}</span>`:""}<b>Placed</b><span>${fmtTime(o.createdAt)}</span></div>
+    ${itemsHTML(o,false)}${cash}${kind==="mine"?photoBox(o):""}${actions}<p class="err" data-err="${o.id}"${cardErr[o.id]?"":" hidden"}>${esc(cardErr[o.id]||"")}</p></div>`;
+}
+function render(){
+  const mine=myOrders();
+  const active=mine.filter(o=>["assigned","picked_up"].includes(o.status));
+  active.forEach(o=>{ loadContact(o.id); loadMyProofs(o.id); });
+  const focusKey=document.activeElement?.dataset?.focusKey; // keep the cursor in a PIN box across updates
+  $("#mine").innerHTML = active.length ? active.map(o=>card(o,"mine")).join("") : `<p class="empty">No active delivery. Accept one below.</p>`;
+  if(focusKey) document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`)?.focus();
+  $("#waitCount").textContent=openOrders.length;
+  $("#open").innerHTML = !rider?.online ? `<p class="empty">Switch to <b>Available</b> to see and accept orders.</p>`
+    : openOrders.length ? openOrders.map(o=>card(o,"open")).join("") : `<p class="empty">No orders waiting right now. New ones will appear here.</p>`;
+  const done=mine.filter(o=>o.status==="delivered" && o.deliveredDate===day);
+  const unsettled=mine.filter(o=>o.status==="delivered" && o.settled===false);
+  $("#sTrips").textContent=done.length;
+  $("#sEarn").textContent=peso(done.reduce((s,o)=>s+(o.deliveryFee||0),0));
+  // Cash orders: the rider keeps the fee and hands over the food money.
+  // GCash orders: the shop got everything, so it owes the rider the fee.
+  $("#sCash").textContent=peso(unsettled.filter(o=>o.payment==="Cash").reduce((s,o)=>s+(o.subtotal||0),0));
+  $("#sOwed").textContent=peso(unsettled.filter(o=>o.payment==="GCash").reduce((s,o)=>s+(o.deliveryFee||0),0));
+}
+// What the rider has typed in each order's delivery-code box
+// ---------- Proof photos ----------
+// The rider photographs the food at pickup and at the customer's door. Each photo is saved once
+// and can't be changed, so the rider checks it before sending.
+const myProofs={}, photoDraft={}; // order id -> { pickup, delivery } ; "id_kind" -> photo waiting to be sent
+function loadMyProofs(id){
+  if(myProofs[id]) return; myProofs[id]={};
+  ["pickup","delivery"].forEach(k=>getDoc(doc(db,"proofs",`${id}_${k}`)).then(s=>{ if(s.exists()){ myProofs[id][k]=true; render(); } }).catch(()=>{}));
+}
+function photoBox(o){
+  const kinds=o.status==="assigned"?["pickup"]:o.status==="picked_up"?["pickup","delivery"]:[];
+  if(!kinds.length) return "";
+  return `<div class="btnrow" style="gap:10px">${kinds.map(k=>{
+    const key=`${o.id}_${k}`;
+    if(myProofs[o.id]?.[k]) return `<span class="pill go">✓ ${k==="pickup"?"Pickup":"Delivery"} photo saved</span>`;
+    if(k==="pickup" && o.status==="picked_up") return ""; // too late once on the way
+    if(photoDraft[key]) return `<div style="display:grid;gap:6px"><img src="${photoDraft[key]}" alt="" style="width:160px;border-radius:10px">
+      <span class="btnrow"><button class="btn small ok" data-photo-send="${key}">Send photo</button><button class="btn ghost small" data-photo-retake="${key}">Retake</button></span></div>`;
+    return `<label class="btn ghost small" style="cursor:pointer">📷 Take ${k==="pickup"?"pickup":"delivery"} photo
+      <input type="file" accept="image/*" capture="environment" data-photo-take="${key}" hidden></label>`;
+  }).join("")}</div>
+  <p class="muted" style="margin:0;font-size:.82rem">Optional proof: photo the food when you pick it up, and at the customer's door when you hand it over.</p>`;
+}
+$("#riderView").addEventListener("change",async e=>{
+  const i=e.target.closest("[data-photo-take]"); if(!i||!i.files[0]) return;
+  const key=i.dataset.photoTake, id=key.split("_")[0];
+  try{ photoDraft[key]=await compressPhoto(i.files[0]); render(); }
+  catch(x){ cardErr[id]=x.message; const p=document.querySelector(`[data-err="${id}"]`); if(p){ p.textContent=x.message; p.hidden=false; } }
+});
+$("#riderView").addEventListener("click",async e=>{
+  const r=e.target.closest("[data-photo-retake]"); if(r){ delete photoDraft[r.dataset.photoRetake]; render(); return; }
+  const b=e.target.closest("[data-photo-send]"); if(!b) return;
+  const key=b.dataset.photoSend, i=key.lastIndexOf("_"), id=key.slice(0,i), kind=key.slice(i+1);
+  b.disabled=true; b.textContent="Sending…";
+  try{
+    await setDoc(doc(db,"proofs",key),{orderId:id,kind,riderUid:me.uid,photo:photoDraft[key],takenAt:serverTimestamp()});
+    delete photoDraft[key]; (myProofs[id]||(myProofs[id]={}))[kind]=true; render();
+  }catch(x){
+    b.disabled=false; b.textContent="Send photo";
+    cardErr[id]=friendlyError(x); const p=document.querySelector(`[data-err="${id}"]`); if(p){ p.textContent=friendlyError(x); p.hidden=false; }
+  }
+});
+
+const pinDraft={}, cardErr={}; // typed codes, and the last error on each order card (kept across refreshes)
+$("#riderView").addEventListener("input",e=>{
+  const i=e.target.closest("[data-pin-for]"); if(!i) return;
+  i.value=i.value.replace(/\D/g,"").slice(0,4); pinDraft[i.dataset.pinFor]=i.value; delete cardErr[i.dataset.pinFor];
+});
+$("#riderView").addEventListener("click", async e=>{
+  const b=e.target.closest("[data-act]"); if(!b) return;
+  const id=b.dataset.id, ref=doc(db,"orders",id), act=b.dataset.act;
+  const fail=m=>{ cardErr[id]=m; const p=document.querySelector(`[data-err="${id}"]`); if(p){p.textContent=m;p.hidden=false;} b.disabled=false; };
+  if(act==="release" && b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Tap again to give it back"; return; }
+  b.disabled=true;
+  try{
+    if(act==="accept"){
+      await runTransaction(db, async tx=>{
+        const s=await tx.get(ref);
+        if(!s.exists()||s.data().status!=="ready"||s.data().riderUid) throw {message:"Another rider already took this order."};
+        tx.update(ref,{status:"assigned",riderUid:me.uid,riderName:rider.name,riderPhone:rider.phone,assignedAt:serverTimestamp()});
+      });
+    }
+    if(act==="picked") await updateDoc(ref,{status:"picked_up",pickedUpAt:serverTimestamp()});
+    if(act==="delivered"){
+      const pin=(pinDraft[id]||"").trim();
+      const o=myOrders().find(x=>x.id===id);
+      if(o?.hasPin && !/^[0-9]{4}$/.test(pin)) return fail("Type the customer's 4-digit delivery code first.");
+      // a rider who paid for the food at pickup owes the shop nothing more
+      const settled=o?.payment==="Cash" && o?.riderPaid===true;
+      try{ await updateDoc(ref,{status:"delivered",deliveredAt:serverTimestamp(),deliveredDate:todayKey(),settled,pinEntered:pin}); delete pinDraft[id]; delete cardErr[id]; }
+      catch(x){ return fail(String(x?.code).includes("permission-denied")
+        ? (o?.hasPin ? "That code doesn't match. Check it with the customer and try again, or call the shop." : "The shop's system refused this. Please call the shop.")
+        : friendlyError(x)); }
+    }
+    if(act==="release") await updateDoc(ref,{status:"ready",riderUid:null,riderName:null,riderPhone:null,assignedAt:null});
+  }catch(x){ fail(x.code?friendlyError(x):x.message); }
+});
+</script>
+</body>
+</html>

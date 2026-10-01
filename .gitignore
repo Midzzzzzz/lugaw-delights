@@ -1,0 +1,11 @@
+# Installed packages
+node_modules/
+
+# Firebase emulator logs and cache
+*-debug.log
+.firebase/
+
+# Editor and OS files
+.vscode/
+.DS_Store
+Thumbs.db

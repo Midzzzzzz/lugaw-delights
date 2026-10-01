@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lugaw Delights – Seller</title>
+<meta name="robots" content="noindex">
+<meta name="app-role" content="seller">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+.narrow{max-width:460px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+.rider-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 6px var(--sunk)}}
+@media (prefers-reduced-motion:no-preference){.order.alert{animation:pulse 1.6s ease-in-out 3}}
+.dine-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start}
+@media (max-width:760px){.dine-grid{grid-template-columns:minmax(0,1fr)}}
+#dineMenu{max-height:430px;overflow-y:auto;padding-right:4px}
+#dineMenu h3{font-size:1.05rem;color:var(--brand-deep);margin:10px 0 2px}
+.dine-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);font-size:.92rem}
+.dine-item .price{color:var(--muted);font-variant-numeric:tabular-nums}
+.step{display:inline-flex;align-items:center;border:2px solid var(--brand);border-radius:99px;overflow:hidden}
+.step button{border:0;background:transparent;color:var(--brand);width:32px;height:28px;font-size:1.1rem;font-weight:800;cursor:pointer}
+.step button:disabled{opacity:.35;cursor:default}
+.step span{min-width:22px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums}
+/* Signed-in seller profile */
+.profile{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:12px}
+.profile .avatar{width:56px;height:56px;border-radius:50%;background:var(--brand);color:var(--on-brand);display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:1.3rem;flex:none}
+.profile .pinfo{flex:1;min-width:200px;display:grid;gap:2px}
+.profile .pname{font-family:var(--display);font-weight:800;font-size:1.25rem;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.profile .pstats{display:flex;gap:18px}
+.profile .pstats div{display:grid}
+.profile .pstats b{font-family:var(--display);font-size:1.3rem;color:var(--brand-deep);font-variant-numeric:tabular-nums}
+.profile .pstats span{font-size:.75rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <img src="logo.jpg" alt="Lugaw Delights logo">
+    <div class="who"><h1>Seller Dashboard</h1><p class="tag">Orders, kitchen and dine-in.</p></div>
+    <button class="btn ghost small" id="signOut" hidden>Sign out</button>
+  </header>
+  <div id="setup"></div>
+
+  <form class="stack card narrow" id="loginForm" novalidate hidden>
+    <h2 style="color:var(--brand)" id="loginTitle">Seller sign in</h2>
+    <label class="f" for="r-name" data-reg hidden>Full name<input id="r-name" autocomplete="name" maxlength="80"></label>
+    <label class="f" for="r-phone" data-reg hidden>Mobile number<input id="r-phone" type="tel" inputmode="tel" maxlength="20" placeholder="09XX XXX XXXX"></label>
+    <label class="f" for="l-email">Email<input id="l-email" type="email" autocomplete="email"></label>
+    <label class="f" for="l-pass">Password<input id="l-pass" type="password" autocomplete="current-password"></label>
+    <p class="err" id="l-err" hidden></p>
+    <div class="btnrow"><button class="btn" type="submit" id="loginBtn">Sign in</button>
+      <button class="btn ghost small" type="button" id="regToggle">New seller? Register</button></div>
+    <p class="muted" style="font-size:.85rem;margin:0" id="loginHint">For sellers only. The owner signs in on the owner dashboard.</p>
+  </form>
+
+  <div class="card narrow" id="notAdmin" hidden></div>
+
+  <div id="dash" hidden>
+    <div class="card profile" id="profile"></div>
+    <div class="card toolbar">
+      <label class="switch"><input type="checkbox" id="storeOpen"><span id="storeLabel">Store open</span></label>
+      <div class="btnrow">
+        <button class="btn small" id="dineBtn">+ Dine-in order</button>
+        <button class="btn small" id="soundBtn">Turn on order alerts</button>
+      </div>
+    </div>
+    <div class="card" id="dinePanel" hidden style="margin-top:12px">
+      <h2 style="color:var(--brand);margin-bottom:6px">Dine-in order</h2>
+      <div class="dine-grid">
+        <div id="dineMenu"></div>
+        <form class="stack" id="dineForm" novalidate>
+          <label class="f" for="d-table">Table or name (optional)<input id="d-table" maxlength="30" placeholder="Table 3 or Juan"></label>
+          <div class="group"><span>Payment</span>
+            <div class="seg">
+              <input type="radio" name="dpay" id="d-cash" value="Cash" checked><label for="d-cash">Cash</label>
+              <input type="radio" name="dpay" id="d-gc" value="GCash"><label for="d-gc">GCash</label>
+            </div>
+          </div>
+          <label class="f" for="d-given" id="givenWrap">Cash received (optional)<input id="d-given" type="number" inputmode="numeric" min="0" step="1" placeholder="e.g. 500"></label>
+          <label class="f" for="d-notes">Notes (optional)<input id="d-notes" maxlength="300" placeholder="Extra spicy, no spring onion"></label>
+          <div id="dineCart"></div>
+          <p class="err" id="d-err" hidden></p>
+          <div class="btnrow"><button class="btn" type="submit" id="dineSave">Send to kitchen</button>
+            <button class="btn ghost small" type="button" id="dineClose">Cancel</button></div>
+        </form>
+      </div>
+    </div>
+    <div class="stats">
+      <div class="stat"><b id="sOrders">0</b><span>Orders today</span></div>
+      <div class="stat"><b id="sSales">₱0</b><span>Food sales today</span></div>
+      <div class="stat"><b id="sFees">₱0</b><span>Rider fees today</span></div>
+      <div class="stat"><b id="sCash">₱0</b><span>Cash riders still owe</span></div>
+      <div class="stat"><b id="sOwed">₱0</b><span>Fees you owe riders</span></div>
+    </div>
+    <div class="tabs" id="tabs"></div>
+    <div class="grid-cards" id="board"></div>
+  </div>
+</div>
+
+<script type="module">
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { auth, db, isConfigured, SHOP, MENU, ITEMS, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
+
+const $=s=>document.querySelector(s);
+let subs=[], lists={}, orders=[], riders=[], contacts={}, asked=new Set(), tab="new", known=null;
+let me=null, myName="", myProfile=null, watchSeller=null, registering=false;
+const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
+$("#setup").innerHTML=setupNotice();
+function stopData(){ subs.forEach(f=>f()); subs=[]; lists={}; orders=[]; contacts={}; asked=new Set(); known=null; }
+
+// Only sellers the owner approved can use this page. The owner has their own
+// login on owner.html; to work the counter, the owner registers a seller account.
+if(isConfigured) onAuthStateChanged(auth, async u=>{
+  stopData(); watchSeller?.(); watchSeller=null;
+  me=u && !u.isAnonymous ? u : null;
+  $("#signOut").hidden=!me;
+  if(!me) return show("loginForm");
+  try{
+    if((await getDoc(doc(db,"admins",me.uid))).exists()){
+      show("notAdmin");
+      $("#notAdmin").innerHTML=`<h2 style="color:var(--brand)">This is the owner account</h2>
+        <p>The seller dashboard needs a seller account. Sign out and sign in with a seller account, or use the
+        <a href="owner.html">owner dashboard</a>.</p><p class="muted" style="font-size:.88rem">To take orders yourself,
+        register a separate seller account here and approve it on the owner dashboard.</p>`;
+      return;
+    }
+  }catch(_){}
+  watchSeller=onSnapshot(doc(db,"sellers",me.uid), s=>{
+    const sd=s.exists()?s.data():null;
+    if(sd?.status==="approved"){ myName=sd.name; myProfile=sd; renderProfile(); if($("#dash").hidden){ show("dash"); start(); } return; }
+    stopData(); show("notAdmin");
+    if(!sd){ if(registering) $("#notAdmin").innerHTML=`<h2 style="color:var(--brand)">Sending your application…</h2>`; else finishForm(); return; }
+    const msg = sd.status==="pending" ? ["Application sent",`Thanks, ${esc(sd.name)}! Ask the owner to approve you on the owner dashboard. This page opens by itself once you're approved.`]
+      : ["Account paused","Your seller account is paused. Please talk to the owner."];
+    $("#notAdmin").innerHTML=`<h2 style="color:var(--brand)">${msg[0]}</h2><p>${msg[1]}</p>`;
+  }, e=>{ show("notAdmin"); $("#notAdmin").innerHTML=`<h2 style="color:var(--brand)">Couldn't load your seller account</h2>
+    <p>${esc(friendlyError(e))}</p><p class="muted" style="font-size:.88rem">If the owner just updated the app, the new security rules may not be published yet.</p>`; });
+});
+// An account that exists but has no seller application yet (for example, if sending
+// it failed during registration) can send it from here without registering again.
+let typedApp={name:"",phone:""};
+function finishForm(err){
+  show("notAdmin");
+  $("#notAdmin").innerHTML=`<h2 style="color:var(--brand)">Finish your seller application</h2>
+    <p>Signed in as <b>${esc(me.email)}</b>. Add your name and number and send your application to the owner.</p>
+    <form class="stack" id="finishForm" novalidate>
+      <label class="f" for="fin-name">Full name<input id="fin-name" autocomplete="name" maxlength="80" value="${esc(typedApp.name)}"></label>
+      <label class="f" for="fin-phone">Mobile number<input id="fin-phone" type="tel" inputmode="tel" maxlength="20" value="${esc(typedApp.phone)}" placeholder="09XX XXX XXXX"></label>
+      <p class="err" id="fin-err"${err?"":" hidden"}>${esc(err||"")}</p>
+      <button class="btn" type="submit">Send application</button></form>`;
+  $("#finishForm").onsubmit=async e=>{
+    e.preventDefault();
+    const name=$("#fin-name").value.trim(), phone=$("#fin-phone").value.trim();
+    typedApp={name,phone};
+    if(!name || !phoneKey(phone)) return finishForm("Please add your full name and a valid mobile number (09XX XXX XXXX).");
+    try{ await sendApplication(name,phone); }catch(x){ finishForm(friendlyError(x)); }
+  };
+}
+const sendApplication=(name,phone)=>{
+  const u=auth.currentUser; // set as soon as the account exists, before the sign-in callback runs
+  return setDoc(doc(db,"sellers",u.uid),{name,phone,email:u.email||"",status:"pending",createdAt:serverTimestamp()});
+};
+$("#signOut").onclick=()=>signOut(auth);
+const lerr=m=>{ $("#l-err").textContent=m||""; $("#l-err").hidden=!m; };
+$("#regToggle").onclick=()=>{
+  registering=!registering; lerr();
+  document.querySelectorAll("[data-reg]").forEach(el=>el.hidden=!registering);
+  $("#loginTitle").textContent=registering?"Register as seller":"Seller sign in";
+  $("#loginBtn").textContent=registering?"Submit application":"Sign in";
+  $("#regToggle").textContent=registering?"I already have an account":"New seller? Register";
+  $("#loginHint").textContent=registering?"The owner approves new sellers before they can see orders."
+    :"For sellers only. The owner signs in on the owner dashboard.";
+};
+$("#loginForm").onsubmit=async e=>{
+  e.preventDefault(); lerr();
+  const email=$("#l-email").value.trim(), pass=$("#l-pass").value;
+  if(!registering){
+    try{ await signInWithEmailAndPassword(auth,email,pass); }catch(x){ lerr(friendlyError(x)); }
+    return;
+  }
+  const name=$("#r-name").value.trim(), phone=$("#r-phone").value.trim(), miss=[];
+  if(!name) miss.push("full name"); if(!phoneKey(phone)) miss.push("valid mobile number (09XX XXX XXXX)");
+  if(!email) miss.push("email"); if(pass.length<6) miss.push("password of 6+ characters");
+  if(miss.length) return lerr("Please add your "+miss.join(", ")+".");
+  typedApp={name,phone};
+  try{ await createUserWithEmailAndPassword(auth,email,pass); }
+  catch(x){ return lerr(friendlyError(x)); }
+  $("#regToggle").click(); // back to sign-in mode for next time
+  registering=true; // keep showing "Sending…" until the application is saved
+  try{ await sendApplication(name,phone); }
+  catch(x){ finishForm("Your account was created, but the application didn't send: "+friendlyError(x)+" Try again below."); }
+  finally{ registering=false; }
+};
+$("#soundBtn").onclick=()=>{ if(enableSound()){ chime(); $("#soundBtn").textContent="Alerts on"; $("#soundBtn").disabled=true; } };
+
+// Orders come from three queries: the latest 300 (today's lists and totals), every
+// order still in progress, and every delivery not yet settled with its rider. So an
+// older order that still needs action never drops off the dashboard.
+function start(){
+  subs.push(onSnapshot(doc(db,"settings","store"), s=>{
+    const open=!s.exists()||s.data().open!==false;
+    $("#storeOpen").checked=open; $("#storeLabel").textContent=open?"Store open: taking orders":"Store closed";
+  }, ()=>{}));
+  const orderList=(key,q)=>subs.push(onSnapshot(q, s=>{ lists[key]=s.docs.map(d=>({id:d.id,...d.data()})); merge(); },
+    e=>{ $("#board").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; }));
+  orderList("recent", query(collection(db,"orders"),orderBy("createdAt","desc"),limit(300)));
+  orderList("active", query(collection(db,"orders"),where("status","in",ACTIVE)));
+  orderList("unsettled", query(collection(db,"orders"),where("settled","==",false)));
+  subs.push(onSnapshot(query(collection(db,"contacts"),orderBy("createdAt","desc"),limit(300)), s=>{
+    s.docs.forEach(d=>contacts[d.id]=d.data()); render();
+  }, ()=>{}));
+  subs.push(onSnapshot(collection(db,"riders"), s=>{ riders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+}
+function merge(){
+  const m=new Map(); Object.values(lists).forEach(l=>l.forEach(o=>m.set(o.id,o)));
+  const t=o=>o.createdAt?.toMillis?.()??Infinity; // just-placed orders have no server time yet
+  orders=[...m.values()].sort((a,b)=>t(b)-t(a));
+  if(lists.active){
+    const ids=new Set(orders.filter(o=>o.status==="new").map(o=>o.id));
+    if(known && [...ids].some(id=>!known.has(id))) chime();
+    known=ids;
+  }
+  render();
+}
+// Contact details for older orders outside the latest 300
+function contactFor(id){
+  if(!contacts[id] && !asked.has(id)){
+    asked.add(id);
+    getDoc(doc(db,"contacts",id)).then(s=>{ if(s.exists()){ contacts[id]=s.data(); render(); } }).catch(()=>{});
+  }
+  return contacts[id];
+}
+$("#storeOpen").onchange=e=>{
+  const want=e.target.checked;
+  setDoc(doc(db,"settings","store"),{open:want},{merge:true}).catch(x=>{
+    e.target.checked=!want; $("#storeLabel").textContent="Couldn't change: "+friendlyError(x);
+  });
+};
+
+// ---------- Dine-in orders (recorded at the counter) ----------
+const dine={};
+const dineItems=()=>Object.entries(dine).map(([id,qty])=>({id,name:ITEMS[id].name,price:ITEMS[id].price,qty}));
+const dineErr=m=>{ $("#d-err").textContent=m||""; $("#d-err").hidden=!m; };
+function renderDine(){
+  $("#dineMenu").innerHTML=MENU.map(c=>`<h3>${esc(c.name)}</h3>`+c.items.map(([id])=>{
+    const it=ITEMS[id], q=dine[id]||0;
+    return `<div class="dine-item"><span>${esc(it.name)} <span class="price">${peso(it.price)}</span></span>
+      <div class="step"><button type="button" data-dd="-1" data-item="${id}" aria-label="Remove one"${q?"":" disabled"}>−</button><span>${q}</span><button type="button" data-dd="1" data-item="${id}" aria-label="Add one"${q>=MAX_QTY?" disabled":""}>+</button></div></div>`;
+  }).join("")).join("");
+  renderDineTotals();
+}
+// Cash typed into "Cash received", or null when it's GCash or left blank
+function cashGiven(){
+  const v=$("#d-given").value.trim();
+  return dinePay()==="Cash" && v!=="" ? Math.floor(Number(v)) : null;
+}
+const dinePay=()=>document.querySelector('input[name="dpay"]:checked').value;
+function renderDineTotals(){
+  const items=dineItems(), t=calcTotals(items,"Dine-in"), given=cashGiven();
+  $("#givenWrap").hidden=dinePay()!=="Cash";
+  const change = given===null ? "" : given>=t.total
+    ? `<div><span>Cash received</span><span>${peso(given)}</span></div><div class="grand"><span>Change</span><span>${peso(given-t.total)}</span></div>`
+    : `<div style="color:var(--brand-deep);font-weight:700"><span>Short by</span><span>${peso(t.total-given)}</span></div>`;
+  $("#dineCart").innerHTML=items.length
+    ? `<ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${esc(it.name)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
+       <div class="totals"><div class="grand"><span>Total</span><span>${peso(t.total)}</span></div>${change}</div>`
+    : `<p class="empty" style="margin:0">Tap + on the menu to add items.</p>`;
+  $("#dineSave").disabled=!items.length;
+}
+$("#d-given").addEventListener("input",renderDineTotals);
+document.querySelectorAll('input[name="dpay"]').forEach(r=>r.addEventListener("change",renderDineTotals));
+function closeDine(){ Object.keys(dine).forEach(k=>delete dine[k]); $("#d-table").value=""; $("#d-notes").value=""; $("#d-given").value=""; $("#d-cash").checked=true; dineErr(); $("#dinePanel").hidden=true; }
+$("#dineBtn").onclick=()=>{ $("#dinePanel").hidden=false; renderDine(); $("#dinePanel").scrollIntoView({behavior:"smooth",block:"start"}); };
+$("#dineClose").onclick=closeDine;
+$("#dineMenu").addEventListener("click",e=>{
+  const b=e.target.closest("[data-dd]"); if(!b) return;
+  const id=b.dataset.item, q=(dine[id]||0)+ +b.dataset.dd;
+  if(!dine[id] && Object.keys(dine).length>=MAX_LINES) return dineErr(`Up to ${MAX_LINES} different items per order.`);
+  dineErr(); if(q>0) dine[id]=Math.min(q,MAX_QTY); else delete dine[id];
+  renderDine();
+});
+$("#dineForm").onsubmit=async e=>{
+  e.preventDefault(); dineErr();
+  const items=dineItems(); if(!items.length) return;
+  const t=calcTotals(items,"Dine-in"), ref=doc(collection(db,"orders")), given=cashGiven();
+  if(given!==null && !(given>=t.total)) return dineErr(`Cash received is less than the ${peso(t.total)} total.`);
+  $("#dineSave").disabled=true;
+  const order={ code:orderCode(ref.id), customerUid:me.uid, sellerUid:me.uid, sellerName:myName, mode:"Dine-in",
+    table:$("#d-table").value.trim(), notes:$("#d-notes").value.trim(), payment:dinePay(), items,
+    subtotal:t.subtotal, deliveryFee:0, total:t.total, status:"preparing", riderUid:null, createdAt:serverTimestamp() };
+  if(given!==null) order.cashGiven=given;
+  try{
+    await setDoc(ref,order);
+    closeDine(); tab="kitchen"; render();
+  }catch(x){ dineErr(friendlyError(x)); $("#dineSave").disabled=false; }
+};
+
+const unsettled=o=>o.status==="delivered"&&o.settled===false;
+const TABS=[
+  ["new","New",o=>o.status==="new"],
+  ["kitchen","Kitchen",o=>o.status==="preparing"],
+  ["out","Ready & out",o=>["ready","ready_pickup","assigned","picked_up"].includes(o.status)],
+  ["done","Done today",o=>["delivered","completed"].includes(o.status)&&isToday(o.createdAt)],
+  ["settle","Settle with riders",unsettled],
+  ["cancelled","Cancelled",o=>o.status==="cancelled"&&isToday(o.createdAt)],
+];
+
+// ---------- My profile ----------
+// Who is signed in, and their own orders and sales today (orders credited to them)
+function renderProfile(){
+  if(!myProfile || !me) return;
+  const p=myProfile, initials=String(p.name||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
+  const mine=orders.filter(o=>o.sellerUid===me.uid && isToday(o.createdAt) && o.status!=="cancelled");
+  const sales=mine.filter(o=>["delivered","completed"].includes(o.status)).reduce((s,o)=>s+(o.subtotal||0),0);
+  $("#profile").innerHTML=`<div class="avatar" aria-hidden="true">${esc(initials)}</div>
+    <div class="pinfo"><div class="pname">${esc(p.name)} <span class="pill go">Seller</span></div>
+      <div class="muted" style="font-size:.88rem">${esc(p.phone)} · ${esc(p.email||me.email||"")}${p.createdAt?.toDate?` · seller since ${p.createdAt.toDate().toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
+      <div class="muted" style="font-size:.8rem">To change your details, ask the owner.</div></div>
+    <div class="pstats"><div><b>${mine.length}</b><span>My orders today</span></div><div><b>${peso(sales)}</b><span>My sales today</span></div></div>`;
+}
+
+// Where to send a rider's earnings, from their rider profile
+function payTo(riderUid){
+  const r=riders.find(x=>x.id===riderUid);
+  if(!hasPayout(r)) return `<br><span style="color:var(--brand-deep)">This rider has no payout account yet. Ask them to add it in the rider app.</span>`;
+  // A payout change in the last 24 hours could be someone else using the rider's login
+  const changed=r.payUpdatedAt?.toDate?.(), recent=changed && Date.now()-changed.getTime()<86400000;
+  return `<br>Send to <b>${esc(payoutText(r))}</b>${recent?`<br><b style="color:var(--brand-deep)">Changed ${esc(changed.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}. Confirm with the rider in person, or on a number you already had for them, before sending money.</b>`:""}`;
+}
+// End-of-day total per rider: cash they owe the shop, fees the shop owes them, and the difference
+function settleSummary(list){
+  const by=new Map();
+  list.forEach(o=>{
+    const k=o.riderUid||"_"; const t=by.get(k)||{uid:o.riderUid,name:o.riderName||"Unknown rider",cash:0,fees:0,count:0};
+    if(o.payment==="Cash") t.cash+=o.subtotal||0; else t.fees+=o.deliveryFee||0;
+    t.count++; by.set(k,t);
+  });
+  if(!by.size) return "";
+  return `<div class="card" style="grid-column:1/-1;display:grid;gap:10px"><h2 style="color:var(--brand-deep);font-size:1.15rem">End-of-day totals per rider</h2>
+    ${[...by.values()].map(t=>{
+      const net=t.fees-t.cash;
+      const line= net>0 ? `Send the rider <b>${peso(net)}</b>${payTo(t.uid)}`
+        : net<0 ? `The rider hands you <b>${peso(-net)}</b> cash` : "Nothing to send: it evens out";
+      return `<div style="border-top:2px dashed var(--line);padding-top:8px"><b>${esc(t.name)}</b> · ${t.count} order${t.count===1?"":"s"}
+        <div class="muted" style="font-size:.88rem">Cash they collected for you: ${peso(t.cash)} · Fees you owe them (GCash orders): ${peso(t.fees)}</div>
+        <div>${line}</div></div>`;
+    }).join("")}
+    <p class="muted" style="margin:0;font-size:.85rem">After you send or receive the money, tap the button on each order below to mark it settled.</p></div>`;
+}
+
+function render(){
+  renderProfile();
+  const today=orders.filter(o=>isToday(o.createdAt)&&o.status!=="cancelled");
+  const done=today.filter(o=>["delivered","completed"].includes(o.status));
+  const owed=orders.filter(unsettled);
+  $("#sOrders").textContent=today.length;
+  $("#sSales").textContent=peso(done.reduce((s,o)=>s+(o.subtotal||0),0));
+  $("#sFees").textContent=peso(done.reduce((s,o)=>s+(o.deliveryFee||0),0));
+  // Cash orders: the rider keeps the fee and hands over the food money.
+  // GCash orders: the shop got everything, so it owes the rider the fee.
+  $("#sCash").textContent=peso(owed.filter(o=>o.payment==="Cash").reduce((s,o)=>s+(o.subtotal||0),0));
+  $("#sOwed").textContent=peso(owed.filter(o=>o.payment==="GCash").reduce((s,o)=>s+(o.deliveryFee||0),0));
+  $("#tabs").innerHTML=TABS.map(([id,label,f])=>{
+    const n=orders.filter(f).length;
+    return `<button class="${tab===id?"on":""}" data-tab="${id}">${label}${n?`<span class="count">${n}</span>`:""}</button>`;
+  }).join("");
+  const list=orders.filter(TABS.find(t=>t[0]===tab)[2]);
+  if(tab==="new"||tab==="kitchen") list.reverse(); // oldest first
+  // keep the cursor in a cash or cancel-reason box when new orders refresh the board
+  const focusKey=document.activeElement?.dataset?.focusKey;
+  $("#board").innerHTML=(tab==="settle"?settleSummary(list):"")+(list.length?list.map(orderCard).join(""):`<p class="empty">Nothing here right now.</p>`);
+  if(focusKey){ const el=document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); if(el){ el.focus(); if(el.setSelectionRange&&el.type==="text") el.setSelectionRange(el.value.length,el.value.length); } }
+}
+$("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]"); if(b){ tab=b.dataset.tab; render(); } });
+
+function orderCard(o){
+  const st=STATUS[o.status]||{label:o.status,tone:"off"};
+  const del=o.mode==="Delivery", dineIn=o.mode==="Dine-in", c=dineIn?null:contactFor(o.id);
+  let acts=[];
+  const avail=riders.filter(r=>r.status==="approved"&&r.online);
+  if(o.status==="new") acts.push(["preparing", del&&!avail.length?"No rider available: accept anyway":"Accept & start cooking", "btn"]);
+  if(o.status==="preparing") acts.push(dineIn ? ["completed","Served","btn ok"]
+    : [del?"ready":"ready_pickup", del?"Food ready: call a rider":"Ready for pickup","btn ok"]);
+  if(o.status==="ready_pickup") acts.push(["completed","Customer picked up","btn ok"]);
+  if(o.status==="assigned" && o.payment==="Cash") acts.unshift(["riderpaid",`Rider paid ${peso(o.subtotal)} · hand over food`,"btn ok"]);
+  if(o.status==="assigned") acts.push(["reassign","Send back to riders","btn ghost small"]);
+  // Only the rider marks a delivery delivered. If the customer can't show their code, the
+  // seller calls the customer first, then reads the code to the rider.
+  if(o.status==="picked_up" && o.hasPin) acts.push(["showpin","Customer can't show the code?","btn ghost small"]);
+  if(unsettled(o)) acts.push(["settle", o.payment==="Cash" ? `Got ${peso(o.subtotal)} from rider` : `Paid rider's ${peso(o.deliveryFee)} fee`, "btn ok"]);
+  if(o.payment==="GCash" && !dineIn && !o.paymentConfirmed && o.status!=="cancelled") acts.unshift(["paid","GCash payment received","btn ok"]);
+  if(ACTIVE.includes(o.status)) acts.push(["cancelled","Cancel","btn ghost small"]);
+  const rider=o.riderName?`<b>Rider</b><span>${esc(o.riderName)} · <span class="num">${esc(o.riderPhone)}</span></span>`:
+    (o.status==="ready"?`<b>Rider</b><span class="muted">Waiting for a rider to accept (${avail.length} available)</span>`
+    : o.status==="new"&&del?`<b>Riders</b><span>${avail.length?`<span class="pill go">${avail.length} available now</span> ${avail.map(r=>esc(r.name)).join(", ")}`
+      :`<b style="color:var(--brand-deep)">No rider is available right now.</b> The customer may wait a long time. Call a rider first, or call the customer to offer pickup.`}</span>`:"");
+  const payAtPickup=o.status==="assigned"&&o.payment==="Cash"?`<b>Pickup</b><span>Hand over the food only after the rider pays you <b>${peso(o.subtotal)}</b>. The rider then collects ${peso(o.total)} from the customer and keeps the ${peso(o.deliveryFee)} fee.</span>`:"";
+  const settle=unsettled(o)?`<b>Settle</b><span>${o.payment==="Cash"
+    ? `Older cash order: the rider collected ${peso(o.total)} cash, keeps the ${peso(o.deliveryFee)} fee and owes you ${peso(o.subtotal)}.`
+    : `Paid by GCash. You owe the rider the ${peso(o.deliveryFee)} fee.${payTo(o.riderUid)}`}</span>`:"";
+  return `<div class="order ${o.status==="new"?"alert":""}">
+    <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${esc(st.tone)}">${esc(statusLabel(o))}</span></div>
+    ${priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
+    ${!dineIn && c && ["new","preparing"].includes(o.status) && phoneConfirmed(c.phone)===false?`<div class="flag">New number. Call ${esc(c.phone)} to check the order is real before cooking.</div>`:""}
+    <div class="kv"><b>Time</b><span>${fmtTime(o.createdAt)} · ${esc(o.mode)}</span>
+      ${dineIn?`<b>Table</b><span>${esc(o.table)||"—"}</span>`
+        :`<b>Customer</b><span>${c?`${esc(c.name)} · <a class="num" href="${esc(telLink(c.phone))}">${esc(c.phone)}</a><br>${phoneBadge(c.phone)}`:`<span class="muted">Loading…</span>`}</span>`}
+      ${del?`<b>Address</b><span>${esc(o.address)} · <a href="${mapsLink(o.address)}" target="_blank" rel="noopener">Map</a></span>`:""}
+      <b>Payment</b><span>${o.payment==="GCash"?(dineIn?"GCash":gcashLine(o)):"Cash"}</span>
+      ${o.notes?`<b>Notes</b><span>${esc(o.notes)}</span>`:""}${o.sellerName?`<b>Seller</b><span>${esc(o.sellerName)}</span>`:""}${rider}${payAtPickup}${settle}
+      ${o.cancelledBy?`<b>Cancelled by</b><span>${esc(o.cancelledBy)}${o.cancelReason?`: ${esc(o.cancelReason)}`:""}</span>`:""}</div>
+    ${itemsHTML(o,true)}
+    <div class="totals"><div><span>Subtotal</span><span>${peso(o.subtotal)}</span></div>
+      ${del?`<div><span>Delivery (rider)</span><span>${peso(o.deliveryFee)}</span></div>`:""}
+      <div class="grand"><span>Total</span><span>${peso(o.total)}</span></div></div>
+    ${cashBlock(o)}
+    ${cancelling[o.id]?cancelBox(o):`<div class="btnrow">${acts.map(([s,l,c])=>`<button class="${c}" data-set="${s}" data-id="${esc(o.id)}">${l}</button>`).join("")}
+      <button class="btn ghost small" data-print="${esc(o.id)}">Print receipt</button>${del&&["assigned","picked_up","delivered"].includes(o.status)?`<button class="btn ghost small" data-proofs="${esc(o.id)}">Rider photos</button>`:""}</div>`}
+  </div>`;
+}
+
+// Dine-in cash: what the customer paid and the change. Can be filled in any time,
+// e.g. when they pay after eating. Typed amounts survive the board re-rendering.
+const givenDraft={};
+const changeText=(o,v)=>{
+  const n=Math.floor(Number(v));
+  if(v==="" || !Number.isFinite(n)) return "";
+  return n>=o.total ? `Change: <b>${peso(n-o.total)}</b>` : `<span style="color:var(--brand-deep)">Short by ${peso(o.total-n)}</span>`;
+};
+function cashBlock(o){
+  if(o.mode!=="Dine-in" || o.payment!=="Cash" || o.status==="cancelled") return "";
+  if(o.cashGiven!=null) return `<div class="totals">
+    <div><span>Paid (cash)</span><span>${peso(o.cashGiven)}</span></div>
+    <div class="grand"><span>Change</span><span>${peso(o.cashGiven-o.total)}</span></div></div>`;
+  const v=givenDraft[o.id]??"";
+  return `<div class="stack" style="display:grid;gap:6px">
+    <div class="btnrow"><input type="number" inputmode="numeric" min="0" step="1" data-given-for="${esc(o.id)}" data-focus-key="cash-${esc(o.id)}" value="${esc(v)}"
+      placeholder="Cash received" aria-label="Cash received" style="max-width:170px">
+      <button class="btn small" data-paid="${esc(o.id)}">Save payment</button></div>
+    <div data-change-for="${esc(o.id)}" style="font-size:1.05rem">${changeText(o,v)}</div></div>`;
+}
+$("#board").addEventListener("input",e=>{
+  const i=e.target.closest("[data-given-for]"); if(!i) return;
+  const id=i.dataset.givenFor, o=orders.find(x=>x.id===id); givenDraft[id]=i.value;
+  const out=document.querySelector(`[data-change-for="${CSS.escape(id)}"]`); if(o&&out) out.innerHTML=changeText(o,i.value);
+});
+
+// ---------- Confirmed phone numbers ----------
+// A seller calls a new customer's number once; after "Number confirmed" the shop
+// remembers it, so that customer's next orders show as confirmed.
+const phoneStatus={}; // phone key -> true (confirmed) | false (not yet) | null (checking)
+function phoneConfirmed(phone){
+  const k=phoneKey(phone); if(!k) return false;
+  if(phoneStatus[k]===undefined){
+    phoneStatus[k]=null;
+    getDoc(doc(db,"phones",k)).then(s=>{ phoneStatus[k]=s.exists(); render(); }).catch(()=>{ delete phoneStatus[k]; });
+  }
+  return phoneStatus[k];
+}
+function phoneBadge(phone){
+  const k=phoneKey(phone), ok=phoneConfirmed(phone);
+  if(!k) return `<span style="color:var(--brand-deep);font-weight:700">Not a valid mobile number. Call before cooking.</span>`;
+  if(ok===null) return `<span class="muted">Checking number…</span>`;
+  if(ok) return `<span class="pill go">✓ Confirmed number</span>`;
+  return `<span style="color:var(--brand-deep);font-weight:700">New number: call to confirm</span>
+    <a class="btn ghost small" href="${esc(telLink(phone))}">Call</a>
+    <button class="btn small" data-confirm-phone="${k}">Number confirmed</button>`;
+}
+
+// ---------- GCash payments ----------
+// The customer types their GCash reference number; the seller finds that Ref No. and
+// amount in the shop's GCash history, then taps "GCash payment received".
+function gcashLine(o){
+  if(o.paymentConfirmed) return `<span class="pill done">Paid</span> GCash${o.gcashRef?` · Ref <span class="num">${esc(o.gcashRef)}</span>`:""}`;
+  if(!o.gcashRef) return `<span style="color:var(--brand-deep);font-weight:700">GCash: not paid yet</span><br><span class="muted">Waiting for the customer's reference number. Don't cook until it's paid.</span>`;
+  const reused=orders.filter(x=>x.id!==o.id && x.gcashRef && x.gcashRef===o.gcashRef).map(x=>x.code);
+  return `GCash Ref <b class="num">${esc(o.gcashRef)}</b> from ${esc(o.gcashSender||"—")}<br>
+    <span class="muted">In your GCash app, open History and find this Ref No. for <b>${peso(o.total)}</b> (message: ${esc(o.code)}).</span>
+    ${reused.length?`<br><b style="color:var(--brand-deep)">Warning: this reference number is also on ${reused.map(esc).join(", ")}. One payment can't pay for two orders.</b>`:""}`;
+}
+
+// ---------- Cancelling with a reason ----------
+// The customer sees the reason on their tracking screen, so a seller has to pick one.
+const cancelling={}; // order id -> { reason, other }
+function cancelBox(o){
+  const c=cancelling[o.id], id=esc(o.id);
+  return `<div style="display:grid;gap:8px;border-top:2px dashed var(--line);padding-top:8px">
+    <label class="f" for="cr-${id}">Why cancel this order? The customer will see this.
+      <select id="cr-${id}" data-reason-for="${id}" data-focus-key="reason-${id}">
+        <option value="">Choose a reason…</option>
+        ${CANCEL_REASONS.map(r=>`<option${c.reason===r?" selected":""}>${esc(r)}</option>`).join("")}
+        <option value="other"${c.reason==="other"?" selected":""}>Other reason…</option>
+      </select></label>
+    ${c.reason==="other"?`<input type="text" maxlength="150" data-other-for="${id}" data-focus-key="other-${id}" value="${esc(c.other)}" placeholder="Type the reason" aria-label="Other reason">`:""}
+    <p class="err" data-cancel-err="${id}" hidden></p>
+    <div class="btnrow"><button class="btn" data-cancel-confirm="${id}">Cancel order</button>
+      <button class="btn ghost small" data-cancel-back="${id}">Keep order</button></div></div>`;
+}
+$("#board").addEventListener("change",e=>{
+  const s=e.target.closest("[data-reason-for]"); if(!s) return;
+  cancelling[s.dataset.reasonFor].reason=s.value; render();
+});
+$("#board").addEventListener("input",e=>{
+  const i=e.target.closest("[data-other-for]"); if(i) cancelling[i.dataset.otherFor].other=i.value;
+});
+
+// ---------- Receipt ----------
+// Narrow layout for 58/80 mm receipt printers; prints fine on a normal printer too.
+function receiptHTML(o){
+  const c=o.mode==="Dine-in"?null:contacts[o.id], when=o.createdAt?.toDate?.()||new Date();
+  const row=(l,r,cls="")=>`<tr class="${cls}"><td>${l}</td><td class="r">${r}</td></tr>`;
+  const lines=(Array.isArray(o.items)?o.items:[]).map(it=>{
+    const k=ITEMS[it?.id], qty=Number(it?.qty)||0, price=Number(it?.price)||0;
+    return row(`${esc(qty)} × ${esc(k?k.name:"Item "+String(it?.id??""))}<br><small>@ ${peso(price)}</small>`, peso(price*qty));
+  }).join("");
+  const who=o.mode==="Dine-in" ? (o.table?row("Table",esc(o.table)):"")
+    : (c?row("Customer",esc(c.name))+row("Mobile",esc(c.phone)):"")+(o.mode==="Delivery"?`<tr><td colspan="2">Deliver to: ${esc(o.address)}</td></tr>`:"");
+  const change=o.cashGiven!=null ? row("Cash",peso(o.cashGiven))+row("Change",peso(o.cashGiven-o.total),"big") : "";
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Receipt ${esc(o.code)}</title><style>
+@page{margin:4mm}
+body{font-family:ui-monospace,Consolas,Menlo,monospace;font-size:12px;line-height:1.35;width:72mm;max-width:100%;margin:8px auto;color:#000;background:#fff}
+h1{font-size:16px;margin:0}.c{text-align:center}small{color:#333}
+table{width:100%;border-collapse:collapse}td{vertical-align:top;padding:1px 0}.r{text-align:right;white-space:nowrap;padding-left:8px}
+hr{border:0;border-top:1px dashed #000;margin:6px 0}.big td{font-weight:bold;font-size:14px}
+.noprint{display:flex;gap:8px;justify-content:center;margin-top:14px}.noprint button{font:inherit;padding:8px 14px}
+@media print{.noprint{display:none}}
+</style></head><body>
+<div class="c"><h1>${esc(SHOP.name)}</h1><div>${esc(SHOP.pickupAddress)}</div><div>${esc(SHOP.phone)}</div></div><hr>
+<table>${row("Order",esc(o.code))}${row("Date",when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}${row("Type",esc(o.mode))}${who}</table><hr>
+<table>${lines}</table><hr>
+<table>${row("Subtotal",peso(o.subtotal))}${o.deliveryFee?row("Delivery fee",peso(o.deliveryFee)):""}${row("TOTAL",peso(o.total),"big")}
+${row("Payment",esc(o.payment))}${o.gcashRef?row("GCash Ref",esc(o.gcashRef)):""}${change}</table>
+${o.notes?`<hr><div>Notes: ${esc(o.notes)}</div>`:""}<hr>
+<div class="c">Salamat po! Come again.<br><small>Order slip only. Not an official receipt.</small></div>
+<div class="noprint"><button onclick="print()">Print</button><button onclick="close()">Close</button></div>
+<script>addEventListener("load",()=>setTimeout(print,300))<\/script>
+</body></html>`;
+}
+function printReceipt(o){
+  const w=window.open("","_blank","width=420,height=640");
+  if(!w) return false; // pop-up blocked
+  w.document.open(); w.document.write(receiptHTML(o)); w.document.close();
+  return true;
+}
+
+
+const CONFIRM=new Set(["reassign"]);
+$("#board").addEventListener("click", async e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  if(b.dataset.paid){
+    const id=b.dataset.paid, o=orders.find(x=>x.id===id), n=Math.floor(Number(givenDraft[id]));
+    const out=document.querySelector(`[data-change-for="${CSS.escape(id)}"]`);
+    if(!o || !Number.isFinite(n) || n<o.total){ if(out) out.innerHTML=`<span style="color:var(--brand-deep)">Type at least ${peso(o?.total)}.</span>`; return; }
+    b.disabled=true;
+    try{ await updateDoc(doc(db,"orders",id),{cashGiven:n}); delete givenDraft[id]; }
+    catch(x){ b.disabled=false; if(out) out.textContent=friendlyError(x); }
+    return;
+  }
+  if(b.dataset.confirmPhone){
+    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Someone answered? Tap again"; return; }
+    b.disabled=true;
+    try{
+      await setDoc(doc(db,"phones",b.dataset.confirmPhone),{confirmedBy:me.uid,confirmedByName:myName,confirmedAt:serverTimestamp()});
+      phoneStatus[b.dataset.confirmPhone]=true; render();
+    }catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
+    return;
+  }
+  if(b.dataset.set==="cancelled"){ cancelling[b.dataset.id]={reason:"",other:""}; render(); return; }
+  if(b.dataset.set==="paid" && b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Found it in GCash? Tap again"; return; }
+  if(b.dataset.cancelBack){ delete cancelling[b.dataset.cancelBack]; render(); return; }
+  if(b.dataset.cancelConfirm){
+    const id=b.dataset.cancelConfirm, c=cancelling[id];
+    const reason=c.reason==="other"?c.other.trim():c.reason;
+    const err=document.querySelector(`[data-cancel-err="${CSS.escape(id)}"]`);
+    if(!reason){ err.textContent=c.reason==="other"?"Type the reason first.":"Choose a reason first."; err.hidden=false; return; }
+    b.disabled=true;
+    try{
+      await updateDoc(doc(db,"orders",id),{status:"cancelled",cancelledAt:serverTimestamp(),cancelledBy:"shop",cancelReason:reason});
+      delete cancelling[id];
+    }catch(x){ b.disabled=false; err.textContent=friendlyError(x); err.hidden=false; }
+    return;
+  }
+  if(b.dataset.proofs){
+    b.disabled=true; b.textContent="Loading…";
+    const box=document.createElement("div"); box.style.gridColumn="1/-1";
+    box.innerHTML=proofsHTML(await loadProofs(b.dataset.proofs));
+    b.closest(".btnrow").after(box); b.remove(); return;
+  }
+  if(b.dataset.print){
+    const o=orders.find(x=>x.id===b.dataset.print);
+    if(o && !printReceipt(o)) b.textContent="Allow pop-ups for this site to print";
+    return;
+  }
+  const noRider=b.dataset.set==="preparing" && b.textContent.startsWith("No rider");
+  if(b.dataset.set==="showpin" && b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Called the customer and they have the food? Tap again"; return; }
+  if((CONFIRM.has(b.dataset.set)||b.dataset.set==="riderpaid"||noRider) && b.dataset.sure!=="1"){
+    b.dataset.sure="1"; b.textContent="Tap again to confirm"; return; }
+  b.disabled=true;
+  const set=b.dataset.set, ref=b.dataset.id&&doc(db,"orders",b.dataset.id), now=serverTimestamp();
+  try{
+    if(set==="paid") await updateDoc(ref,{paymentConfirmed:true,paymentConfirmedAt:now});
+    else if(set==="settle"){
+      const o=orders.find(x=>x.id===b.dataset.id);
+      await updateDoc(ref,{...(o?.payment==="Cash"?{cashReceived:true}:{feePaid:true}),settled:true,settledAt:now});
+    }
+    else if(set==="reassign") await updateDoc(ref,{status:"ready",riderUid:null,riderName:null,riderPhone:null,assignedAt:null});
+    else if(set==="riderpaid") await updateDoc(ref,{status:"picked_up",pickedUpAt:now,riderPaid:true,riderPaidAt:now,cashReceived:true});
+    else if(set==="showpin"){
+      const p=await getDoc(doc(db,"pins",b.dataset.id));
+      const box=document.createElement("p"); box.className="flag"; box.style.margin="0";
+      box.innerHTML=p.exists()
+        ? `Delivery code: <b class="num" style="font-size:1.2rem;letter-spacing:.2em">${esc(p.data().pin)}</b><br>Call the customer first. Give this code to the rider only after the customer confirms they received the food.`
+        : "This order has no delivery code.";
+      b.replaceWith(box); return;
+    }
+    else if(set) await updateDoc(ref,{status:set,[set+"At"]:now,
+      ...(set==="preparing"?{sellerUid:me.uid,sellerName:myName}:{})}); // accepting credits the sale to this seller
+  }catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
+});
+</script>
+</body>
+</html>

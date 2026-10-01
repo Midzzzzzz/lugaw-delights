@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lugaw Delights – Owner</title>
+<meta name="robots" content="noindex">
+<meta name="app-role" content="owner">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+.narrow{max-width:460px}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.chip{border:2px solid var(--line);background:var(--surface);color:var(--fg);font-weight:700;border-radius:99px;padding:5px 12px;cursor:pointer;font-size:.88rem}
+.chip.on{border-color:var(--brand);background:var(--brand);color:var(--on-brand)}
+.custom{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.custom input{width:auto;padding:5px 8px;font-size:.88rem}
+.panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px;margin-top:12px}
+@media (max-width:400px){.panels{grid-template-columns:minmax(0,1fr)}}
+.panel h2{font-size:1.2rem;color:var(--brand-deep);margin-bottom:10px}
+.panel .sub{font-size:.8rem;color:var(--muted);margin:-8px 0 10px}
+/* Ranked bars: one row per entity, the number is always written out, the bar only helps compare */
+.rank{display:grid;gap:3px;padding:5px 0}
+.rrow{display:flex;justify-content:space-between;gap:10px;font-size:.9rem}
+.rrow .rnum{font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+.rrow .rnum b{color:var(--fg)}
+.track{height:10px}
+.bar{height:10px;background:var(--brand);border-radius:0 4px 4px 0;min-width:2px}
+.tablewrap{overflow-x:auto;margin-top:10px}
+table.orders{width:100%;border-collapse:collapse;font-size:.88rem}
+table.orders th{text-align:left;color:var(--muted);font-weight:700;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;border-bottom:2px solid var(--line);white-space:nowrap}
+table.orders td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+table.orders tr.row{cursor:pointer}
+table.orders tr.row:hover td{background:var(--sunk)}
+table.orders td.n,table.orders th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.detail td{background:var(--sunk)}
+.search{max-width:220px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <img src="logo.jpg" alt="Lugaw Delights logo">
+    <div class="who"><h1>Owner Dashboard</h1><p class="tag">Sales, sellers, riders and every order.</p></div>
+    <button class="btn ghost small" id="signOut" hidden>Sign out</button>
+  </header>
+  <div id="setup"></div>
+
+  <form class="stack card narrow" id="loginForm" novalidate hidden>
+    <h2 style="color:var(--brand)">Owner sign in</h2>
+    <label class="f" for="l-email">Email<input id="l-email" type="email" autocomplete="email"></label>
+    <label class="f" for="l-pass">Password<input id="l-pass" type="password" autocomplete="current-password"></label>
+    <p class="err" id="l-err" hidden></p>
+    <div class="btnrow"><button class="btn" type="submit">Sign in</button>
+      <button class="btn ghost small" type="button" id="create">Create owner account</button></div>
+    <p class="muted" style="font-size:.85rem;margin:0">New owner? Type the email and password you want, tap <b>Create owner account</b>, then follow step 7 of the setup guide.</p>
+  </form>
+
+  <div class="card narrow" id="notAdmin" hidden></div>
+
+  <div id="dash" hidden>
+    <div class="card toolbar" id="ranges"></div>
+    <div class="stats">
+      <div class="stat"><b id="sSales">₱0</b><span>Food sales</span></div>
+      <div class="stat"><b id="sOrders">0</b><span>Completed orders</span></div>
+      <div class="stat"><b id="sAvg">₱0</b><span>Average order</span></div>
+      <div class="stat"><b id="sFees">₱0</b><span>Rider fees</span></div>
+      <div class="stat"><b id="sOpen">0</b><span>In progress</span></div>
+      <div class="stat"><b id="sCancel">0</b><span>Cancelled</span></div>
+    </div>
+    <div class="tabs" id="tabs"></div>
+    <div id="view"></div>
+  </div>
+</div>
+
+<script type="module">
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
+import { auth, db, isConfigured, ITEMS, ACTIVE, peso, esc, STATUS, statusLabel, itemsHTML, mapsLink, cashLimitOf, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
+
+const $=s=>document.querySelector(s);
+let agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], riders=[], contacts={}, open=null, teamErr="";
+let range="today", tab="sales", filter="all", search="";
+const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
+$("#setup").innerHTML=setupNotice();
+
+if(isConfigured) onAuthStateChanged(auth, async u=>{
+  subs.forEach(f=>f()); subs=[]; ordersSub?.(); ordersSub=null;
+  const me=u && !u.isAnonymous ? u : null;
+  $("#signOut").hidden=!me;
+  if(!me) return show("loginForm");
+  let admin=false;
+  try{ admin=(await getDoc(doc(db,"admins",me.uid))).exists(); }catch(_){}
+  if(!admin){
+    show("notAdmin");
+    // Seller and rider accounts get a plain refusal; only a brand-new account sees the owner setup steps
+    let staffAccount=false;
+    try{ staffAccount=(await getDoc(doc(db,"sellers",me.uid))).exists() || (await getDoc(doc(db,"riders",me.uid))).exists(); }catch(_){}
+    if(staffAccount){
+      $("#notAdmin").innerHTML=`<h2 style="color:var(--brand)">Owner only</h2>
+        <p>This page is for the shop owner. Please sign out.</p>`;
+      return;
+    }
+    $("#notAdmin").innerHTML=`<h2 style="color:var(--brand)">One more step</h2>
+      <p>Signed in as <b>${esc(me.email)}</b>, but this account isn't an owner yet. In the Firebase console, add a document to the
+      <code>admins</code> collection with this ID (setup guide, step 7):</p>
+      <p><code style="font-size:1rem;user-select:all;overflow-wrap:anywhere">${esc(me.uid)}</code></p>
+      <div class="btnrow"><button class="btn small" id="copyUid">Copy ID</button><button class="btn ghost small" onclick="location.reload()">I've done it, reload</button></div>`;
+    $("#copyUid").onclick=()=>navigator.clipboard?.writeText(me.uid).then(()=>$("#copyUid").textContent="Copied").catch(()=>{});
+    return;
+  }
+  show("dash"); start();
+});
+$("#signOut").onclick=()=>signOut(auth);
+const lerr=m=>{ $("#l-err").textContent=m||""; $("#l-err").hidden=!m; };
+$("#loginForm").onsubmit=async e=>{ e.preventDefault(); lerr();
+  try{ await signInWithEmailAndPassword(auth,$("#l-email").value.trim(),$("#l-pass").value); }catch(x){ lerr(friendlyError(x)); } };
+$("#create").onclick=async()=>{ lerr();
+  try{ await createUserWithEmailAndPassword(auth,$("#l-email").value.trim(),$("#l-pass").value); }catch(x){ lerr(friendlyError(x)); } };
+
+function start(){
+  subs.push(onSnapshot(collection(db,"sellers"), s=>{ sellers=s.docs.map(d=>({id:d.id,...d.data()})); teamErr=""; render(); }, e=>{ teamErr="Couldn't load sellers: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; render(); }));
+  subs.push(onSnapshot(collection(db,"riders"), s=>{ riders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  // Signed rider agreements, by rider id
+  subs.push(onSnapshot(collection(db,"agreements"), s=>{ agreements={}; s.docs.forEach(d=>agreements[d.id]=d.data()); render(); }, ()=>{}));
+  subs.push(onSnapshot(query(collection(db,"reports"),orderBy("createdAt","desc"),limit(200)), s=>{ reports=s.docs.map(d=>({id:d.id,...d.data()})); reportsErr=""; render(); },
+    e=>{ reportsErr="Couldn't load reports: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; render(); }));
+  // Don't redraw the settings tab while the owner is typing in it
+  const editing=()=>tab==="settings" && document.activeElement?.closest?.("#view") && /INPUT|SELECT/.test(document.activeElement.tagName);
+  subs.push(onSnapshot(doc(db,"settings","store"), s=>{ store=s.exists()?s.data():{}; if(tab==="settings" && !editing()) render(); }, ()=>{}));
+  // Delivery fees per barangay. The first time, save the starting fees from config.js.
+  subs.push(onSnapshot(doc(db,"settings","delivery"), s=>{
+    if(!s.exists()){
+      // Not saved yet: show the starting fees and try to save them; any error is shown on Shop settings
+      deliveryFees=defaultFees(); feesSaved=false; if(tab==="settings" && !editing()) render();
+      setDoc(doc(db,"settings","delivery"),{fees:defaultFees()}).catch(x=>{ feesErr="Couldn't save the delivery fees: "+friendlyError(x)+" Check that the latest security rules are published in Firebase, then tap Save delivery fees."; if(tab==="settings") render(); });
+      return;
+    }
+    deliveryFees=s.data().fees||{}; feesSaved=true; feesErr=""; if(tab==="settings" && !editing()) render();
+  }, x=>{ feesErr="Couldn't load the delivery fees: "+friendlyError(x); if(tab==="settings") render(); }));
+  renderRanges(); watchOrders();
+}
+
+// ---------- Date range ----------
+const RANGES=[["today","Today"],["yesterday","Yesterday"],["week","Last 7 days"],["month","This month"],["custom","Custom"]];
+const addDays=(d,n)=>{ const x=new Date(d); x.setDate(x.getDate()+n); return x; };
+const dayStart=d=>{ const x=new Date(d); x.setHours(0,0,0,0); return x; };
+const ymd=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+function rangeDates(){
+  const t=dayStart(new Date());
+  if(range==="yesterday") return [addDays(t,-1),t];
+  if(range==="week") return [addDays(t,-6),addDays(t,1)];
+  if(range==="month") return [new Date(t.getFullYear(),t.getMonth(),1),addDays(t,1)];
+  if(range==="custom"){
+    const f=$("#from")?.value, to=$("#to")?.value;
+    if(f && to){ const a=dayStart(new Date(f+"T00:00")), b=addDays(dayStart(new Date(to+"T00:00")),1); if(b>a) return [a,b]; }
+  }
+  return [t,addDays(t,1)];
+}
+function renderRanges(){
+  const [a,b]=rangeDates();
+  $("#ranges").innerHTML=RANGES.map(([k,l])=>`<button class="chip ${range===k?"on":""}" data-range="${k}">${l}</button>`).join("")
+    + `<span class="custom" ${range==="custom"?"":"hidden"}><input type="date" id="from" value="${ymd(a)}" aria-label="From">
+       <span class="muted">to</span><input type="date" id="to" value="${ymd(addDays(b,-1))}" aria-label="To"></span>`;
+}
+$("#ranges").addEventListener("click",e=>{ const b=e.target.closest("[data-range]"); if(!b) return; range=b.dataset.range; renderRanges(); watchOrders(); });
+$("#ranges").addEventListener("change",e=>{ if(e.target.matches("#from,#to")) watchOrders(); });
+setInterval(()=>{ if(ordersSub && range==="today" && rangeDates()[0].getTime()!==watching) watchOrders(); }, 60000); // roll over at midnight
+
+// Live list of every order placed in the chosen range
+let watching=0;
+function watchOrders(){
+  ordersSub?.(); const [a,b]=rangeDates(); watching=a.getTime(); open=null;
+  ordersSub=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<",Timestamp.fromDate(b)),orderBy("createdAt","desc")),
+    s=>{ orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); },
+    e=>{ $("#view").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; });
+}
+
+// ---------- Numbers ----------
+const DONE=["delivered","completed"];
+const isDone=o=>DONE.includes(o.status);
+function group(list,keyFn,labelFn,valFn){
+  const m=new Map();
+  list.forEach(o=>{ const k=keyFn(o); const r=m.get(k)||{key:k,label:labelFn(o),count:0,value:0}; r.count++; r.value+=valFn(o); m.set(k,r); });
+  return [...m.values()].sort((x,y)=>y.value-x.value||y.count-x.count);
+}
+const sellerName=o=>{ const s=sellers.find(x=>x.id===o.sellerUid); return s?s.name:(o.sellerName||"Not recorded (older orders)"); };
+const riderName=o=>{ const r=riders.find(x=>x.id===o.riderUid); return r?r.name:(o.riderName||"Unknown rider"); };
+
+// One row per entity: label, the value written out, and a bar scaled to the top value
+function rank(rows,{main,sub,numbered=true,empty}){
+  if(!rows.length) return `<p class="empty">${empty}</p>`;
+  const max=Math.max(...rows.map(r=>r.value))||1;
+  return rows.map((r,i)=>`<div class="rank"><div class="rrow"><span>${numbered?`${i+1}. `:""}${esc(r.label)}</span>
+    <span class="rnum">${sub(r)}${sub(r)?" · ":""}<b>${main(r)}</b></span></div>
+    <div class="track" title="${esc(r.label)}: ${esc(main(r))}"><div class="bar" style="width:${Math.max(0.5,r.value/max*100).toFixed(1)}%"></div></div></div>`).join("");
+}
+const plural=(n,w)=>`${n} ${w}${n===1?"":"s"}`;
+
+function render(){
+  const done=orders.filter(isDone), sales=done.reduce((s,o)=>s+(o.subtotal||0),0);
+  $("#sSales").textContent=peso(sales);
+  $("#sOrders").textContent=done.length;
+  $("#sAvg").textContent=peso(done.length?Math.round(sales/done.length):0);
+  $("#sFees").textContent=peso(done.reduce((s,o)=>s+(o.deliveryFee||0),0));
+  $("#sOpen").textContent=orders.filter(o=>ACTIVE.includes(o.status)).length;
+  $("#sCancel").textContent=orders.filter(o=>o.status==="cancelled").length;
+  const pending=sellers.filter(s=>s.status==="pending").length+riders.filter(r=>r.status==="pending").length;
+  $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Sellers & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["settings","Shop settings"]]
+    .map(([id,l,n])=>`<button class="${tab===id?"on":""}" data-tab="${id}">${l}${n?`<span class="count">${n}</span>`:""}</button>`).join("");
+  if(tab==="sales") renderSales(done);
+  else if(tab==="orders") renderOrders();
+  else if(tab==="team") renderTeam();
+  else if(tab==="reports") renderReports();
+  else renderSettings();
+}
+$("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]"); if(b){ tab=b.dataset.tab; render(); } });
+
+function renderSales(done){
+  const food=o=>o.subtotal||0;
+  const bySeller=group(done,o=>o.sellerUid||"_none",sellerName,food);
+  const byRider=group(done.filter(o=>o.mode==="Delivery"&&o.riderUid),o=>o.riderUid,riderName,o=>o.deliveryFee||0);
+  const byMode=group(done,o=>o.mode,o=>o.mode,food);
+  const byPay=group(done,o=>o.payment,o=>o.payment,food);
+  const items=new Map();
+  done.forEach(o=>(o.items||[]).forEach(it=>{
+    const k=it.id, r=items.get(k)||{key:k,label:ITEMS[k]?.name||"Unknown item",count:0,value:0};
+    r.count+=Number(it.qty)||0; r.value+=(Number(it.price)||0)*(Number(it.qty)||0); items.set(k,r);
+  }));
+  const topItems=[...items.values()].sort((x,y)=>y.count-x.count||y.value-x.value).slice(0,10).map(r=>({...r,value:r.count,sales:r.value}));
+  // Sales over time: by hour for a single day, by day for longer ranges
+  const [a,b]=rangeDates(), oneDay=b-a<=86400000, buckets=new Map();
+  if(oneDay){ done.forEach(o=>{ const h=o.createdAt?.toDate?.().getHours(); if(h!=null) buckets.set(h,(buckets.get(h)||0)+food(o)); }); }
+  else {
+    for(let d=new Date(a); d<b; d=addDays(d,1)) buckets.set(ymd(d),0); // every day shows, even with no sales
+    done.forEach(o=>{ const d=o.createdAt?.toDate?.(); if(d){ const k=ymd(d); buckets.set(k,(buckets.get(k)||0)+food(o)); } });
+  }
+  let time=[...buckets.entries()].map(([k,v])=>({label:oneDay?new Date(2000,0,1,k).toLocaleTimeString("en-PH",{hour:"numeric"}):new Date(k+"T00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"}),value:v,k}));
+  time.sort((x,y)=>x.k<y.k?-1:x.k>y.k?1:0);
+  if(oneDay) time=time.filter(r=>r.value>0);
+  const money=r=>peso(r.value);
+  $("#view").innerHTML=`<div class="panels">
+    <section class="card panel"><h2>Sellers</h2><p class="sub">Food sales from completed orders each seller accepted or recorded</p>
+      ${rank(bySeller,{main:money,sub:r=>plural(r.count,"order"),empty:"No completed orders in this range yet."})}</section>
+    <section class="card panel"><h2>Best-selling items</h2><p class="sub">Top 10 by quantity</p>
+      ${rank(topItems,{main:r=>plural(r.count,"pc"),sub:r=>peso(r.sales),empty:"Nothing sold in this range yet."})}</section>
+    <section class="card panel"><h2>${oneDay?"Sales by hour":"Sales by day"}</h2><p class="sub">Food sales from completed orders</p>
+      ${rank(time,{main:money,sub:()=>"",numbered:false,empty:"No sales in this range yet."})}</section>
+    <section class="card panel"><h2>Riders</h2><p class="sub">Delivery fees earned on completed deliveries</p>
+      ${rank(byRider,{main:money,sub:r=>r.count===1?"1 delivery":`${r.count} deliveries`,empty:"No deliveries in this range yet."})}</section>
+    <section class="card panel"><h2>Order type</h2><p class="sub">Food sales by delivery, pickup and dine-in</p>
+      ${rank(byMode,{main:money,sub:r=>plural(r.count,"order"),numbered:false,empty:"No completed orders yet."})}</section>
+    <section class="card panel"><h2>Payment</h2><p class="sub">Food sales by payment method</p>
+      ${rank(byPay,{main:money,sub:r=>plural(r.count,"order"),numbered:false,empty:"No completed orders yet."})}</section>
+  </div>`;
+}
+
+// ---------- Orders ----------
+const FILTERS=[["all","All"],["active","In progress"],["done","Completed"],["cancelled","Cancelled"]];
+function renderOrders(){
+  const q=search.trim().toLowerCase();
+  const list=orders.filter(o=>filter==="all"||(filter==="active"&&ACTIVE.includes(o.status))||(filter==="done"&&isDone(o))||(filter==="cancelled"&&o.status==="cancelled"))
+    .filter(o=>!q||[o.code,o.table,o.sellerName,o.riderName,o.mode].some(v=>String(v||"").toLowerCase().includes(q)));
+  const shown=list.slice(0,300);
+  $("#view").innerHTML=`<div class="card" style="margin-top:12px">
+    <div class="toolbar">${FILTERS.map(([k,l])=>`<button class="chip ${filter===k?"on":""}" data-filter="${k}">${l}</button>`).join("")}
+      <input class="search" type="search" id="search" placeholder="Search code, table, seller…" value="${esc(search)}" aria-label="Search orders"></div>
+    <div class="tablewrap"><table class="orders"><thead><tr><th>Time</th><th>Code</th><th>Type</th><th>Seller</th><th>Rider</th><th>Status</th><th class="n">Total</th></tr></thead>
+    <tbody>${shown.map(o=>`<tr class="row" data-open="${esc(o.id)}">
+      <td>${o.createdAt?.toDate?.().toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"just now"}</td>
+      <td><b>${esc(o.code)}</b></td><td>${esc(o.mode)}${o.table?` · ${esc(o.table)}`:""}</td>
+      <td>${o.sellerUid||o.sellerName?esc(sellerName(o)):`<span class="muted">—</span>`}</td>
+      <td>${o.riderUid?esc(riderName(o)):`<span class="muted">—</span>`}</td>
+      <td><span class="pill ${esc(STATUS[o.status]?.tone||"off")}">${esc(statusLabel(o))}</span></td>
+      <td class="n">${peso(o.total)}</td></tr>
+      ${open===o.id?`<tr class="detail"><td colspan="7">${detail(o)}</td></tr>`:""}`).join("")
+      || `<tr><td colspan="7" class="muted">No orders match.</td></tr>`}</tbody></table></div>
+    ${list.length>shown.length?`<p class="muted" style="font-size:.85rem">Showing the latest ${shown.length} of ${list.length}. Pick a shorter date range to see the rest.</p>`:""}
+  </div>`;
+}
+// Rider proof photos, loaded once per order when first shown
+const proofCache={};
+function proofsFor(orderId){
+  if(proofCache[orderId]===undefined){ proofCache[orderId]=null; loadProofs(orderId).then(p=>{ proofCache[orderId]=p; render(); }); }
+  return proofCache[orderId] ? proofsHTML(proofCache[orderId]) : `<span class="muted">Loading photos…</span>`;
+}
+function detail(o){
+  const c=contacts[o.id];
+  if(o.mode!=="Dine-in" && c===undefined){
+    contacts[o.id]=null;
+    getDoc(doc(db,"contacts",o.id)).then(s=>{ contacts[o.id]=s.exists()?s.data():{}; render(); }).catch(()=>{});
+  }
+  const who=o.mode==="Dine-in"?`<b>Table</b><span>${esc(o.table)||"—"}</span>`
+    :`<b>Customer</b><span>${c?`${esc(c.name||"—")} · <span class="num">${esc(c.phone||"")}</span>`:`<span class="muted">Loading…</span>`}</span>`;
+  return `<div class="kv" style="display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 10px">${who}
+    ${o.mode==="Delivery"?`<b>Address</b><span>${esc(o.address)} · <a href="${mapsLink(o.address)}" target="_blank" rel="noopener">Map</a></span>`:""}
+    <b>Payment</b><span>${esc(o.payment)}${o.gcashRef?` · Ref ${esc(o.gcashRef)} from ${esc(o.gcashSender||"—")}`:""}${o.payment==="GCash"&&o.mode!=="Dine-in"?(o.paymentConfirmed?" · confirmed":" · not confirmed"):""}${o.cashGiven!=null?` · paid ${peso(o.cashGiven)}, change ${peso(o.cashGiven-o.total)}`:""}</span>
+    ${o.notes?`<b>Notes</b><span>${esc(o.notes)}</span>`:""}
+    ${o.cancelledBy?`<b>Cancelled by</b><span>${esc(o.cancelledBy)}${o.cancelReason?`: ${esc(o.cancelReason)}`:""}</span>`:""}</div>
+    ${itemsHTML(o,true)}
+    ${o.mode==="Delivery"&&o.riderUid?`<b style="display:block;margin-top:6px">Rider photos</b>${proofsFor(o.id)}`:""}
+    <div class="muted" style="font-size:.85rem">Subtotal ${peso(o.subtotal)}${o.deliveryFee?` · delivery ${peso(o.deliveryFee)}`:""} · total ${peso(o.total)}</div>`;
+}
+$("#view").addEventListener("click",e=>{
+  const f=e.target.closest("[data-filter]"); if(f){ filter=f.dataset.filter; render(); return; }
+  const r=e.target.closest("[data-open]"); if(r){ open=open===r.dataset.open?null:r.dataset.open; render(); }
+});
+$("#view").addEventListener("input",e=>{
+  if(e.target.id!=="search") return;
+  search=e.target.value; const pos=e.target.selectionStart; render();
+  const s=$("#search"); s.focus(); s.setSelectionRange(pos,pos);
+});
+
+// ---------- Customer reports ----------
+function renderReports(){
+  const list=[...reports].sort((a,b)=>(a.status==="open"?0:1)-(b.status==="open"?0:1));
+  $("#view").innerHTML=`${reportsErr?`<div class="flag" style="margin-top:12px">${esc(reportsErr)}</div>`:""}
+    <p class="muted" style="margin:12px 0 8px;font-size:.88rem">Problems customers reported about their orders. Call the customer, check with the rider, then mark it resolved.</p>
+    <div class="grid-cards">${list.map(r=>{
+      const c=contacts[r.orderId];
+      if(c===undefined){ contacts[r.orderId]=null; getDoc(doc(db,"contacts",r.orderId)).then(s=>{ contacts[r.orderId]=s.exists()?s.data():{}; render(); }).catch(()=>{}); }
+      const rider=r.riderUid?riders.find(x=>x.id===r.riderUid):null;
+      const riderReports=r.riderUid?reports.filter(x=>x.riderUid===r.riderUid).length:0;
+      return `<div class="order ${r.status==="open"?"alert":""}">
+        <div class="head"><span class="code">${esc(r.code)}</span><span class="pill ${r.status==="open"?"new":"done"}">${r.status==="open"?"Open":"Resolved"}</span></div>
+        <div class="flag">${esc(r.reason)}</div>
+        <div class="kv"><b>Reported</b><span>${r.createdAt?.toDate?.().toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})||"just now"}</span>
+          ${r.details?`<b>Details</b><span>${esc(r.details)}</span>`:""}
+          <b>Order</b><span>${esc(r.mode)}</span>
+          <b>Customer</b><span>${c?`${esc(c.name||"—")} · <a class="num" href="tel:${esc(String(c.phone||"").replace(/[^\d+]/g,""))}">${esc(c.phone||"")}</a>`:`<span class="muted">Loading…</span>`}</span>
+          ${r.riderUid?`<b>Rider</b><span>${esc(rider?.name||r.riderName||"Unknown")}${rider?` · <span class="num">${esc(rider.phone)}</span> · ${esc(rider.status)}`:""}
+            ${riderReports>1?`<br><b style="color:var(--brand-deep)">${riderReports} reports about this rider</b>`:""}</span>`:""}</div>
+        ${r.mode==="Delivery"&&r.riderUid?`<div><b style="font-size:.9rem">Rider photos</b>${proofsFor(r.orderId)}</div>`:""}
+        <div class="btnrow">
+          <button class="btn small ${r.status==="open"?"ok":"ghost"}" data-report-status="${esc(r.id)}" data-to="${r.status==="open"?"resolved":"open"}">${r.status==="open"?"Mark resolved":"Reopen"}</button>
+          ${rider&&rider.status==="approved"?`<button class="btn ghost small" data-kind="riders" data-who="${esc(rider.id)}" data-st="suspended">Suspend rider</button>`:""}</div>
+      </div>`;}).join("")||`<p class="empty">No reports. Customers can report a problem from their order screen.</p>`}</div>`;
+}
+$("#view").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-report-status]"); if(!b) return;
+  b.disabled=true;
+  try{ await updateDoc(doc(db,"reports",b.dataset.reportStatus),{status:b.dataset.to}); }
+  catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
+});
+
+// ---------- Shop settings ----------
+function renderSettings(){
+  const limit=cashLimitOf(store);
+  $("#view").innerHTML=`<div class="card" style="margin-top:12px;max-width:520px;display:grid;gap:10px">
+    <h2 style="color:var(--brand-deep);font-size:1.2rem">Cash payment limit</h2>
+    <p style="margin:0">Online orders (delivery and pickup) with a total above this amount must be paid by GCash.
+      This protects your sellers and riders from fake orders: a prankster can't order a big cash meal and disappear.
+      Dine-in orders aren't affected.</p>
+    <p class="muted" style="margin:0;font-size:.88rem">Right now: ${limit?`cash is allowed up to <b>${peso(limit)}</b>`:`<b>no limit</b>, cash is allowed for any amount`}.</p>
+    <label class="f" for="cashMax">Limit in pesos (0 = no limit)
+      <input id="cashMax" type="number" inputmode="numeric" min="0" step="1" value="${limit}" style="max-width:180px"></label>
+    <div class="btnrow"><button class="btn" id="saveCashMax">Save</button><span class="muted" id="cashMaxMsg"></span></div>
+  </div>
+  <div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
+    <h2 style="color:var(--brand-deep);font-size:1.2rem">Delivery areas and fees</h2>
+    <p style="margin:0">Customers can only order delivery to the barangays ticked here, and pay that barangay's fee.
+      Set higher fees for barangays farther from the stall. The fee goes to the rider.</p>
+    ${feesErr?`<div class="flag">${esc(feesErr)}</div>`:!feesSaved&&deliveryFees?`<div class="flag">Not saved yet. Customers can't order delivery until these fees are saved. Check them and tap Save delivery fees.</div>`:""}
+    ${deliveryFees===null?`<p class="muted">Loading…</p>`:`<div class="tablewrap"><table class="orders">
+      <thead><tr><th>Deliver</th><th>Barangay</th><th class="n">Fee (₱)</th></tr></thead>
+      <tbody>${DELIVERY_ZONES.map(t=>`<tr><td colspan="3" style="font-weight:800;color:var(--brand-deep)">${esc(t.town)}, Laguna</td></tr>`
+        +t.barangays.map(([id,name,start])=>{ const on=id in deliveryFees;
+          return `<tr><td><input type="checkbox" data-zone-on="${id}"${on?" checked":""} aria-label="Deliver to ${esc(name)}"></td>
+            <td>${esc(name)}</td>
+            <td class="n"><input type="number" inputmode="numeric" min="0" step="1" data-zone-fee="${id}" value="${on?deliveryFees[id]:start}"
+              aria-label="Fee for ${esc(name)}" style="max-width:90px;text-align:right"></td></tr>`; }).join("")).join("")}</tbody></table></div>`}
+    <div class="btnrow"><button class="btn" id="saveFees">Save delivery fees</button><span class="muted" id="feesMsg"></span></div>
+  </div>`;
+}
+$("#view").addEventListener("click",async e=>{
+  if(e.target.id!=="saveFees") return;
+  const fees={}, msg=$("#feesMsg");
+  for(const box of document.querySelectorAll("[data-zone-on]")){
+    if(!box.checked) continue;
+    const n=Math.floor(Number(document.querySelector(`[data-zone-fee="${box.dataset.zoneOn}"]`).value));
+    if(!Number.isFinite(n) || n<0 || n>1000){ msg.textContent="Each fee must be between ₱0 and ₱1,000."; return; }
+    fees[box.dataset.zoneOn]=n;
+  }
+  e.target.disabled=true; msg.textContent="Saving…";
+  // saved whole (not merged) so unticked barangays are removed
+  try{ await setDoc(doc(db,"settings","delivery"),{fees}); msg.textContent="Saved."; e.target.disabled=false; }
+  catch(x){ e.target.disabled=false; msg.textContent=friendlyError(x); }
+});
+$("#view").addEventListener("click",async e=>{
+  if(e.target.id!=="saveCashMax") return;
+  const n=Math.floor(Number($("#cashMax").value)), msg=$("#cashMaxMsg");
+  if(!Number.isFinite(n) || n<0){ msg.textContent="Type 0 or more."; return; }
+  e.target.disabled=true; msg.textContent="Saving…";
+  try{ await setDoc(doc(db,"settings","store"),{cashMax:n},{merge:true}); $("#cashMax").blur(); render(); }
+  catch(x){ e.target.disabled=false; msg.textContent=friendlyError(x); }
+});
+
+// ---------- Confirmed phone numbers ----------
+// Call each applicant before approving; "Number confirmed" is remembered for the shop.
+const phoneStatus={}; // phone key -> true | false | null (checking)
+function phoneBadge(phone){
+  const k=phoneKey(phone);
+  if(!k) return `<span style="color:var(--brand-deep);font-weight:700">Not a valid mobile number</span>`;
+  if(phoneStatus[k]===undefined){
+    phoneStatus[k]=null;
+    getDoc(doc(db,"phones",k)).then(s=>{ phoneStatus[k]=s.exists(); render(); }).catch(()=>{ delete phoneStatus[k]; });
+  }
+  if(phoneStatus[k]===null) return `<span class="muted">Checking number…</span>`;
+  if(phoneStatus[k]) return `<span class="pill go">✓ Confirmed number</span>`;
+  return `<span style="color:var(--brand-deep);font-weight:700">Not confirmed yet: call before approving</span>
+    <a class="btn ghost small" href="${esc(telLink(phone))}">Call</a>
+    <button class="btn small" data-confirm-phone="${k}">Number confirmed</button>`;
+}
+$("#view").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-confirm-phone]"); if(!b) return;
+  if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Someone answered? Tap again"; return; }
+  b.disabled=true;
+  try{
+    await setDoc(doc(db,"phones",b.dataset.confirmPhone),{confirmedBy:auth.currentUser.uid,confirmedByName:"Owner",confirmedAt:serverTimestamp()});
+    phoneStatus[b.dataset.confirmPhone]=true; render();
+  }catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
+});
+
+// ---------- Rider agreements ----------
+function contractStatus(r){
+  const a=agreements[r.id];
+  if(!a) return r.status==="approved" ? `<span style="color:var(--brand-deep);font-weight:700">Not signed yet: can't take orders</span>` : `<span class="muted">Signs after approval</span>`;
+  const when=a.signedAt?.toDate?.().toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"})||"";
+  const old=a.version!==CONTRACT_VERSION;
+  return `<span class="pill ${old?"work":"go"}">${old?"Older version signed":"Signed"} ${esc(when)}</span>
+    <button class="btn ghost small" data-contract="${esc(r.id)}">View / print</button>`;
+}
+$("#view").addEventListener("click",e=>{
+  const b=e.target.closest("[data-contract]"); if(!b) return;
+  const a=agreements[b.dataset.contract]; if(!a) return;
+  const w=window.open("","_blank");
+  if(!w){ b.textContent="Allow pop-ups to view"; return; }
+  w.document.open(); w.document.write(agreementHTML(a)); w.document.close();
+});
+
+// ---------- Rider payout accounts ----------
+// Only the rider can set or change where their earnings go (see firestore.rules).
+function payoutCell(r){
+  if(!hasPayout(r)) return `<span style="color:var(--brand-deep);font-weight:700">Not set: the rider is asked to add it</span>`;
+  const when=r.payUpdatedAt?.toDate?.();
+  return `${esc(payoutText(r))}${when?`<br><span class="muted" style="font-size:.85rem">Changed by the rider ${when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})}</span>`:""}`;
+}
+
+// ---------- Sellers & riders ----------
+const TONE={pending:"new",approved:"go",suspended:"work",rejected:"off"};
+const ORDER={pending:0,approved:1,suspended:2,rejected:3};
+const ACTS={pending:[["approved","Approve","btn ok"],["rejected","Reject","btn ghost small"]],
+  approved:[["suspended","Suspend","btn ghost small"]],suspended:[["approved","Reactivate","btn ok"]],rejected:[["approved","Approve","btn ok"]]};
+function renderTeam(){
+  const sort=l=>[...l].sort((a,b)=>(ORDER[a.status]??9)-(ORDER[b.status]??9));
+  const card=(p,kind,extra)=>`<div class="order">
+    <div class="head"><span class="code">${esc(p.name)}</span><span class="pill ${TONE[p.status]||"off"}">${esc(p.status)}${kind==="riders"&&p.status==="approved"&&p.online?" · available":""}</span></div>
+    <div class="kv"><b>Mobile</b><span><a class="num" href="${esc(telLink(p.phone))}">${esc(p.phone)}</a><br>${phoneBadge(p.phone)}</span><b>Email</b><span>${esc(p.email)}</span>${extra}
+      <b>Applied</b><span>${p.createdAt?.toDate?.().toLocaleDateString("en-PH")||"—"}</span></div>
+    <div class="btnrow">${(ACTS[p.status]||[]).map(([s,l,c])=>`<button class="${c}" data-kind="${kind}" data-who="${esc(p.id)}" data-st="${s}">${l}</button>`).join("")}</div></div>`;
+  $("#view").innerHTML=`<h2 style="color:var(--brand-deep);margin:16px 0 4px">Sellers</h2>
+    <p class="muted" style="margin:0 0 8px;font-size:.88rem">Sellers register at <b>seller.html</b>. Approve them here so they can take orders.</p>
+    ${teamErr?`<div class="flag">${esc(teamErr)}</div>`:""}<div class="grid-cards">${sort(sellers).map(s=>card(s,"sellers","")).join("")||`<p class="empty">No seller applications yet.</p>`}</div>
+    <h2 style="color:var(--brand-deep);margin:20px 0 4px">Riders</h2>
+    <p class="muted" style="margin:0 0 8px;font-size:.88rem">Check their license, OR/CR and clearance in person before approving.</p>
+    <div class="grid-cards">${sort(riders).map(r=>card(r,"riders",`<b>Area</b><span>${esc(r.area)}</span>
+      <b>Vehicle</b><span>${esc(r.vehicle)}${r.plate?" · "+esc(r.plate):""}</span><b>License</b><span>${esc(r.license)||"—"}</span>
+      <b>Agreement</b><span>${contractStatus(r)}</span>
+      <b>Payout</b><span>${payoutCell(r)}</span>`)).join("")
+      ||`<p class="empty">No rider applications yet. Share the link to <b>rider.html</b>.</p>`}</div>`;
+}
+$("#view").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-kind]"); if(!b) return;
+  if(["rejected","suspended"].includes(b.dataset.st) && b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Tap again to confirm"; return; }
+  b.disabled=true;
+  try{ await updateDoc(doc(db,b.dataset.kind,b.dataset.who),{status:b.dataset.st,...(b.dataset.kind==="riders"?{online:false}:{})}); }
+  catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
+});
+</script>
+</body>
+</html>

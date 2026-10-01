@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lugaw Delights – Order Online</title>
+<meta name="description" content="Order lugaw, rice bowls and dumplings from Lugaw Delights for delivery or pickup.">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+nav.cats{position:sticky;top:0;z-index:5;background:var(--bg);padding-block:10px;display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;border-bottom:1px solid var(--line)}
+nav.cats a{flex:none;text-decoration:none;font-family:var(--display);font-weight:700;padding:6px 14px;border-radius:99px;border:2px solid var(--brand);color:var(--brand)}
+nav.cats a.on{background:var(--brand);color:var(--on-brand)}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 350px;gap:28px;align-items:start;padding-top:18px}
+@media (max-width:860px){.layout{grid-template-columns:minmax(0,1fr)}}
+section.cat{scroll-margin-top:70px;margin-bottom:26px}
+section.cat h2{font-size:1.5rem;color:var(--brand-deep);display:flex;align-items:baseline;gap:10px;margin-bottom:4px}
+section.cat h2 small{font-family:var(--body);font-size:.8rem;color:var(--muted);font-weight:600}
+.item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 14px;align-items:center;padding:12px 0;border-bottom:1px dashed var(--line)}
+.item .name{font-weight:700}
+.item .inc{font-size:.85rem;color:var(--muted)}
+.item .price{font-variant-numeric:tabular-nums;font-weight:700;color:var(--brand-deep);font-size:.95rem}
+.item .meta{min-width:0}
+.item.best .name::after{content:"Best seller";margin-left:8px;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;background:var(--yolk);color:#3a1a22;padding:1px 7px;border-radius:99px;vertical-align:2px}
+.step{display:inline-flex;align-items:center;border:2px solid var(--brand);border-radius:99px;overflow:hidden}
+.step button{border:0;background:transparent;color:var(--brand);width:34px;height:32px;font-size:1.2rem;font-weight:800;cursor:pointer}
+.step span{min-width:24px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums}
+aside#side{position:sticky;top:70px;display:grid;gap:14px;scroll-margin-top:70px}
+@media (max-width:860px){aside#side{position:static}}
+aside h2{font-size:1.4rem;color:var(--brand)}
+.track{display:grid;gap:10px}
+.steps{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:0}
+.steps li{display:grid;grid-template-columns:18px minmax(0,1fr);gap:10px;align-items:start;font-size:.92rem;color:var(--muted);position:relative;padding-bottom:10px}
+.steps li::before{content:"";width:14px;height:14px;border-radius:50%;border:2px solid var(--line);background:var(--surface);margin-top:3px;z-index:1}
+.steps li:not(:last-child)::after{content:"";position:absolute;left:7px;top:17px;bottom:-2px;width:2px;background:var(--line)}
+.steps li.done{color:var(--fg)}
+.steps li.done::before{background:var(--ok);border-color:var(--ok)}
+.steps li.now{color:var(--fg);font-weight:800}
+.steps li.now::before{background:var(--brand);border-color:var(--brand);box-shadow:0 0 0 4px var(--sunk)}
+.seg input:disabled+label{opacity:.45;cursor:not-allowed}
+.bar{position:fixed;left:0;right:0;bottom:0;padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));background:var(--brand);color:var(--on-brand);display:none;justify-content:space-between;align-items:center;text-decoration:none;font-family:var(--display);font-weight:700;font-size:1.1rem;z-index:10}
+@media (max-width:860px){.bar.show{display:flex}}
+.summary{display:grid;gap:4px;background:var(--sunk);border-radius:12px;padding:10px 12px}
+.summary .lines{margin:4px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <img src="logo.jpg" alt="Lugaw Delights logo">
+    <div class="who">
+      <h1>Lugaw Delights</h1>
+      <p class="tag">Comfort in a bowl, delivered hot to your door.</p>
+      <div class="chips">
+        <span class="pill brand" id="hoursPill"></span>
+        <span class="pill">Delivery</span><span class="pill">Pickup</span><span class="pill">GCash or cash</span>
+      </div>
+    </div>
+  </header>
+  <div id="setup"></div>
+  <div class="notice closed" id="closed" hidden>We're closed right now. You can browse the menu, and ordering opens again during store hours.</div>
+
+  <nav class="cats" id="cats" aria-label="Menu categories"></nav>
+
+  <div class="layout">
+    <main id="menu"></main>
+
+    <aside id="side">
+      <div class="card track" id="trackBox" hidden></div>
+
+      <div class="card" id="orderBox">
+        <h2>Your order</h2>
+        <div id="cartBox"></div>
+        <form class="stack" id="form" novalidate>
+          <div class="group"><span>How do you want it?</span>
+            <div class="seg">
+              <input type="radio" name="mode" id="m-del" value="Delivery" checked><label for="m-del">Delivery</label>
+              <input type="radio" name="mode" id="m-pick" value="Pickup"><label for="m-pick">Pickup</label>
+            </div>
+          </div>
+          <label class="f" for="f-name">Name<input id="f-name" autocomplete="name" maxlength="80" placeholder="Juan Dela Cruz"></label>
+          <label class="f" for="f-phone">Mobile number<input id="f-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="09XX XXX XXXX"></label>
+          <label class="f" for="f-zone" id="zoneWrap">Barangay (Los Baños or Bay, Laguna only)<select id="f-zone"></select></label>
+          <label class="f" for="f-addr" id="addrWrap">House no., street and landmark<textarea id="f-addr" rows="2" maxlength="200" placeholder="e.g. 12 Lopez Ave., near the chapel"></textarea></label>
+          <div class="group"><span>Payment</span>
+            <div class="seg">
+              <input type="radio" name="pay" id="p-cash" value="Cash" checked><label for="p-cash" id="cashLabel">Cash on delivery</label>
+              <input type="radio" name="pay" id="p-gc" value="GCash"><label for="p-gc">GCash</label>
+            </div>
+          </div>
+          <p class="notice warn" id="cashLimitNote" hidden style="margin:0;font-size:.88rem"></p>
+          <p class="muted" id="gcashNote" hidden style="margin:0;font-size:.88rem"></p>
+          <label class="f" for="f-notes">Notes (optional)<input id="f-notes" maxlength="300" placeholder="Extra spicy, no spring onion, etc."></label>
+          <p class="err" id="err" hidden></p>
+          <button class="btn big" id="submit" type="submit" disabled>Place order</button>
+        </form>
+      </div>
+    </aside>
+  </div>
+  <footer id="foot"></footer>
+</div>
+<a class="bar" id="bar" href="#orderBox"><span id="barCount"></span><span id="barTotal"></span></a>
+
+<script type="module">
+import { onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { collection, doc, getDoc, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { auth, db, isConfigured, SHOP, MENU, ITEMS, MAX_LINES, MAX_QTY, DEFAULT_CASH_MAX, cashLimitOf, REPORT_REASONS, phoneKey, DELIVERY_ZONES, ZONES, zoneLabel, peso, esc, STATUS, FLOW, calcTotals, itemsHTML, fmtTime, orderCode, friendlyError, setupNotice } from "./common.js";
+
+const $ = s => document.querySelector(s);
+const cart = {};
+let storeOpen = true, user = null, cashMax = DEFAULT_CASH_MAX;
+// Delivery fees per barangay, from the owner's settings (null until loaded, {} if not set up)
+let fees = null;
+const zone = ()=>$("#f-zone").value;
+const zoneFee = ()=>fees && zone() in fees ? fees[zone()] : null;
+
+// ---------- Menu ----------
+$("#hoursPill").textContent = "Open " + SHOP.hours;
+$("#foot").innerHTML = `${esc(SHOP.deliveryNote)} Pickup at ${esc(SHOP.pickupAddress)}. Questions? Call or text ${esc(SHOP.phone)}.<br>
+  <a href="rider.html">Ride with us</a>`;
+$("#cats").innerHTML = MENU.map((c,i)=>`<a href="#${c.id}" class="${i?"":"on"}">${esc(c.name.replace(" Series",""))}</a>`).join("");
+$("#menu").innerHTML = MENU.map(c => `
+  <section class="cat" id="${c.id}"><h2>${esc(c.name)}${c.note?`<small>${esc(c.note)}</small>`:""}</h2>
+  ${c.items.map(([id])=>{const it=ITEMS[id];return `
+    <div class="item${it.best?" best":""}"><div class="meta"><div class="name">${esc(it.name.replace("Add-on: ",""))}</div>
+    ${it.inc?`<div class="inc">${esc(it.inc)}</div>`:""}<div class="price">${peso(it.price)}</div></div>
+    <div class="ctl" data-id="${id}"></div></div>`}).join("")}</section>`).join("");
+
+function renderCtl(id){
+  const el=document.querySelector(`.ctl[data-id="${id}"]`), q=cart[id]||0;
+  el.innerHTML = q ? `<div class="step"><button type="button" data-d="-1" aria-label="Remove one">−</button><span>${q}</span><button type="button" data-d="1" aria-label="Add one"${q>=MAX_QTY?" disabled":""}>+</button></div>`
+                   : `<button type="button" class="btn" data-d="1">Add</button>`;
+}
+Object.keys(ITEMS).forEach(renderCtl);
+$("#menu").addEventListener("click", e=>{
+  const b=e.target.closest("button[data-d]"); if(!b) return;
+  const id=b.closest(".ctl").dataset.id, q=(cart[id]||0)+ +b.dataset.d;
+  if(!cart[id] && Object.keys(cart).length>=MAX_LINES) return showErr(`You can order up to ${MAX_LINES} different items at a time.`);
+  if(q>MAX_QTY) return;
+  showErr("");
+  if(q>0) cart[id]=q; else delete cart[id];
+  renderCtl(id); renderCart();
+});
+
+const mode=()=>document.querySelector('input[name="mode"]:checked').value;
+const pay=()=>document.querySelector('input[name="pay"]:checked').value;
+const cartItems=()=>Object.entries(cart).map(([id,qty])=>({id,name:ITEMS[id].name,price:ITEMS[id].price,qty}));
+
+function renderCart(){
+  const items=cartItems(), t=calcTotals(items,mode(),zoneFee()||0), count=items.reduce((a,b)=>a+b.qty,0);
+  $("#cartBox").innerHTML = items.length ? `
+    <ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${esc(it.name)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
+    <div class="totals"><div><span>Subtotal</span><span>${peso(t.subtotal)}</span></div>
+    ${mode()==="Delivery"?`<div><span>Delivery fee</span><span>${zoneFee()!=null?peso(t.deliveryFee):"Choose your barangay"}</span></div>`:""}
+    <div class="grand"><span>Total</span><span>${peso(t.total)}</span></div></div>`
+    : `<p class="empty">Your bowl is empty. Tap <b>Add</b> on anything from the menu to start your order.</p>`;
+  // Big orders must be paid by GCash (limit set by the owner)
+  const overCash = cashMax>0 && t.total>cashMax;
+  $("#p-cash").disabled = overCash;
+  if(overCash && pay()==="Cash"){ $("#p-gc").checked=true; renderPayNote(); }
+  $("#cashLimitNote").hidden = !overCash;
+  $("#cashLimitNote").textContent = `Cash is only for orders up to ${peso(cashMax)}. Please pay this order by GCash.`;
+  $("#submit").disabled = !items.length || !storeOpen || !isConfigured;
+  $("#submit").textContent = storeOpen ? "Place order" : "Closed right now";
+  $("#bar").classList.toggle("show", items.length>0);
+  $("#barCount").textContent=`View order · ${count} item${count>1?"s":""}`;
+  $("#barTotal").textContent=peso(t.total);
+}
+function renderPayNote(){
+  const isDel = mode()==="Delivery";
+  $("#addrWrap").hidden = !isDel; $("#zoneWrap").hidden = !isDel;
+  $("#cashLabel").textContent = isDel ? "Cash on delivery" : "Cash on pickup";
+  $("#gcashNote").hidden = pay()!=="GCash";
+  $("#gcashNote").textContent = `After placing your order, send your total to GCash ${SHOP.gcashNumber} (${SHOP.gcashName}), then type the GCash reference number on your order screen so we can match your payment.`;
+}
+// Barangay list: only barangays the owner delivers to, each with its fee
+function renderZones(){
+  const keep=zone();
+  const groups=DELIVERY_ZONES.map(t=>{
+    const opts=t.barangays.filter(([id])=>fees && id in fees)
+      .map(([id,name])=>`<option value="${id}"${id===keep?" selected":""}>${esc(name)} · ${peso(fees[id])}</option>`).join("");
+    return opts?`<optgroup label="${esc(t.town)}, Laguna">${opts}</optgroup>`:"";
+  }).join("");
+  $("#f-zone").innerHTML = fees===null ? `<option value="">Loading…</option>`
+    : groups ? `<option value="">Choose your barangay…</option>${groups}` : `<option value="">Delivery isn't available right now</option>`;
+}
+renderZones();
+$("#f-zone").addEventListener("change",renderCart);
+document.querySelectorAll('input[name="mode"],input[name="pay"]').forEach(r=>r.addEventListener("change",()=>{renderPayNote();renderCart();}));
+renderPayNote(); renderCart();
+
+const obs=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting)
+  document.querySelectorAll("nav.cats a").forEach(a=>a.classList.toggle("on",a.getAttribute("href")==="#"+e.target.id)); }),
+  {rootMargin:"-80px 0px -70% 0px"});
+document.querySelectorAll("section.cat").forEach(s=>obs.observe(s));
+
+// ---------- Live data ----------
+$("#setup").innerHTML = setupNotice();
+if(isConfigured){
+  onSnapshot(doc(db,"settings","delivery"), s=>{ fees = s.exists() ? (s.data().fees||{}) : {}; renderZones(); renderCart(); }, ()=>{});
+  onSnapshot(doc(db,"settings","store"), s=>{
+    storeOpen = !s.exists() || s.data().open !== false;
+    cashMax = cashLimitOf(s.exists() ? s.data() : null);
+    $("#closed").hidden = storeOpen; renderCart();
+  }, ()=>{});
+  onAuthStateChanged(auth, u=>{
+    user=u;
+    if(!u){ signInAnonymously(auth).catch(e=>showErr(friendlyError(e))); return; }
+    watchMyOrders();
+  });
+}
+
+// Orders this phone placed are remembered so the customer can track them.
+const KEY="ld_orders";
+function myOrderIds(){ try{ return JSON.parse(localStorage.getItem(KEY)||"[]"); }catch(_){ return []; } }
+function rememberOrder(id){ try{ localStorage.setItem(KEY, JSON.stringify([id,...myOrderIds().filter(x=>x!==id)].slice(0,5))); }catch(_){} }
+const live={}, unsubs={};
+function watchMyOrders(){
+  myOrderIds().forEach(id=>{
+    if(unsubs[id]) return;
+    unsubs[id]=onSnapshot(doc(db,"orders",id), s=>{ if(s.exists()){ live[id]={id,...s.data()}; } else delete live[id]; renderTrack(); },
+      ()=>{ delete live[id]; renderTrack(); });
+  });
+}
+// Stop tracking an order on this phone
+function forgetOrder(id){
+  try{ localStorage.setItem(KEY, JSON.stringify(myOrderIds().filter(x=>x!==id))); }catch(_){}
+  unsubs[id]?.(); delete unsubs[id]; delete live[id];
+}
+// Finished orders stay on screen for an hour after they end, then drop off
+const FINAL=["delivered","completed","cancelled"], KEEP_FINISHED=60*60*1000;
+const endedAt=o=>(o.deliveredAt||o.completedAt||o.cancelledAt||o.createdAt)?.toDate?.();
+// What the customer ordered, so they can check it after placing the order
+function orderSummary(o){
+  const del=o.mode==="Delivery";
+  return `<div class="summary"><b>Your order</b>
+    ${itemsHTML(o,true)}
+    <div class="totals"><div><span>Subtotal</span><span>${peso(o.subtotal)}</span></div>
+      ${del?`<div><span>Delivery fee${o.zoneName?` (${esc(o.zoneName)})`:""}</span><span>${peso(o.deliveryFee)}</span></div>`:""}
+      <div class="grand"><span>Total</span><span>${peso(o.total)}</span></div></div>
+    <div class="muted" style="font-size:.88rem">${del?`Deliver to: ${esc(o.address)}`:`Pickup at: ${esc(SHOP.pickupAddress)}`}
+      <br>Payment: ${o.payment==="GCash"?"GCash":del?"Cash on delivery":"Cash on pickup"}${o.notes?`<br>Notes: ${esc(o.notes)}`:""}</div></div>`;
+}
+function renderTrack(){
+  const focusKey=document.activeElement?.dataset?.focusKey; // restore the cursor after redrawing
+  const list=Object.values(live).filter(o=>{ const d=endedAt(o); return !FINAL.includes(o.status) || !d || Date.now()-d.getTime()<KEEP_FINISHED; })
+    .sort((a,b)=>(b.createdAt?.seconds||9e9)-(a.createdAt?.seconds||9e9));
+  $("#trackBox").hidden=!list.length;
+  $("#trackBox").innerHTML = `<h2>Track your order</h2>` + list.map(o=>{
+    const flow=FLOW[o.mode]||FLOW.Delivery, at=flow.indexOf(o.status), finished=FINAL.includes(o.status);
+    const steps = o.status==="cancelled" ? `<p class="pill off" style="justify-self:start">Cancelled</p>` :
+      `<ol class="steps">${flow.map((s,i)=>`<li class="${i<at||finished?"done":i===at?"now":""}"><span>${esc(STATUS[s].label)}</span></li>`).join("")}</ol>`;
+    const cancelNote = o.status!=="cancelled" ? "" : o.cancelledBy==="customer"
+      ? `<p style="margin:0">You cancelled this order.</p>`
+      : `<p style="margin:0">Sorry, we had to cancel this order${o.cancelReason?`: <b>${esc(o.cancelReason)}</b>`:"."}</p>
+         <p class="muted" style="margin:0;font-size:.88rem">Questions? Call or text ${esc(SHOP.phone)}.${o.payment==="GCash"?" If you already paid by GCash, please call us about your refund.":""}</p>`;
+    const doneNote = o.status==="delivered" ? `<p style="margin:0"><b>Delivered at ${fmtTime(o.deliveredAt)}.</b> Salamat po, enjoy your meal!</p>`
+      : o.status==="completed" ? `<p style="margin:0"><b>Picked up.</b> Salamat po, enjoy your meal!</p>` : "";
+    const rider = o.riderName && ["assigned","picked_up"].includes(o.status)
+      ? `<p style="margin:0">Your rider: <b>${esc(o.riderName)}</b> · <span class="num">${esc(o.riderPhone)}</span></p>` : "";
+    const cancel = o.status==="new" ? `<button class="btn ghost small" data-cancel="${o.id}">Cancel order</button>` : "";
+    const hide = finished ? `<button class="btn ghost small" data-hide="${o.id}" style="justify-self:start">Hide</button>` : "";
+    return `<div style="border-top:2px dashed var(--line);padding-top:10px;display:grid;gap:6px">
+      <div class="btnrow" style="justify-content:space-between"><b class="num">${esc(o.code)}</b><span class="muted">${fmtTime(o.createdAt)} · ${peso(o.total)}</span></div>
+      ${steps}${cancelNote}${doneNote}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
+  }).join("");
+  if(focusKey){ const el=document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); if(el){ el.focus(); if(el.tagName==="TEXTAREA") el.setSelectionRange(el.value.length,el.value.length); } }
+}
+setInterval(renderTrack, 60000); // let finished orders drop off without a reload
+
+// ---------- Delivery PIN ----------
+// A 4-digit code made on this phone with each delivery order. The rider needs it to
+// mark the order delivered, so the customer only reads it out once they have the food.
+const PINS="ld_pins";
+const pins=(()=>{ try{ return JSON.parse(localStorage.getItem(PINS)||"{}"); }catch(_){ return {}; } })();
+const newPin=()=>String(crypto.getRandomValues(new Uint32Array(1))[0]%10000).padStart(4,"0");
+function savePin(id,pin){ pins[id]=pin; try{ localStorage.setItem(PINS,JSON.stringify(pins)); }catch(_){} }
+function pinBox(o){
+  if(o.mode!=="Delivery" || FINAL.includes(o.status)) return "";
+  if(pins[o.id]===undefined){ // not saved on this phone: fetch it once
+    pins[o.id]=null;
+    getDoc(doc(db,"pins",o.id)).then(s=>{ if(s.exists()){ savePin(o.id,s.data().pin); renderTrack(); } }).catch(()=>{});
+  }
+  if(!pins[o.id]) return "";
+  return `<div class="notice" style="margin:0">Delivery code: <b class="num" style="font-size:1.5rem;letter-spacing:.25em">${esc(pins[o.id])}</b><br>
+    <span style="font-size:.88rem">Give this code to the rider <b>only after you have your food</b>. The rider needs it to finish the delivery.</span></div>`;
+}
+
+// ---------- GCash payment ----------
+// After paying, the customer types the GCash reference number so the seller can
+// find this exact payment in their GCash history, even with many orders at once.
+const payDraft={}; // order id -> { ref, sender, err, editing }
+function payBox(o){
+  if(o.payment!=="GCash" || o.status==="cancelled") return "";
+  if(o.paymentConfirmed) return `<p style="margin:0"><span class="pill done">Paid</span> GCash payment confirmed by the shop.</p>`;
+  const d=payDraft[o.id]||(payDraft[o.id]={ref:"",sender:"",err:"",editing:false}), id=esc(o.id);
+  if(o.gcashRef && !d.editing) return `<div class="notice" style="margin:0;font-size:.9rem">GCash reference <b class="num">${esc(o.gcashRef)}</b> sent.
+    Waiting for the shop to confirm your payment.<br><button class="btn ghost small" data-pay-edit="${id}" style="margin-top:6px">Fix the reference number</button></div>`;
+  return `<div class="notice" style="margin:0;display:grid;gap:8px">
+    <div><b>Pay ${peso(o.total)} by GCash</b> to <b class="num">${esc(SHOP.gcashNumber)}</b> (${esc(SHOP.gcashName)}).
+      In the GCash message, type your order code <b class="num">${esc(o.code)}</b>.</div>
+    <label class="f" for="gr-${id}">GCash reference number (Ref No. on your GCash receipt)
+      <input id="gr-${id}" data-pay-ref="${id}" data-focus-key="gr-${id}" inputmode="numeric" maxlength="20" autocomplete="off" value="${esc(d.ref||o.gcashRef||"")}" placeholder="e.g. 1234567890123"></label>
+    <label class="f" for="gs-${id}">Your GCash name or number
+      <input id="gs-${id}" data-pay-sender="${id}" data-focus-key="gs-${id}" maxlength="60" value="${esc(d.sender||o.gcashSender||"")}" placeholder="Juan D. or 0917…"></label>
+    ${d.err?`<p class="err" style="margin:0">${esc(d.err)}</p>`:""}
+    <div class="btnrow"><button class="btn small" data-pay-send="${id}">Send reference number</button>
+      ${d.editing?`<button class="btn ghost small" data-pay-cancel="${id}">Never mind</button>`:""}</div></div>`;
+}
+$("#trackBox").addEventListener("input",e=>{
+  const r=e.target.closest("[data-pay-ref]"); if(r){ r.value=r.value.replace(/[^0-9A-Za-z]/g,""); payDraft[r.dataset.payRef].ref=r.value; }
+  const s=e.target.closest("[data-pay-sender]"); if(s) payDraft[s.dataset.paySender].sender=s.value;
+});
+async function sendPayRef(id){
+  const o=live[id], d=payDraft[id], ref=(d.ref||o.gcashRef||"").trim(), sender=(d.sender||o.gcashSender||"").trim();
+  if(!/^[0-9A-Za-z]{6,20}$/.test(ref)){ d.err="Type the reference number from your GCash receipt (the Ref No.)."; return renderTrack(); }
+  if(!sender){ d.err="Type the GCash name or number you paid from."; return renderTrack(); }
+  try{
+    await updateDoc(doc(db,"orders",id),{gcashRef:ref,gcashSender:sender,gcashSentAt:serverTimestamp()});
+    payDraft[id]={ref:"",sender:"",err:"",editing:false};
+  }catch(x){ d.err=String(x?.code).includes("permission-denied")?"The shop already confirmed this payment, so it can't be changed. Call us if something's wrong.":friendlyError(x); }
+  renderTrack();
+}
+
+// ---------- Report a problem ----------
+const REPORTED="ld_reported";
+const reported=new Set((()=>{ try{ return JSON.parse(localStorage.getItem(REPORTED)||"[]"); }catch(_){ return []; } })());
+const reporting={}; // order id -> { reason, details, err }
+function reportBox(o){
+  if(o.status==="new") return "";
+  if(reported.has(o.id)) return `<p class="muted" style="margin:0;font-size:.88rem">Problem reported. The owner will look into it. You can also call ${esc(SHOP.phone)}.</p>`;
+  const r=reporting[o.id], id=esc(o.id);
+  if(!r) return `<button class="btn ghost small" data-report="${id}" style="justify-self:start">Report a problem</button>`;
+  return `<div style="display:grid;gap:8px;border-top:1px dashed var(--line);padding-top:8px">
+    <label class="f" for="rr-${id}">What went wrong?
+      <select id="rr-${id}" data-report-reason="${id}" data-focus-key="rr-${id}"><option value="">Choose one…</option>
+        ${REPORT_REASONS.map(x=>`<option${r.reason===x?" selected":""}>${esc(x)}</option>`).join("")}</select></label>
+    <label class="f" for="rd-${id}">Details (optional)<textarea id="rd-${id}" rows="2" maxlength="300" data-report-details="${id}" data-focus-key="rd-${id}"
+      placeholder="What happened?">${esc(r.details)}</textarea></label>
+    ${r.err?`<p class="err" style="margin:0">${esc(r.err)}</p>`:""}
+    <div class="btnrow"><button class="btn small" data-report-send="${id}">Send report</button>
+      <button class="btn ghost small" data-report-back="${id}">Never mind</button></div></div>`;
+}
+$("#trackBox").addEventListener("change",e=>{
+  const s=e.target.closest("[data-report-reason]"); if(s) reporting[s.dataset.reportReason].reason=s.value;
+});
+$("#trackBox").addEventListener("input",e=>{
+  const t=e.target.closest("[data-report-details]"); if(t) reporting[t.dataset.reportDetails].details=t.value;
+});
+async function sendReport(id){
+  const o=live[id], r=reporting[id];
+  if(!r.reason){ r.err="Choose what went wrong first."; return renderTrack(); }
+  try{
+    await setDoc(doc(db,"reports",id),{ orderId:id, code:o.code, customerUid:user.uid, riderUid:o.riderUid??null,
+      riderName:o.riderName??null, mode:o.mode, reason:r.reason, details:r.details.trim(), status:"open", createdAt:serverTimestamp() });
+  }catch(x){
+    // an earlier report for this order already exists: treat it as sent
+    if(!String(x?.code).includes("permission-denied") || !(await getDoc(doc(db,"reports",id)).then(s=>s.exists()).catch(()=>false))){
+      r.err=friendlyError(x); return renderTrack();
+    }
+  }
+  reported.add(id); delete reporting[id];
+  try{ localStorage.setItem(REPORTED,JSON.stringify([...reported])); }catch(_){}
+  renderTrack();
+}
+
+$("#trackBox").addEventListener("click", async e=>{
+  const ps=e.target.closest("[data-pay-send]"); if(ps){ ps.disabled=true; await sendPayRef(ps.dataset.paySend); return; }
+  const pe=e.target.closest("[data-pay-edit]"); if(pe){ payDraft[pe.dataset.payEdit].editing=true; renderTrack(); return; }
+  const pc=e.target.closest("[data-pay-cancel]"); if(pc){ payDraft[pc.dataset.payCancel]={ref:"",sender:"",err:"",editing:false}; renderTrack(); return; }
+  const rp=e.target.closest("[data-report]"); if(rp){ reporting[rp.dataset.report]={reason:"",details:"",err:""}; renderTrack(); return; }
+  const rb=e.target.closest("[data-report-back]"); if(rb){ delete reporting[rb.dataset.reportBack]; renderTrack(); return; }
+  const rs=e.target.closest("[data-report-send]"); if(rs){ rs.disabled=true; await sendReport(rs.dataset.reportSend); return; }
+  const h=e.target.closest("[data-hide]"); if(h){ forgetOrder(h.dataset.hide); renderTrack(); return; }
+  const b=e.target.closest("[data-cancel]"); if(!b) return;
+  if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Tap again to cancel"; return; }
+  b.disabled=true;
+  try{ await updateDoc(doc(db,"orders",b.dataset.cancel),{status:"cancelled",cancelledBy:"customer"}); }
+  catch(err){ b.disabled=false; b.textContent="Couldn't cancel. The shop may have started your order. Call us."; }
+});
+
+// ---------- Place order ----------
+function showErr(m){ $("#err").textContent=m; $("#err").hidden=!m; }
+$("#form").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const name=$("#f-name").value.trim(), phone=$("#f-phone").value.trim(), address=$("#f-addr").value.trim(), notes=$("#f-notes").value.trim();
+  const miss=[]; if(!name) miss.push("your name"); if(!phoneKey(phone)) miss.push("a valid mobile number (09XX XXX XXXX)");
+  if(mode()==="Delivery" && fees && !Object.keys(fees).length) return showErr("Sorry, delivery isn't available right now. Please choose Pickup or call us.");
+  if(mode()==="Delivery" && zoneFee()==null) miss.push("your barangay (we deliver in Los Baños and Bay only)");
+  if(mode()==="Delivery" && !address) miss.push("your house no., street and landmark");
+  if(miss.length) return showErr("Please add "+miss.join(", ")+".");
+  if(!user) return showErr("Still connecting. Try again in a few seconds.");
+  const wait=Math.ceil((lastOrderAt()+61000-Date.now())/1000);
+  if(wait>0) return showErr(`Your last order just went through. You can place another in ${wait} seconds.`);
+  showErr(""); $("#submit").disabled=true; $("#submit").textContent="Sending…";
+  const items=cartItems(), t=calcTotals(items,mode(),zoneFee()||0), z=ZONES[zone()];
+  // The order, the customer's contact details and the one-order-a-minute record
+  // are saved together (see firestore.rules).
+  const ref=doc(collection(db,"orders")), batch=writeBatch(db);
+  // delivery orders get a 4-digit code the rider must enter to finish the delivery
+  const pin = mode()==="Delivery" ? newPin() : null;
+  batch.set(ref,{
+    code:orderCode(ref.id), customerUid:user.uid, mode:mode(),
+    address: mode()==="Delivery"?`${address}, Brgy. ${z.name}, ${z.town}, Laguna`:"", notes, payment:pay(), items,
+    ...(mode()==="Delivery"?{zone:z.id, zoneName:zoneLabel(z)}:{}),
+    subtotal:t.subtotal, deliveryFee:t.deliveryFee, total:t.total,
+    status:"new", riderUid:null, createdAt:serverTimestamp(), ...(pin?{hasPin:true}:{})
+  });
+  batch.set(doc(db,"contacts",ref.id),{ name, phone, customerUid:user.uid, createdAt:serverTimestamp() });
+  batch.set(doc(db,"customers",user.uid),{ lastOrderAt:serverTimestamp(), lastOrderId:ref.id });
+  if(pin){ batch.set(doc(db,"pins",ref.id),{ pin, customerUid:user.uid }); savePin(ref.id,pin); }
+  try{
+    await batch.commit();
+    Object.values(live).filter(o=>FINAL.includes(o.status)).forEach(o=>forgetOrder(o.id)); // a new order replaces finished ones
+    rememberOrder(ref.id); watchMyOrders();
+    try{ localStorage.setItem("ld_last", String(Date.now())); }catch(_){}
+    Object.keys(cart).forEach(id=>{ delete cart[id]; renderCtl(id); });
+    $("#f-notes").value=""; renderCart();
+    $("#trackBox").scrollIntoView({behavior:"smooth",block:"start"});
+  }catch(err){
+    showErr(String(err?.code).includes("permission-denied")
+      ? "We couldn't take this order. The store may have just closed, or an order was placed from this phone less than a minute ago. Wait a moment and try again."
+      : friendlyError(err));
+    renderCart();
+  }
+});
+function lastOrderAt(){ try{ return +localStorage.getItem("ld_last")||0; }catch(_){ return 0; } }
+</script>
+</body>
+</html>

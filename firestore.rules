@@ -1,0 +1,395 @@
+rules_version = '2';
+
+// Lugaw Delights security rules.
+// Paste this whole file into Firebase console → Firestore Database → Rules → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+    function isAdmin() {
+      return signedIn() && exists(/databases/$(database)/documents/admins/$(uid()));
+    }
+    function isSeller() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/sellers/$(uid()))
+        && get(/databases/$(database)/documents/sellers/$(uid())).data.status == 'approved';
+    }
+    // Anyone who works the counter: the owner or an approved seller
+    function isStaff() { return isAdmin() || isSeller(); }
+    // The only delivery areas a rider can choose (rider.html)
+    // Where the shop sends a rider's earnings: a GCash number, or a bank account
+    function payoutOk(d) {
+      return d.payMethod in ['GCash', 'Bank']
+        && str(d.payName, 80) && d.payName.size() > 0
+        && d.payNumber is string
+        && (d.payMethod == 'GCash'
+              ? (d.payNumber.matches('09[0-9]{9}') && d.payBank == '')
+              : (d.payNumber.matches('[0-9]{6,20}') && str(d.payBank, 60) && d.payBank.size() > 0));
+    }
+    function riderAreas() { return ['Los Baños', 'Bay', 'Los Baños & Bay']; }
+    function isApprovedRider() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/riders/$(uid()))
+        && get(/databases/$(database)/documents/riders/$(uid())).data.status == 'approved';
+    }
+    function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+    function str(v, max) { return v is string && v.size() <= max; }
+    function amount(v) { return v is int && v >= 0 && v < 100000; }
+    function storeOpen() {
+      return !exists(/databases/$(database)/documents/settings/store) || get(/databases/$(database)/documents/settings/store).data.get('open', true) != false;
+    }
+    // Online orders above this total must be paid by GCash (0 = no limit).
+    // Keep the 500 default in step with DEFAULT_CASH_MAX in common.js.
+    function cashLimit() {
+      return exists(/databases/$(database)/documents/settings/store)
+        ? get(/databases/$(database)/documents/settings/store).data.get('cashMax', 500) : 500;
+    }
+    function cashOk(d) { return d.payment == 'GCash' || cashLimit() == 0 || d.total <= cashLimit(); }
+    // Delivery only to barangays on the owner's list (settings/delivery.fees, set on
+    // owner.html), and the fee must be that barangay's fee.
+    function deliveryOk(d) {
+      return d.mode != 'Delivery' || (
+        d.zone is string
+        && exists(/databases/$(database)/documents/settings/delivery)
+        && d.zone in get(/databases/$(database)/documents/settings/delivery).data.fees
+        && d.deliveryFee == get(/databases/$(database)/documents/settings/delivery).data.fees[d.zone]
+        && str(d.zoneName, 80));
+    }
+
+    // Every line needs a whole-number quantity. Kept to one cheap check per line:
+    // rules stop after 1000 steps per save, and the owner page checks each line
+    // against the menu before cooking anyway.
+    function q(items, i) { return items.size() <= i || items[i].qty is int; }
+    // Up to 20 different items per order (MAX_LINES in common.js).
+    function okItems(items) {
+      return items is list && items.size() > 0 && items.size() <= 20
+        && q(items, 0) && q(items, 1) && q(items, 2) && q(items, 3) && q(items, 4)
+        && q(items, 5) && q(items, 6) && q(items, 7) && q(items, 8) && q(items, 9)
+        && q(items, 10) && q(items, 11) && q(items, 12) && q(items, 13) && q(items, 14)
+        && q(items, 15) && q(items, 16) && q(items, 17) && q(items, 18) && q(items, 19);
+    }
+
+    // Store settings. Everyone reads. Sellers can only open or close the store;
+    // the owner also sets the cash limit.
+    match /settings/{id} {
+      allow read: if true;
+      allow write: if (isAdmin()
+          && (!('cashMax' in request.resource.data) || (request.resource.data.cashMax is int && request.resource.data.cashMax >= 0)))
+        || (isSeller() && id == 'store'
+          && (resource == null ? request.resource.data.keys().hasOnly(['open']) : changed().hasOnly(['open'])));
+    }
+
+    // Seller applications and profiles. Sellers sign up on seller.html and the
+    // owner approves or suspends them on owner.html.
+    match /sellers/{sellerId} {
+      allow read: if isAdmin() || (signedIn() && uid() == sellerId);
+      allow create: if signedIn() && uid() == sellerId
+        && request.auth.token.firebase.sign_in_provider == 'password'
+        && request.resource.data.keys().hasOnly(['name','phone','email','status','createdAt'])
+        && request.resource.data.status == 'pending'
+        && str(request.resource.data.name, 80) && request.resource.data.name.size() > 0
+        && str(request.resource.data.phone, 20)
+        && str(request.resource.data.email, 120)
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if isAdmin();
+    }
+
+    // Owner accounts. Added by hand in the Firebase console (setup guide, step 7).
+    match /admins/{adminId} {
+      allow read: if signedIn() && uid() == adminId;
+      allow write: if false;
+    }
+
+    // Rider applications and profiles.
+    match /riders/{riderId} {
+      // Sellers can see riders (to know who's available) but only the owner approves them
+      allow read: if isStaff() || (signedIn() && uid() == riderId);
+
+      allow create: if signedIn() && uid() == riderId
+        && request.auth.token.firebase.sign_in_provider == 'password'
+        && request.resource.data.keys().hasOnly(
+             ['name','phone','email','area','vehicle','plate','license','status','online','createdAt',
+              'payMethod','payName','payNumber','payBank'])
+        && payoutOk(request.resource.data)
+        && request.resource.data.status == 'pending'
+        && request.resource.data.online == false
+        && str(request.resource.data.name, 80) && request.resource.data.name.size() > 0
+        && str(request.resource.data.phone, 20) && request.resource.data.phone.size() >= 10
+        && str(request.resource.data.email, 120)
+        && request.resource.data.area in riderAreas()
+        && str(request.resource.data.vehicle, 40)
+        && str(request.resource.data.plate, 20)
+        && str(request.resource.data.license, 40)
+        && request.resource.data.createdAt == request.time;
+
+      // Owner can change anything (approve, suspend). An approved rider can only
+      // switch Available on/off or update phone and area.
+      // The owner approves, rejects and suspends riders, but can't touch a rider's
+      // payout account: only the rider decides where their earnings go.
+      allow update: if (isAdmin()
+          && !changed().hasAny(['payMethod','payName','payNumber','payBank','payUpdatedAt']))
+
+        // The rider updates their own mobile number, area and payout account, and
+        // switches Available on/off once approved. A payout change is time-stamped
+        // so sellers are warned to call the rider before sending money.
+        || (signedIn() && uid() == riderId && resource.data.status in ['pending', 'approved']
+            && changed().hasOnly(['online','phone','area','payMethod','payName','payNumber','payBank','payUpdatedAt'])
+            && (!changed().hasAny(['online']) || (resource.data.status == 'approved' && request.resource.data.online is bool))
+            && (!changed().hasAny(['phone']) || (str(request.resource.data.phone, 20) && request.resource.data.phone.size() >= 10))
+            && (!changed().hasAny(['area']) || request.resource.data.area in riderAreas())
+            && (!changed().hasAny(['payMethod','payName','payNumber','payBank','payUpdatedAt'])
+                || (payoutOk(request.resource.data) && request.resource.data.payUpdatedAt == request.time)));
+
+      allow delete: if isAdmin();
+    }
+
+    // Signed rider agreements (contract.js). A rider signs after the owner approves them,
+    // and can only sign again for a new version of the agreement; nobody can edit a
+    // signed copy. Riders can't take orders until they've signed.
+    match /agreements/{riderId} {
+      function validAgreement(d) {
+        return d.keys().hasOnly(['riderUid','version','signedName','contractText','signature','phone','license','plate','vehicle','signedAt'])
+          && d.riderUid == riderId
+          && str(d.version, 20)
+          && str(d.signedName, 80) && d.signedName.size() > 1
+          && d.contractText is string && d.contractText.size() > 500 && d.contractText.size() < 20000
+          && d.signature is string && d.signature.size() < 300000 && d.signature.matches('data:image/png;base64,.+')
+          && str(d.phone, 20) && str(d.license, 40) && str(d.plate, 20) && str(d.vehicle, 40)
+          && d.signedAt == request.time;
+      }
+      allow read: if isAdmin() || (signedIn() && uid() == riderId);
+      allow create: if signedIn() && uid() == riderId && isApprovedRider() && validAgreement(request.resource.data);
+      allow update: if signedIn() && uid() == riderId && isApprovedRider()
+        && request.resource.data.version != resource.data.version && validAgreement(request.resource.data);
+      allow delete: if false;
+    }
+
+    // Order-rate limit: each customer can place one order a minute. The order,
+    // its contact details and this record are written together in one batch.
+    match /customers/{customerId} {
+      allow read: if signedIn() && uid() == customerId;
+      allow create: if signedIn() && uid() == customerId
+        && request.resource.data.keys().hasOnly(['lastOrderAt', 'lastOrderId'])
+        && request.resource.data.lastOrderAt == request.time
+        && str(request.resource.data.lastOrderId, 40);
+      allow update: if signedIn() && uid() == customerId
+        && request.resource.data.keys().hasOnly(['lastOrderAt', 'lastOrderId'])
+        && request.resource.data.lastOrderAt == request.time
+        && str(request.resource.data.lastOrderId, 40)
+        && request.time > resource.data.lastOrderAt + duration.value(60, 's');
+    }
+
+    // Customer name and number, kept apart from the order so riders only see
+    // them after accepting the delivery.
+    match /contacts/{orderId} {
+      allow read: if isStaff()
+        || (signedIn() && resource.data.customerUid == uid())
+        || (isApprovedRider() && get(/databases/$(database)/documents/orders/$(orderId)).data.riderUid == uid());
+
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['name','phone','customerUid','createdAt'])
+        && request.resource.data.customerUid == uid()
+        && str(request.resource.data.name, 80) && request.resource.data.name.size() > 0
+        && str(request.resource.data.phone, 20) && request.resource.data.phone.size() >= 10
+        && request.resource.data.createdAt == request.time
+        && getAfter(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == uid();
+
+      allow update, delete: if isAdmin();
+    }
+
+    // Phone numbers staff confirmed by calling them. Keyed by the 10 digits after 0/+63
+    // (phoneKey in common.js), so a customer's next orders show as confirmed.
+    match /phones/{key} {
+      allow read: if isStaff();
+      allow create, update: if isStaff() && key.matches('9[0-9]{9}')
+        && request.resource.data.keys().hasOnly(['confirmedBy','confirmedByName','confirmedAt'])
+        && request.resource.data.confirmedBy == uid()
+        && str(request.resource.data.confirmedByName, 80)
+        && request.resource.data.confirmedAt == request.time;
+      allow delete: if isAdmin();
+    }
+
+    // Delivery PIN. The customer creates it with the order and reads it out to the
+    // rider on arrival. Riders can't read it; the rules compare what the rider types.
+    match /pins/{orderId} {
+      allow read: if isStaff() || (signedIn() && resource.data.customerUid == uid());
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['pin','customerUid'])
+        && request.resource.data.customerUid == uid()
+        && request.resource.data.pin is string && request.resource.data.pin.matches('[0-9]{4}')
+        && getAfter(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == uid();
+      allow update, delete: if false;
+    }
+
+    // Customer problem reports, one per order, read and handled by the owner.
+    match /reports/{orderId} {
+      function order() { return get(/databases/$(database)/documents/orders/$(orderId)).data; }
+      allow read: if isAdmin() || (signedIn() && resource.data.customerUid == uid());
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(
+             ['orderId','code','customerUid','riderUid','riderName','mode','reason','details','status','createdAt'])
+        && request.resource.data.orderId == orderId
+        && request.resource.data.customerUid == uid()
+        && order().customerUid == uid()
+        && request.resource.data.riderUid == order().get('riderUid', null)
+        && (request.resource.data.riderName == null || str(request.resource.data.riderName, 80))
+        && request.resource.data.mode == order().mode
+        && str(request.resource.data.code, 20)
+        && str(request.resource.data.reason, 60) && request.resource.data.reason.size() > 0
+        && str(request.resource.data.details, 300)
+        && request.resource.data.status == 'open'
+        && request.resource.data.createdAt == request.time;
+      allow update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Proof photos: the rider photographs the food at pickup and at the customer's door.
+    // One photo of each kind per order, time-stamped by the server, never changed or deleted.
+    match /proofs/{proofId} {
+      function order() { return get(/databases/$(database)/documents/orders/$(request.resource.data.orderId)).data; }
+      allow read: if isStaff() || (signedIn() && resource.data.riderUid == uid());
+      allow create: if isApprovedRider()
+        && request.resource.data.keys().hasOnly(['orderId','kind','riderUid','photo','takenAt'])
+        && request.resource.data.riderUid == uid()
+        && request.resource.data.orderId is string
+        && request.resource.data.kind in ['pickup', 'delivery']
+        && proofId == request.resource.data.orderId + '_' + request.resource.data.kind
+        && request.resource.data.photo is string && request.resource.data.photo.size() < 800000
+        && request.resource.data.photo.matches('data:image/jpeg;base64,[A-Za-z0-9+/=]+')
+        && request.resource.data.takenAt == request.time
+        && order().riderUid == uid()
+        && order().status in (request.resource.data.kind == 'pickup' ? ['assigned', 'picked_up'] : ['picked_up']);
+      allow update, delete: if false;
+    }
+
+    match /orders/{orderId} {
+      function newOrder(d) {
+        return d.keys().hasOnly(
+             ['code','customerUid','mode','address','notes','payment','hasPin','zone','zoneName',
+              'items','subtotal','deliveryFee','total','status','riderUid','createdAt'])
+          && d.customerUid == uid()
+          && d.status == 'new'
+          && d.riderUid == null
+          && d.mode in ['Delivery', 'Pickup']
+          && d.payment in ['Cash', 'GCash']
+          && okItems(d.items)
+          && amount(d.subtotal) && amount(d.deliveryFee) && amount(d.total)
+          && d.total == d.subtotal + d.deliveryFee && d.subtotal > 0
+          && (d.mode == 'Delivery' || d.deliveryFee == 0)
+          && str(d.code, 20)
+          && str(d.address, 300) && (d.mode == 'Pickup' || d.address.size() > 0)
+          && str(d.notes, 300)
+          && d.createdAt == request.time;
+      }
+      // Dine-in order a seller (or the owner) records at the counter. Goes straight to
+      // the kitchen, no delivery fee, no contact details, works even when online
+      // ordering is closed. Credited to whoever records it.
+      function dineIn(d) {
+        return d.keys().hasOnly(
+             ['code','customerUid','mode','table','notes','payment','cashGiven','sellerUid','sellerName',
+              'items','subtotal','deliveryFee','total','status','riderUid','createdAt'])
+          && d.customerUid == uid()
+          && d.sellerUid == uid() && str(d.sellerName, 80)
+          && d.mode == 'Dine-in'
+          && (!('cashGiven' in d) || (amount(d.cashGiven) && d.cashGiven >= d.total))
+          && d.status == 'preparing'
+          && d.riderUid == null
+          && d.payment in ['Cash', 'GCash']
+          && okItems(d.items)
+          && amount(d.subtotal) && d.subtotal > 0
+          && d.deliveryFee == 0 && d.total == d.subtotal
+          && str(d.code, 20) && str(d.table, 30) && str(d.notes, 300)
+          && d.createdAt == request.time;
+      }
+
+      // Owner and sellers see all. Customers see their own. Approved riders see orders
+      // waiting for a rider (address only, no name or number), plus the ones they took.
+      allow read: if isStaff()
+        || (signedIn() && resource.data.customerUid == uid())
+        || (isApprovedRider() && (resource.data.status == 'ready' || resource.data.riderUid == uid()));
+
+      allow create: if (signedIn()
+        && storeOpen()
+        && newOrder(request.resource.data)
+        && cashOk(request.resource.data)
+        && deliveryOk(request.resource.data)
+        && existsAfter(/databases/$(database)/documents/contacts/$(orderId))
+        // every new delivery order carries a PIN, and says so (hasPin) so the rider app knows to ask for it
+        && (request.resource.data.mode != 'Delivery'
+            || (request.resource.data.get('hasPin', false) == true && existsAfter(/databases/$(database)/documents/pins/$(orderId))))
+        && getAfter(/databases/$(database)/documents/customers/$(uid())).data.lastOrderAt == request.time
+        && getAfter(/databases/$(database)/documents/customers/$(uid())).data.lastOrderId == orderId)
+        || (isStaff() && dineIn(request.resource.data));
+
+      // Only the rider who carried a delivery can mark it delivered (with the customer's
+      // delivery code). Neither the owner nor a seller can, so a rider can't ask the shop
+      // to close a delivery that never reached the customer.
+      function shopCanSet(o) {
+        return !(resource.data.mode == 'Delivery' && o.status == 'delivered' && resource.data.status != 'delivered');
+      }
+
+      allow update: if (isAdmin() && shopCanSet(request.resource.data))
+
+        // Seller moves orders along and settles cash, but can't change what was
+        // ordered or its price. A sale is credited once, to the seller who takes it,
+        // and nobody else can move that credit to themselves.
+        || (isSeller() && shopCanSet(request.resource.data)
+            && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','total','payment','createdAt'])
+            && (!changed().hasAny(['cancelReason']) || str(request.resource.data.cancelReason, 150))
+            && (!changed().hasAny(['sellerUid','sellerName'])
+                || (request.resource.data.sellerUid == uid() && str(request.resource.data.sellerName, 80)
+                    && resource.data.get('sellerUid', null) in [null, uid()])))
+
+        // Customer cancels before the shop accepts the order
+        || (signedIn() && resource.data.customerUid == uid() && resource.data.status == 'new'
+            && changed().hasOnly(['status','cancelledBy'])
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.cancelledBy == 'customer')
+
+        // Customer sends their GCash reference number so the seller can match the
+        // payment. They can fix a typo until the seller confirms the payment.
+        || (signedIn() && resource.data.customerUid == uid() && resource.data.payment == 'GCash'
+            && resource.data.status != 'cancelled'
+            && resource.data.get('paymentConfirmed', false) != true
+            && changed().hasOnly(['gcashRef','gcashSender','gcashSentAt'])
+            && request.resource.data.gcashRef is string && request.resource.data.gcashRef.matches('[0-9A-Za-z]{6,20}')
+            && str(request.resource.data.gcashSender, 60)
+            && request.resource.data.gcashSentAt == request.time)
+
+        // Rider accepts an order that is waiting for a rider (only after signing the agreement)
+        || (isApprovedRider() && exists(/databases/$(database)/documents/agreements/$(uid()))
+            && 'payMethod' in get(/databases/$(database)/documents/riders/$(uid())).data
+            && resource.data.status == 'ready' && resource.data.riderUid == null
+            && changed().hasOnly(['status','riderUid','riderName','riderPhone','assignedAt'])
+            && request.resource.data.status == 'assigned'
+            && request.resource.data.riderUid == uid()
+            && request.resource.data.riderName == get(/databases/$(database)/documents/riders/$(uid())).data.name
+            && request.resource.data.riderPhone == get(/databases/$(database)/documents/riders/$(uid())).data.phone
+            && request.resource.data.assignedAt == request.time)
+
+        // Rider moves their own order forward, or gives it back before pickup
+        || (isApprovedRider() && resource.data.riderUid == uid() && (
+              // A cash order is only picked up once the seller confirms the rider paid for the food
+              (resource.data.status == 'assigned' && request.resource.data.status == 'picked_up'
+                && resource.data.payment != 'Cash'
+                && changed().hasOnly(['status','pickedUpAt']) && request.resource.data.pickedUpAt == request.time)
+           || (resource.data.status == 'picked_up' && request.resource.data.status == 'delivered'
+                && changed().hasOnly(['status','deliveredAt','deliveredDate','settled','pinEntered'])
+                // the customer's delivery PIN must match (orders from before PINs have no hasPin)
+                && (resource.data.get('hasPin', false) != true
+                    || request.resource.data.get('pinEntered', '') == get(/databases/$(database)/documents/pins/$(orderId)).data.pin)
+                && request.resource.data.deliveredAt == request.time
+                && str(request.resource.data.deliveredDate, 10)
+                // Nothing left to settle when the rider already paid for the food at pickup;
+                // GCash orders (and older cash orders) are settled later
+                && request.resource.data.settled == (resource.data.payment == 'Cash' && resource.data.get('riderPaid', false) == true))
+           || (resource.data.status == 'assigned' && request.resource.data.status == 'ready'
+                && request.resource.data.riderUid == null
+                && changed().hasOnly(['status','riderUid','riderName','riderPhone','assignedAt']))
+           ));
+
+      allow delete: if false;
+    }
+  }
+}
