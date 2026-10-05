@@ -292,14 +292,15 @@ function detail(o){
     contacts[o.id]=null;
     getDoc(doc(db,"contacts",o.id)).then(s=>{ contacts[o.id]=s.exists()?s.data():{}; render(); }).catch(()=>{});
   }
-  const who=o.mode==="Dine-in"?`<b>Table</b><span>${esc(o.table)||"—"}</span>`
+  const who=o.mode==="Dine-in"?`<b>Table/Customer</b><span>${esc(o.table)||"—"}</span>`
     :`<b>Customer</b><span>${c?`${esc(c.name||"—")} · <span class="num">${esc(c.phone||"")}</span>`:`<span class="muted">Loading…</span>`}</span>`;
   return `<div class="kv" style="display:grid;grid-template-columns:auto minmax(0,1fr);gap:2px 10px">${who}
     ${o.mode==="Delivery"?`<b>Address</b><span>${esc(o.address)} · <a href="${mapsLink(o.address)}" target="_blank" rel="noopener">Map</a></span>`:""}
-    <b>Payment</b><span>${esc(o.payment)}${o.gcashRef?` · Ref ${esc(o.gcashRef)} from ${esc(o.gcashSender||"—")}`:""}${o.payment==="GCash"&&o.mode!=="Dine-in"?(o.paymentConfirmed?" · confirmed":" · not confirmed"):""}${o.cashGiven!=null?` · paid ${peso(o.cashGiven)}, change ${peso(o.cashGiven-o.total)}`:""}</span>
+    <b>Payment</b><span>${esc(o.payment)}${o.gcashRef?` · Ref ${esc(o.gcashRef)} from ${esc(o.gcashSender||"—")}`:""}${o.payment==="GCash"&&o.mode!=="Dine-in"?(o.paymentConfirmed?" · confirmed":" · not confirmed"):""}${o.cashGiven!=null?` · paid ${peso(o.cashGiven)}, change ${peso(o.cashGiven-o.total)}`:o.mode==="Dine-in"&&o.status!=="cancelled"?(o.paid?" · paid":" · <b style=\"color:var(--brand-deep)\">not paid yet</b>"):""}</span>
     ${o.notes?`<b>Notes</b><span>${esc(o.notes)}</span>`:""}
     ${o.cancelledBy?`<b>Cancelled by</b><span>${esc(o.cancelledBy)}${o.cancelReason?`: ${esc(o.cancelReason)}`:""}</span>`:""}</div>
     ${itemsHTML(o,true)}
+    ${o.removed?.length?`<div style="font-size:.85rem;color:var(--brand-deep)"><b>Removed after ordering:</b> ${o.removed.map(r=>`${esc(r.qty)}× ${esc(r.name)} ${peso(r.price*r.qty)} by ${esc(r.by)} at ${new Date(r.at).toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})}`).join("; ")}</div>`:""}
     ${o.mode==="Delivery"&&o.riderUid?`<b style="display:block;margin-top:6px">Rider photos</b>${proofsFor(o.id)}`:""}
     <div class="muted" style="font-size:.85rem">Subtotal ${peso(o.subtotal)}${o.deliveryFee?` · delivery ${peso(o.deliveryFee)}`:""}${o.boxFee?` · boxes ${peso(o.boxFee)}`:""} · total ${peso(o.total)}</div>`;
 }

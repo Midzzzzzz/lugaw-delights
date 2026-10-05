@@ -73,7 +73,7 @@
       <div class="dine-grid">
         <div id="dineMenu"></div>
         <form class="stack" id="dineForm" novalidate>
-          <label class="f" for="d-table" id="tableWrap">Table or name (optional)<input id="d-table" maxlength="30" placeholder="Table 3 or Juan"></label>
+          <label class="f" for="d-table" id="tableWrap">Table/Customer (name to call when the food is ready)<input id="d-table" maxlength="30" placeholder="e.g. Juan, or Table 3"></label>
           <div class="group" id="dinePayWrap"><span>Payment</span>
             <div class="seg">
               <input type="radio" name="dpay" id="d-cash" value="Cash" checked><label for="d-cash">Cash</label>
@@ -100,6 +100,7 @@
       <div class="stat"><b id="sOrders">0</b><span>Orders today</span></div>
       <div class="stat"><b id="sSales">₱0</b><span>Sales today</span></div>
       <div class="stat"><b id="sFees">₱0</b><span>Rider fees today</span></div>
+      <div class="stat"><b id="sUnpaid">₱0</b><span>Unpaid dine-in</span></div>
       <div class="stat"><b id="sCash">₱0</b><span>Cash riders still owe</span></div>
       <div class="stat"><b id="sOwed">₱0</b><span>Fees you owe riders</span></div>
     </div>
@@ -271,12 +272,32 @@ function cashGiven(){
   return dinePay()==="Cash" && v!=="" ? Math.floor(Number(v)) : null;
 }
 const dinePay=()=>document.querySelector('input[name="dpay"]:checked').value;
+// ---------- Changing a dine-in order (before it's paid) ----------
+// editLines: a copy of the order's current lines whose quantities the seller can lower or raise.
+let editLines=[];
+const lineLabel=it=>esc(ITEMS[it.id]?.name||it.name)+(it.pack?` <span class="pill work" style="font-size:.7rem">Take-out · ${it.pack==="box"?"box":"plastic"}</span>`:"");
+function renderChangeCart(items){
+  const kept=editLines.filter(it=>it.qty>0), all=[...kept,...items], t=calcTotals(all,"Dine-in");
+  const changed=items.length || editLines.some((it,i)=>it.qty!==addingTo.items[i].qty);
+  $("#dineCart").innerHTML=`<b style="font-size:.9rem">Already ordered</b>
+    <ul class="lines">${editLines.map((it,i)=>`<li style="${it.qty?"":"opacity:.5;text-decoration:line-through"}">
+      <span class="step" style="display:inline-flex"><button type="button" data-el="${i}" data-ed="-1" aria-label="One less"${it.qty?"":" disabled"}>−</button><span>${it.qty}</span><button type="button" data-el="${i}" data-ed="1" aria-label="One more"${it.qty>=MAX_QTY?" disabled":""}>+</button></span>
+      <span>${lineLabel(it)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
+    ${items.length?`<b style="font-size:.9rem">Adding</b><ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${lineLabel(it)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>`:""}
+    <div class="totals"><div><span>Was</span><span>${peso(addingTo.total)}</span></div>${boxRow(t)}<div class="grand"><span>New total</span><span>${peso(t.total)}</span></div></div>`;
+  $("#dineSave").disabled=!changed || !all.length;
+}
+$("#dineCart").addEventListener("click",e=>{
+  const b=e.target.closest("[data-el]"); if(!b||!addingTo) return;
+  const it=editLines[+b.dataset.el]; it.qty=Math.max(0,Math.min(MAX_QTY,it.qty+ +b.dataset.ed)); renderDineTotals();
+});
 function renderDineTotals(){
   const items=dineItems(), t=calcTotals(items,"Dine-in"), given=cashGiven();
   $("#givenWrap").hidden=dinePay()!=="Cash" || !!addingTo;
   const change = given===null ? "" : given>=t.total
     ? `<div><span>Cash received</span><span>${peso(given)}</span></div><div class="grand"><span>Change</span><span>${peso(given-t.total)}</span></div>`
     : `<div style="color:var(--brand-deep);font-weight:700"><span>Short by</span><span>${peso(t.total-given)}</span></div>`;
+  if(addingTo) return renderChangeCart(items);
   $("#dineCart").innerHTML=items.length
     ? `<ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${esc(it.name)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
        <div class="totals">${addingTo?`<div><span>Already ordered</span><span>${peso(addingTo.total)}</span></div><div><span>Adding</span><span>${peso(t.total)}</span></div><div class="grand"><span>New total</span><span>${peso(addingTo.total+t.total)}</span></div>`
@@ -292,9 +313,10 @@ function closeDine(){ Object.keys(dine).forEach(k=>delete dine[k]); $("#d-table"
 // Switch the panel between a new dine-in order and adding to an existing one
 function setAdding(o){
   addingTo=o;
-  $("#dineTitle").textContent=o?`Add to ${o.code}${o.table?" · "+o.table:""}`:"Dine-in order";
+  $("#dineTitle").textContent=o?`Change ${o.code}${o.table?" · "+o.table:""}`:"Dine-in order";
+  editLines=o?(o.items||[]).map(it=>({...it})):[];
   $("#tableWrap").hidden=$("#dinePayWrap").hidden=!!o;
-  $("#dineSave").textContent=o?"Send added items to kitchen":"Send to kitchen";
+  $("#dineSave").textContent=o?"Save changes":"Send to kitchen";
 }
 function openAddItems(o){
   Object.keys(dine).forEach(k=>delete dine[k]); dineErr(); setAdding(o);
@@ -316,13 +338,19 @@ $("#dineForm").onsubmit=async e=>{
   if(addingTo){
     // Added items are appended as a new round so the kitchen sees what's new
     const o=orders.find(x=>x.id===addingTo.id)||addingTo;
-    if(o.cashGiven!=null || !["preparing","completed"].includes(o.status)) return dineErr("This order is already paid or closed. Start a new dine-in order.");
+    if(isPaid(o) || !["preparing","completed"].includes(o.status)) return dineErr("This order is already paid or closed. Start a new dine-in order.");
+    if((o.items||[]).length!==editLines.length) return dineErr("This order changed on another screen. Close this panel and try again.");
     const round=Math.max(1,...(o.items||[]).map(it=>it.round||1))+1;
-    const all=[...(o.items||[]),...items.map(it=>({...it,round}))], added=calcTotals(items,"Dine-in");
+    const removedNow=[], at=Date.now();
+    editLines.forEach((it,i)=>{ const less=(o.items[i].qty||0)-it.qty; if(less>0) removedNow.push({id:it.id,name:ITEMS[it.id]?.name||it.name,price:it.price,qty:less,...(it.pack?{pack:it.pack}:{}),by:myName,at}); });
+    const more=editLines.some((it,i)=>it.qty>(o.items[i].qty||0));
+    const all=[...editLines.filter(it=>it.qty>0),...items.map(it=>({...it,round}))], t=calcTotals(all,"Dine-in");
+    const upd={items:all,subtotal:t.subtotal,boxFee:t.boxFee,total:t.total};
+    if(items.length||more){ upd.status="preparing"; upd.addedAt=serverTimestamp(); } // something new for the kitchen
+    if(removedNow.length) Object.assign(upd,{removed:[...(o.removed||[]),...removedNow],editedAt:serverTimestamp(),editedBy:me.uid,editedByName:myName});
     $("#dineSave").disabled=true;
     try{
-      const subtotal=o.subtotal+added.subtotal, boxFee=(o.boxFee||0)+added.boxFee;
-      await updateDoc(doc(db,"orders",o.id),{items:all,subtotal,boxFee,total:subtotal+boxFee,status:"preparing",addedAt:serverTimestamp()});
+      await updateDoc(doc(db,"orders",o.id),upd);
       closeDine(); tab="kitchen"; render();
     }catch(x){ dineErr(friendlyError(x)); $("#dineSave").disabled=false; }
     return;
@@ -344,12 +372,16 @@ const unsettled=o=>o.status==="delivered"&&o.settled===false;
 // Orders the store must act on now: pickup orders just placed, and delivery
 // orders a rider has accepted (delivery orders find a rider before the store cooks)
 const needsStore=o=>(o.status==="new"&&o.mode!=="Delivery")||(o.status==="assigned"&&o.mode==="Delivery");
+// A dine-in order is paid once cash received is recorded, or GCash is marked received
+const isPaid=o=>o.cashGiven!=null||o.paid===true;
+const unpaidDine=o=>o.mode==="Dine-in"&&o.status!=="cancelled"&&!isPaid(o);
 const TABS=[
   ["new","New",needsStore],
   ["finding","Finding rider",o=>o.mode==="Delivery"&&o.status==="new"],
   ["kitchen","Kitchen",o=>o.status==="preparing"],
   ["out","Ready & out",o=>["ready","ready_pickup","picked_up"].includes(o.status)],
   ["done","Done today",o=>["delivered","completed"].includes(o.status)&&isToday(o.createdAt)],
+  ["unpaid","Unpaid",unpaidDine],
   ["settle","Settle with riders",unsettled],
   ["cancelled","Cancelled",o=>o.status==="cancelled"&&isToday(o.createdAt)],
 ];
@@ -403,6 +435,7 @@ function render(){
   const done=today.filter(o=>["delivered","completed"].includes(o.status));
   const owed=orders.filter(unsettled);
   $("#sOrders").textContent=today.length;
+  $("#sUnpaid").textContent=peso(orders.filter(unpaidDine).reduce((s,o)=>s+(o.total||0),0));
   $("#sSales").textContent=peso(done.reduce((s,o)=>s+shopAmount(o),0));
   $("#sFees").textContent=peso(done.reduce((s,o)=>s+(o.deliveryFee||0),0));
   // Cash orders: the rider keeps the fee and hands over the food money.
@@ -424,6 +457,11 @@ setInterval(()=>{ if(!$("#dash").hidden) render(); },60000); // keeps "finding a
 $("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]"); if(b){ tab=b.dataset.tab; render(); } });
 
 const waitedMin=o=>{ const d=o.createdAt?.toDate?.(); return d?Math.max(0,Math.floor((Date.now()-d.getTime())/60000)):0; };
+// Items removed from a dine-in order, with who removed them and when
+function removedHTML(o){
+  if(!o.removed?.length) return "";
+  return `<div class="muted" style="font-size:.82rem"><b>Removed:</b> ${o.removed.map(r=>`${esc(r.qty)}× ${esc(r.name)} ${peso(r.price*r.qty)} (by ${esc(r.by)}, ${new Date(r.at).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"})})`).join("; ")}</div>`;
+}
 function orderCard(o){
   const st=STATUS[o.status]||{label:o.status,tone:"off"};
   const del=o.mode==="Delivery", dineIn=o.mode==="Dine-in", c=dineIn?null:contactFor(o.id);
@@ -443,7 +481,7 @@ function orderCard(o){
   if(o.status==="picked_up" && o.hasPin) acts.push(["showpin","Customer can't show the code?","btn ghost small"]);
   if(unsettled(o)) acts.push(["settle", o.payment==="Cash" ? `Got ${peso(shopAmount(o))} from rider` : `Paid rider's ${peso(o.deliveryFee)} fee`, "btn ok"]);
   if(o.payment==="GCash" && !dineIn && !o.paymentConfirmed && o.status!=="cancelled") acts.unshift(["paid","GCash payment received","btn ok"]);
-  if(dineIn && ["preparing","completed"].includes(o.status) && o.cashGiven==null) acts.push(["additems","Add items","btn ghost small"]);
+  if(dineIn && ["preparing","completed"].includes(o.status) && !isPaid(o)) acts.push(["additems","Change order","btn ghost small"]);
   if(ACTIVE.includes(o.status)) acts.push(["cancelled","Cancel","btn ghost small"]);
   const rider=o.riderName?`<b>Rider</b><span>${esc(o.riderName)} · <span class="num">${esc(o.riderPhone)}</span></span>`:
     (del&&["preparing","ready"].includes(o.status)?`<b>Rider</b><span style="color:var(--brand-deep)">No rider yet: finding a new one (${avail.length} available)</span>`
@@ -459,13 +497,13 @@ function orderCard(o){
     ${priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
     ${!dineIn && c && ["new","preparing"].includes(o.status) && phoneConfirmed(c.phone)===false?`<div class="flag">New number. Call ${esc(c.phone)} to check the order is real before cooking.</div>`:""}
     <div class="kv"><b>Time</b><span>${fmtTime(o.createdAt)} · ${esc(o.mode)}</span>
-      ${dineIn?`<b>Table</b><span>${esc(o.table)||"—"}</span>`
+      ${dineIn?`<b>Table/Customer</b><span style="font-size:1.1rem;font-weight:800">${esc(o.table)||"—"}</span>`
         :`<b>Customer</b><span>${c?`${esc(c.name)} · <a class="num" href="${esc(telLink(c.phone))}">${esc(c.phone)}</a><br>${phoneBadge(c.phone)}`:`<span class="muted">Loading…</span>`}</span>`}
       ${del?`<b>Address</b><span>${esc(o.address)} · <a href="${mapsLink(o.address)}" target="_blank" rel="noopener">Map</a></span>`:""}
       <b>Payment</b><span>${o.payment==="GCash"?(dineIn?"GCash":gcashLine(o)):"Cash"}</span>
       ${o.notes?`<b>Notes</b><span>${esc(o.notes)}</span>`:""}${o.sellerName?`<b>Seller</b><span>${esc(o.sellerName)}</span>`:""}${rider}${payAtPickup}${settle}
       ${o.cancelledBy?`<b>Cancelled by</b><span>${esc(o.cancelledBy)}${o.cancelReason?`: ${esc(o.cancelReason)}`:""}</span>`:""}</div>
-    ${itemsHTML(o,true)}
+    ${itemsHTML(o,true)}${removedHTML(o)}
     <div class="totals"><div><span>Subtotal</span><span>${peso(o.subtotal)}</span></div>
       ${del?`<div><span>Delivery (rider)</span><span>${peso(o.deliveryFee)}</span></div>`:""}${boxRow(o)}
       <div class="grand"><span>Total</span><span>${peso(o.total)}</span></div></div>
@@ -484,10 +522,17 @@ const changeText=(o,v)=>{
   return n>=o.total ? `Change: <b>${peso(n-o.total)}</b>` : `<span style="color:var(--brand-deep)">Short by ${peso(o.total-n)}</span>`;
 };
 function cashBlock(o){
-  if(o.mode!=="Dine-in" || o.payment!=="Cash" || o.status==="cancelled") return "";
+  if(o.mode!=="Dine-in" || o.status==="cancelled") return "";
+  const due=isPaid(o)?"":`<div class="flag">Not paid yet · ${peso(o.total)}</div>`;
+  if(o.payment!=="Cash") return o.paid
+    ? `<div><span class="pill done">Paid</span> GCash</div>`
+    : `${due}<div class="btnrow"><button class="btn small ok" data-gcash-paid="${esc(o.id)}">GCash payment received</button></div>`;
+  if(o.cashGiven==null) return due+cashInput(o);
   if(o.cashGiven!=null) return `<div class="totals">
     <div><span>Paid (cash)</span><span>${peso(o.cashGiven)}</span></div>
     <div class="grand"><span>Change</span><span>${peso(o.cashGiven-o.total)}</span></div></div>`;
+}
+function cashInput(o){
   const v=givenDraft[o.id]??"";
   return `<div class="stack" style="display:grid;gap:6px">
     <div class="btnrow"><input type="number" inputmode="numeric" min="0" step="1" data-given-for="${esc(o.id)}" data-focus-key="cash-${esc(o.id)}" value="${esc(v)}"
@@ -569,7 +614,7 @@ function receiptHTML(o){
     const k=ITEMS[it?.id], qty=Number(it?.qty)||0, price=Number(it?.price)||0;
     return row(`${esc(qty)} × ${esc(k?k.name:"Item "+String(it?.id??""))}<br><small>@ ${peso(price)}</small>`, peso(price*qty));
   }).join("");
-  const who=o.mode==="Dine-in" ? (o.table?row("Table",esc(o.table)):"")
+  const who=o.mode==="Dine-in" ? (o.table?row("Table/Customer",esc(o.table)):"")
     : (c?row("Customer",esc(c.name))+row("Mobile",esc(c.phone)):"")+(o.mode==="Delivery"?`<tr><td colspan="2">Deliver to: ${esc(o.address)}</td></tr>`:"");
   const change=o.cashGiven!=null ? row("Cash",peso(o.cashGiven))+row("Change",peso(o.cashGiven-o.total),"big") : "";
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -586,7 +631,7 @@ hr{border:0;border-top:1px dashed #000;margin:6px 0}.big td{font-weight:bold;fon
 <table>${row("Order",esc(o.code))}${row("Date",when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}${row("Type",esc(o.mode))}${who}</table><hr>
 <table>${lines}</table><hr>
 <table>${row("Subtotal",peso(o.subtotal))}${o.deliveryFee?row("Delivery fee",peso(o.deliveryFee)):""}${o.boxFee?row("Take-out boxes",peso(o.boxFee)):""}${row("TOTAL",peso(o.total),"big")}
-${row("Payment",esc(o.payment))}${o.gcashRef?row("GCash Ref",esc(o.gcashRef)):""}${change}</table>
+${row("Payment",esc(o.payment)+(o.mode==="Dine-in"&&o.status!=="cancelled"&&!isPaid(o)?" · NOT PAID":""))}${o.gcashRef?row("GCash Ref",esc(o.gcashRef)):""}${change}</table>
 ${o.notes?`<hr><div>Notes: ${esc(o.notes)}</div>`:""}<hr>
 <div class="c">Salamat po! Come again.<br><small>Order slip only. Not an official receipt.</small></div>
 <div class="noprint"><button onclick="print()">Print</button><button onclick="close()">Close</button></div>
@@ -642,6 +687,13 @@ $("#board").addEventListener("click", async e=>{
     const box=document.createElement("div"); box.style.gridColumn="1/-1";
     box.innerHTML=proofsHTML(await loadProofs(b.dataset.proofs));
     b.closest(".btnrow").after(box); b.remove(); return;
+  }
+  if(b.dataset.gcashPaid){
+    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Found it in GCash? Tap again"; return; }
+    b.disabled=true;
+    try{ await updateDoc(doc(db,"orders",b.dataset.gcashPaid),{paid:true,paidAt:serverTimestamp()}); }
+    catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
+    return;
   }
   if(b.dataset.print){
     const o=orders.find(x=>x.id===b.dataset.print);

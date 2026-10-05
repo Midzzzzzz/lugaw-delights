@@ -345,26 +345,40 @@ service cloud.firestore {
             && !(resource.data.status in ['new', 'assigned'] && request.resource.data.status == 'preparing'
                  && resource.data.payment == 'GCash' && resource.data.mode != 'Dine-in'
                  && !('gcashRef' in resource.data))
-            && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','total','payment','createdAt'])
+            // Payment is recorded once: cash received (covering the total) or GCash marked received
+            && (!changed().hasAny(['cashGiven']) || (!('cashGiven' in resource.data)
+                 && amount(request.resource.data.cashGiven) && request.resource.data.cashGiven >= resource.data.total))
+            && (!changed().hasAny(['paid']) || (request.resource.data.paid == true && resource.data.get('paid', false) != true))
+            // (items, prices, box fees and the removal log only change through the dine-in change rule below)
+            && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','boxFee','total','payment','createdAt',
+                                  'addedAt','removed','editedAt','editedBy','editedByName'])
             && (!changed().hasAny(['cancelReason']) || str(request.resource.data.cancelReason, 150))
             && (!changed().hasAny(['sellerUid','sellerName'])
                 || (request.resource.data.sellerUid == uid() && str(request.resource.data.sellerName, 80)
                     && resource.data.get('sellerUid', null) in [null, uid()])))
 
-        // Dine-in customer orders more: a seller adds items to an unpaid dine-in order.
-        // The total can only go up, and the order goes back to the kitchen.
+        // Dine-in customer changes their order before paying: a seller adds, removes or
+        // changes items. A lower total is only allowed when the removal is logged
+        // (removed list grows, with who and when), so totals can't be quietly cut.
         || (isSeller() && resource.data.mode == 'Dine-in'
             && resource.data.status in ['preparing', 'completed']
-            && !('cashGiven' in resource.data)
-            && changed().hasOnly(['items','subtotal','boxFee','total','status','addedAt'])
-            && boxOk(request.resource.data)
-            && request.resource.data.get('boxFee', 0) >= resource.data.get('boxFee', 0)
+            && !('cashGiven' in resource.data) && resource.data.get('paid', false) != true
+            && changed().hasOnly(['items','subtotal','boxFee','total','status','addedAt','removed','editedAt','editedBy','editedByName'])
             && okItems(request.resource.data.items)
-            && request.resource.data.items.size() > resource.data.items.size()
-            && amount(request.resource.data.subtotal) && request.resource.data.subtotal > resource.data.subtotal
+            && amount(request.resource.data.subtotal) && request.resource.data.subtotal > 0
+            && boxOk(request.resource.data)
             && request.resource.data.total == request.resource.data.subtotal + request.resource.data.get('boxFee', 0)
-            && request.resource.data.status == 'preparing'
-            && request.resource.data.addedAt == request.time)
+            && request.resource.data.status in ['preparing', resource.data.status]
+            && (!changed().hasAny(['addedAt']) || request.resource.data.addedAt == request.time)
+            && (!changed().hasAny(['removed','editedAt','editedBy','editedByName'])
+                || (request.resource.data.removed is list
+                    && request.resource.data.removed.size() > resource.data.get('removed', []).size()
+                    && request.resource.data.removed.size() <= 60
+                    && request.resource.data.editedAt == request.time
+                    && request.resource.data.editedBy == uid()
+                    && str(request.resource.data.editedByName, 80)))
+            && ((request.resource.data.total >= resource.data.total && request.resource.data.get('boxFee', 0) >= resource.data.get('boxFee', 0))
+                || changed().hasAny(['removed'])))
 
         // Customer cancels before the shop accepts the order
         || (signedIn() && resource.data.customerUid == uid() && resource.data.status == 'new'
