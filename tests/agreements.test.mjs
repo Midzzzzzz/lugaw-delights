@@ -15,7 +15,7 @@ await env.withSecurityRulesDisabled(async c => {
   await setDoc(doc(db, "riders/r1"), { name: "Rider One", phone: "09171234567", payMethod: "GCash", payName: "Rider", payNumber: "09171234567", payBank: "", status: "approved", online: true });
   await setDoc(doc(db, "riders/r2"), { name: "Rider Two", phone: "09179999999", payMethod: "GCash", payName: "Rider", payNumber: "09171234567", payBank: "", status: "approved", online: true });
   await setDoc(doc(db, "riders/pend"), { name: "Pending", phone: "09170000000", status: "pending", online: false });
-  await setDoc(doc(db, "orders/o1"), { code: "LD-1", customerUid: "c", mode: "Delivery", status: "ready", riderUid: null, total: 118, createdAt: Timestamp.now() });
+  await setDoc(doc(db, "orders/o1"), { code: "LD-1", customerUid: "c", mode: "Delivery", status: "new", riderUid: null, total: 118, createdAt: Timestamp.now() });
 });
 const text = "RIDER SERVICE AND CASH-HANDLING AGREEMENT\n\n" + "Clause text. ".repeat(60);
 const sig = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";

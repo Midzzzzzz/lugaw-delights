@@ -129,7 +129,7 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { CONTRACT_VERSION, riderContract, agreementHTML } from "./contract.js";
-import { auth, db, isConfigured, SHOP, phoneKey, hasPayout, payoutText, readPayout, peso, esc, STATUS, fmtTime, todayKey, mapsLink, itemsHTML, compressPhoto, PROOF_KINDS, friendlyError, setupNotice, enableSound, chime } from "./common.js";
+import { auth, db, isConfigured, SHOP, phoneKey, hasPayout, payoutText, readPayout, shopAmount, peso, esc, STATUS, statusLabel, fmtTime, todayKey, mapsLink, itemsHTML, compressPhoto, PROOF_KINDS, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 
 const $=s=>document.querySelector(s);
 $("#shopPhone").textContent=SHOP.phone;
@@ -335,11 +335,11 @@ function stopWork(){ workSubs.forEach(f=>f()); workSubs=[]; mineBy={}; }
 setInterval(()=>{ if(workSubs.length && day!==todayKey()) startWork(); }, 60000); // new day: reset today's trips
 function startWork(){
   stopWork(); firstOpenLoad=true; seenOpen=new Set(); day=todayKey();
-  watchMine("assigned", where("status","==","assigned"));
+  watchMine("assigned", where("status","in",["assigned","preparing","ready"]));
   watchMine("picked", where("status","==","picked_up"));
   watchMine("today", where("deliveredDate","==",day));
   watchMine("unsettled", where("settled","==",false));
-  workSubs.push(onSnapshot(query(collection(db,"orders"),where("status","==","ready")), s=>{
+  workSubs.push(onSnapshot(query(collection(db,"orders"),where("mode","==","Delivery"),where("riderUid","==",null),where("status","in",["new","preparing","ready"])), s=>{
     openOrders=s.docs.map(d=>({id:d.id,...d.data()})).filter(o=>!o.riderUid)
       .sort((a,b)=>(a.createdAt?.seconds||0)-(b.createdAt?.seconds||0));
     const fresh=openOrders.some(o=>!seenOpen.has(o.id));
@@ -358,7 +358,7 @@ function loadContact(id){
 }
 
 function card(o, kind){
-  const fee=peso(o.deliveryFee), food=peso(o.subtotal);
+  const fee=peso(o.deliveryFee), food=peso(shopAmount(o)); // food + take-out boxes: what the rider pays the shop
   const cash = o.payment==="Cash"
     ? (o.riderPaid
       ? `<div><span class="pill go">You paid the shop ${food}</span> Collect <span class="collect">${peso(o.total)}</span> cash from the customer. ${food} pays you back and ${fee} is your fee.</div>`
@@ -366,7 +366,9 @@ function card(o, kind){
     : `<div><span class="pill go">Paid by GCash</span> Collect nothing. The shop pays your ${fee} fee.</div>`;
   let actions="";
   if(kind==="open") actions=`<button class="btn big" data-act="accept" data-id="${o.id}">Accept delivery · earn ${peso(o.deliveryFee)}</button>`;
-  if(o.status==="assigned") actions=`<div class="btnrow">${o.payment==="Cash"
+  const kitchen={assigned:"The shop has your order and will start cooking now.",preparing:"The shop is cooking. Head to the shop.",ready:"The food is ready. Pick it up at the shop."}[o.status];
+  if(kitchen && kind==="mine") actions=`<p style="margin:0"><b>${kitchen}</b></p><div class="btnrow">${o.status!=="ready"?""
+       : o.payment==="Cash"
        ? `<span class="muted">At the shop, pay ${food}. The seller confirms your payment, then this order moves to <b>On the way</b>.</span>`
        : `<button class="btn ok" data-act="picked" data-id="${o.id}">Picked up from shop</button>`}
      <button class="btn ghost small" data-act="release" data-id="${o.id}">I can't take this</button></div>`;
@@ -380,7 +382,7 @@ function card(o, kind){
   const contact = kind==="open" ? "" : `<b>Customer</b><span>${c&&c!=="loading"
     ? `${esc(c.name)} · <a class="num" href="tel:${esc(String(c.phone).replace(/[^\d+]/g,""))}">${esc(c.phone)}</a>` : `<span class="muted">Loading…</span>`}</span>`;
   return `<div class="order ${kind==="open"?"alert":""}">
-    <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${STATUS[o.status]?.tone}">${esc(STATUS[o.status]?.label)}</span></div>
+    <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${STATUS[o.status]?.tone}">${esc(statusLabel(o))}</span></div>
     <div class="kv"><b>Pick up</b><span>${esc(SHOP.pickupAddress)}</span>
       <b>Deliver to</b><span>${esc(o.address)} · <a href="${mapsLink(o.address)}" target="_blank" rel="noopener">Map</a></span>
       ${contact}${o.notes?`<b>Notes</b><span>${esc(o.notes)}</span>`:""}<b>Placed</b><span>${fmtTime(o.createdAt)}</span></div>
@@ -388,7 +390,7 @@ function card(o, kind){
 }
 function render(){
   const mine=myOrders();
-  const active=mine.filter(o=>["assigned","picked_up"].includes(o.status));
+  const active=mine.filter(o=>["assigned","preparing","ready","picked_up"].includes(o.status));
   active.forEach(o=>{ loadContact(o.id); loadMyProofs(o.id); });
   const focusKey=document.activeElement?.dataset?.focusKey; // keep the cursor in a PIN box across updates
   $("#mine").innerHTML = active.length ? active.map(o=>card(o,"mine")).join("") : `<p class="empty">No active delivery. Accept one below.</p>`;
@@ -402,7 +404,7 @@ function render(){
   $("#sEarn").textContent=peso(done.reduce((s,o)=>s+(o.deliveryFee||0),0));
   // Cash orders: the rider keeps the fee and hands over the food money.
   // GCash orders: the shop got everything, so it owes the rider the fee.
-  $("#sCash").textContent=peso(unsettled.filter(o=>o.payment==="Cash").reduce((s,o)=>s+(o.subtotal||0),0));
+  $("#sCash").textContent=peso(unsettled.filter(o=>o.payment==="Cash").reduce((s,o)=>s+shopAmount(o),0));
   $("#sOwed").textContent=peso(unsettled.filter(o=>o.payment==="GCash").reduce((s,o)=>s+(o.deliveryFee||0),0));
 }
 // What the rider has typed in each order's delivery-code box
@@ -415,7 +417,7 @@ function loadMyProofs(id){
   ["pickup","delivery"].forEach(k=>getDoc(doc(db,"proofs",`${id}_${k}`)).then(s=>{ if(s.exists()){ myProofs[id][k]=true; render(); } }).catch(()=>{}));
 }
 function photoBox(o){
-  const kinds=o.status==="assigned"?["pickup"]:o.status==="picked_up"?["pickup","delivery"]:[];
+  const kinds=["assigned","preparing","ready"].includes(o.status)?["pickup"]:o.status==="picked_up"?["pickup","delivery"]:[];
   if(!kinds.length) return "";
   return `<div class="btnrow" style="gap:10px">${kinds.map(k=>{
     const key=`${o.id}_${k}`;
@@ -463,8 +465,9 @@ $("#riderView").addEventListener("click", async e=>{
     if(act==="accept"){
       await runTransaction(db, async tx=>{
         const s=await tx.get(ref);
-        if(!s.exists()||s.data().status!=="ready"||s.data().riderUid) throw {message:"Another rider already took this order."};
-        tx.update(ref,{status:"assigned",riderUid:me.uid,riderName:rider.name,riderPhone:rider.phone,assignedAt:serverTimestamp()});
+        const d=s.exists()?s.data():null;
+        if(!d||d.riderUid||!["new","preparing","ready"].includes(d.status)) throw {message:"Another rider already took this order."};
+        tx.update(ref,{status:d.status==="new"?"assigned":d.status,riderUid:me.uid,riderName:rider.name,riderPhone:rider.phone,assignedAt:serverTimestamp()});
       });
     }
     if(act==="picked") await updateDoc(ref,{status:"picked_up",pickedUpAt:serverTimestamp()});
@@ -479,7 +482,10 @@ $("#riderView").addEventListener("click", async e=>{
         ? (o?.hasPin ? "That code doesn't match. Check it with the customer and try again, or call the shop." : "The shop's system refused this. Please call the shop.")
         : friendlyError(x)); }
     }
-    if(act==="release") await updateDoc(ref,{status:"ready",riderUid:null,riderName:null,riderPhone:null,assignedAt:null});
+    if(act==="release"){
+      const o=myOrders().find(x=>x.id===id);
+      await updateDoc(ref,{status:o?.status==="assigned"?"new":o?.status,riderUid:null,riderName:null,riderPhone:null,assignedAt:null});
+    }
   }catch(x){ fail(x.code?friendlyError(x):x.message); }
 });
 </script>

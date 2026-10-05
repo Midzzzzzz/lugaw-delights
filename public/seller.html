@@ -69,18 +69,25 @@
       </div>
     </div>
     <div class="card" id="dinePanel" hidden style="margin-top:12px">
-      <h2 style="color:var(--brand);margin-bottom:6px">Dine-in order</h2>
+      <h2 style="color:var(--brand);margin-bottom:6px" id="dineTitle">Dine-in order</h2>
       <div class="dine-grid">
         <div id="dineMenu"></div>
         <form class="stack" id="dineForm" novalidate>
-          <label class="f" for="d-table">Table or name (optional)<input id="d-table" maxlength="30" placeholder="Table 3 or Juan"></label>
-          <div class="group"><span>Payment</span>
+          <label class="f" for="d-table" id="tableWrap">Table or name (optional)<input id="d-table" maxlength="30" placeholder="Table 3 or Juan"></label>
+          <div class="group" id="dinePayWrap"><span>Payment</span>
             <div class="seg">
               <input type="radio" name="dpay" id="d-cash" value="Cash" checked><label for="d-cash">Cash</label>
               <input type="radio" name="dpay" id="d-gc" value="GCash"><label for="d-gc">GCash</label>
             </div>
           </div>
           <label class="f" for="d-given" id="givenWrap">Cash received (optional)<input id="d-given" type="number" inputmode="numeric" min="0" step="1" placeholder="e.g. 500"></label>
+          <div class="group"><span>Take-out?</span>
+            <div class="seg" style="grid-template-columns:repeat(3,1fr)">
+              <input type="radio" name="dpack" id="d-pack-no" value="" checked><label for="d-pack-no">No, eating here</label>
+              <input type="radio" name="dpack" id="d-pack-box" value="box"><label for="d-pack-box" id="d-pack-box-label">Box</label>
+              <input type="radio" name="dpack" id="d-pack-plastic" value="plastic"><label for="d-pack-plastic">Plastic (free)</label>
+            </div>
+          </div>
           <label class="f" for="d-notes">Notes (optional)<input id="d-notes" maxlength="300" placeholder="Extra spicy, no spring onion"></label>
           <div id="dineCart"></div>
           <p class="err" id="d-err" hidden></p>
@@ -91,7 +98,7 @@
     </div>
     <div class="stats">
       <div class="stat"><b id="sOrders">0</b><span>Orders today</span></div>
-      <div class="stat"><b id="sSales">₱0</b><span>Food sales today</span></div>
+      <div class="stat"><b id="sSales">₱0</b><span>Sales today</span></div>
       <div class="stat"><b id="sFees">₱0</b><span>Rider fees today</span></div>
       <div class="stat"><b id="sCash">₱0</b><span>Cash riders still owe</span></div>
       <div class="stat"><b id="sOwed">₱0</b><span>Fees you owe riders</span></div>
@@ -104,7 +111,7 @@
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { auth, db, isConfigured, SHOP, MENU, ITEMS, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
+import { auth, db, isConfigured, SHOP, MENU, ITEMS, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 
 const $=s=>document.querySelector(s);
 let subs=[], lists={}, orders=[], riders=[], contacts={}, asked=new Set(), tab="new", known=null;
@@ -221,7 +228,7 @@ function merge(){
   const t=o=>o.createdAt?.toMillis?.()??Infinity; // just-placed orders have no server time yet
   orders=[...m.values()].sort((a,b)=>t(b)-t(a));
   if(lists.active){
-    const ids=new Set(orders.filter(o=>o.status==="new").map(o=>o.id));
+    const ids=new Set(orders.filter(needsStore).map(o=>o.id));
     if(known && [...ids].some(id=>!known.has(id))) chime();
     known=ids;
   }
@@ -244,7 +251,11 @@ $("#storeOpen").onchange=e=>{
 
 // ---------- Dine-in orders (recorded at the counter) ----------
 const dine={};
-const dineItems=()=>Object.entries(dine).map(([id,qty])=>({id,name:ITEMS[id].name,price:ITEMS[id].price,qty}));
+// Items in the dine-in panel; take-out items carry how they're packed (box or plastic)
+const dinePack=()=>document.querySelector('input[name="dpack"]:checked')?.value||"";
+const dineItems=()=>Object.entries(dine).map(([id,qty])=>({id,name:ITEMS[id].name,price:ITEMS[id].price,qty,...(dinePack()?{pack:dinePack()}:{})}));
+// When adding to an existing dine-in order: that order (otherwise null)
+let addingTo=null;
 const dineErr=m=>{ $("#d-err").textContent=m||""; $("#d-err").hidden=!m; };
 function renderDine(){
   $("#dineMenu").innerHTML=MENU.map(c=>`<h3>${esc(c.name)}</h3>`+c.items.map(([id])=>{
@@ -262,37 +273,66 @@ function cashGiven(){
 const dinePay=()=>document.querySelector('input[name="dpay"]:checked').value;
 function renderDineTotals(){
   const items=dineItems(), t=calcTotals(items,"Dine-in"), given=cashGiven();
-  $("#givenWrap").hidden=dinePay()!=="Cash";
+  $("#givenWrap").hidden=dinePay()!=="Cash" || !!addingTo;
   const change = given===null ? "" : given>=t.total
     ? `<div><span>Cash received</span><span>${peso(given)}</span></div><div class="grand"><span>Change</span><span>${peso(given-t.total)}</span></div>`
     : `<div style="color:var(--brand-deep);font-weight:700"><span>Short by</span><span>${peso(t.total-given)}</span></div>`;
   $("#dineCart").innerHTML=items.length
     ? `<ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${esc(it.name)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
-       <div class="totals"><div class="grand"><span>Total</span><span>${peso(t.total)}</span></div>${change}</div>`
+       <div class="totals">${addingTo?`<div><span>Already ordered</span><span>${peso(addingTo.total)}</span></div><div><span>Adding</span><span>${peso(t.total)}</span></div><div class="grand"><span>New total</span><span>${peso(addingTo.total+t.total)}</span></div>`
+         :`${boxRow(t)}<div class="grand"><span>Total</span><span>${peso(t.total)}</span></div>${change}`}</div>`
     : `<p class="empty" style="margin:0">Tap + on the menu to add items.</p>`;
   $("#dineSave").disabled=!items.length;
 }
 $("#d-given").addEventListener("input",renderDineTotals);
+document.querySelectorAll('input[name="dpack"]').forEach(r=>r.addEventListener("change",renderDineTotals));
+$("#d-pack-box-label").textContent=`Box (+${peso(SHOP.boxFee)} each)`;
 document.querySelectorAll('input[name="dpay"]').forEach(r=>r.addEventListener("change",renderDineTotals));
-function closeDine(){ Object.keys(dine).forEach(k=>delete dine[k]); $("#d-table").value=""; $("#d-notes").value=""; $("#d-given").value=""; $("#d-cash").checked=true; dineErr(); $("#dinePanel").hidden=true; }
-$("#dineBtn").onclick=()=>{ $("#dinePanel").hidden=false; renderDine(); $("#dinePanel").scrollIntoView({behavior:"smooth",block:"start"}); };
+function closeDine(){ Object.keys(dine).forEach(k=>delete dine[k]); $("#d-table").value=""; $("#d-notes").value=""; $("#d-given").value=""; $("#d-cash").checked=true; $("#d-pack-no").checked=true; dineErr(); $("#dinePanel").hidden=true; setAdding(null); }
+// Switch the panel between a new dine-in order and adding to an existing one
+function setAdding(o){
+  addingTo=o;
+  $("#dineTitle").textContent=o?`Add to ${o.code}${o.table?" · "+o.table:""}`:"Dine-in order";
+  $("#tableWrap").hidden=$("#dinePayWrap").hidden=!!o;
+  $("#dineSave").textContent=o?"Send added items to kitchen":"Send to kitchen";
+}
+function openAddItems(o){
+  Object.keys(dine).forEach(k=>delete dine[k]); dineErr(); setAdding(o);
+  $("#dinePanel").hidden=false; renderDine(); $("#dinePanel").scrollIntoView({behavior:"smooth",block:"start"});
+}
+$("#dineBtn").onclick=()=>{ if(addingTo) closeDine(); $("#dinePanel").hidden=false; renderDine(); $("#dinePanel").scrollIntoView({behavior:"smooth",block:"start"}); };
 $("#dineClose").onclick=closeDine;
 $("#dineMenu").addEventListener("click",e=>{
   const b=e.target.closest("[data-dd]"); if(!b) return;
   const id=b.dataset.item, q=(dine[id]||0)+ +b.dataset.dd;
-  if(!dine[id] && Object.keys(dine).length>=MAX_LINES) return dineErr(`Up to ${MAX_LINES} different items per order.`);
+  const used=(addingTo?.items?.length||0)+Object.keys(dine).length;
+  if(!dine[id] && used>=MAX_LINES) return dineErr(`Up to ${MAX_LINES} lines per order. Start a new dine-in order for more.`);
   dineErr(); if(q>0) dine[id]=Math.min(q,MAX_QTY); else delete dine[id];
   renderDine();
 });
 $("#dineForm").onsubmit=async e=>{
   e.preventDefault(); dineErr();
   const items=dineItems(); if(!items.length) return;
+  if(addingTo){
+    // Added items are appended as a new round so the kitchen sees what's new
+    const o=orders.find(x=>x.id===addingTo.id)||addingTo;
+    if(o.cashGiven!=null || !["preparing","completed"].includes(o.status)) return dineErr("This order is already paid or closed. Start a new dine-in order.");
+    const round=Math.max(1,...(o.items||[]).map(it=>it.round||1))+1;
+    const all=[...(o.items||[]),...items.map(it=>({...it,round}))], added=calcTotals(items,"Dine-in");
+    $("#dineSave").disabled=true;
+    try{
+      const subtotal=o.subtotal+added.subtotal, boxFee=(o.boxFee||0)+added.boxFee;
+      await updateDoc(doc(db,"orders",o.id),{items:all,subtotal,boxFee,total:subtotal+boxFee,status:"preparing",addedAt:serverTimestamp()});
+      closeDine(); tab="kitchen"; render();
+    }catch(x){ dineErr(friendlyError(x)); $("#dineSave").disabled=false; }
+    return;
+  }
   const t=calcTotals(items,"Dine-in"), ref=doc(collection(db,"orders")), given=cashGiven();
   if(given!==null && !(given>=t.total)) return dineErr(`Cash received is less than the ${peso(t.total)} total.`);
   $("#dineSave").disabled=true;
   const order={ code:orderCode(ref.id), customerUid:me.uid, sellerUid:me.uid, sellerName:myName, mode:"Dine-in",
     table:$("#d-table").value.trim(), notes:$("#d-notes").value.trim(), payment:dinePay(), items,
-    subtotal:t.subtotal, deliveryFee:0, total:t.total, status:"preparing", riderUid:null, createdAt:serverTimestamp() };
+    subtotal:t.subtotal, deliveryFee:0, boxFee:t.boxFee, total:t.total, status:"preparing", riderUid:null, createdAt:serverTimestamp() };
   if(given!==null) order.cashGiven=given;
   try{
     await setDoc(ref,order);
@@ -301,10 +341,14 @@ $("#dineForm").onsubmit=async e=>{
 };
 
 const unsettled=o=>o.status==="delivered"&&o.settled===false;
+// Orders the store must act on now: pickup orders just placed, and delivery
+// orders a rider has accepted (delivery orders find a rider before the store cooks)
+const needsStore=o=>(o.status==="new"&&o.mode!=="Delivery")||(o.status==="assigned"&&o.mode==="Delivery");
 const TABS=[
-  ["new","New",o=>o.status==="new"],
+  ["new","New",needsStore],
+  ["finding","Finding rider",o=>o.mode==="Delivery"&&o.status==="new"],
   ["kitchen","Kitchen",o=>o.status==="preparing"],
-  ["out","Ready & out",o=>["ready","ready_pickup","assigned","picked_up"].includes(o.status)],
+  ["out","Ready & out",o=>["ready","ready_pickup","picked_up"].includes(o.status)],
   ["done","Done today",o=>["delivered","completed"].includes(o.status)&&isToday(o.createdAt)],
   ["settle","Settle with riders",unsettled],
   ["cancelled","Cancelled",o=>o.status==="cancelled"&&isToday(o.createdAt)],
@@ -316,7 +360,7 @@ function renderProfile(){
   if(!myProfile || !me) return;
   const p=myProfile, initials=String(p.name||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
   const mine=orders.filter(o=>o.sellerUid===me.uid && isToday(o.createdAt) && o.status!=="cancelled");
-  const sales=mine.filter(o=>["delivered","completed"].includes(o.status)).reduce((s,o)=>s+(o.subtotal||0),0);
+  const sales=mine.filter(o=>["delivered","completed"].includes(o.status)).reduce((s,o)=>s+shopAmount(o),0);
   $("#profile").innerHTML=`<div class="avatar" aria-hidden="true">${esc(initials)}</div>
     <div class="pinfo"><div class="pname">${esc(p.name)} <span class="pill go">Seller</span></div>
       <div class="muted" style="font-size:.88rem">${esc(p.phone)} · ${esc(p.email||me.email||"")}${p.createdAt?.toDate?` · seller since ${p.createdAt.toDate().toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
@@ -337,7 +381,7 @@ function settleSummary(list){
   const by=new Map();
   list.forEach(o=>{
     const k=o.riderUid||"_"; const t=by.get(k)||{uid:o.riderUid,name:o.riderName||"Unknown rider",cash:0,fees:0,count:0};
-    if(o.payment==="Cash") t.cash+=o.subtotal||0; else t.fees+=o.deliveryFee||0;
+    if(o.payment==="Cash") t.cash+=shopAmount(o); else t.fees+=o.deliveryFee||0;
     t.count++; by.set(k,t);
   });
   if(!by.size) return "";
@@ -359,11 +403,11 @@ function render(){
   const done=today.filter(o=>["delivered","completed"].includes(o.status));
   const owed=orders.filter(unsettled);
   $("#sOrders").textContent=today.length;
-  $("#sSales").textContent=peso(done.reduce((s,o)=>s+(o.subtotal||0),0));
+  $("#sSales").textContent=peso(done.reduce((s,o)=>s+shopAmount(o),0));
   $("#sFees").textContent=peso(done.reduce((s,o)=>s+(o.deliveryFee||0),0));
   // Cash orders: the rider keeps the fee and hands over the food money.
   // GCash orders: the shop got everything, so it owes the rider the fee.
-  $("#sCash").textContent=peso(owed.filter(o=>o.payment==="Cash").reduce((s,o)=>s+(o.subtotal||0),0));
+  $("#sCash").textContent=peso(owed.filter(o=>o.payment==="Cash").reduce((s,o)=>s+shopAmount(o),0));
   $("#sOwed").textContent=peso(owed.filter(o=>o.payment==="GCash").reduce((s,o)=>s+(o.deliveryFee||0),0));
   $("#tabs").innerHTML=TABS.map(([id,label,f])=>{
     const n=orders.filter(f).length;
@@ -376,32 +420,39 @@ function render(){
   $("#board").innerHTML=(tab==="settle"?settleSummary(list):"")+(list.length?list.map(orderCard).join(""):`<p class="empty">Nothing here right now.</p>`);
   if(focusKey){ const el=document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); if(el){ el.focus(); if(el.setSelectionRange&&el.type==="text") el.setSelectionRange(el.value.length,el.value.length); } }
 }
+setInterval(()=>{ if(!$("#dash").hidden) render(); },60000); // keeps "finding a rider for N min" current
 $("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]"); if(b){ tab=b.dataset.tab; render(); } });
 
+const waitedMin=o=>{ const d=o.createdAt?.toDate?.(); return d?Math.max(0,Math.floor((Date.now()-d.getTime())/60000)):0; };
 function orderCard(o){
   const st=STATUS[o.status]||{label:o.status,tone:"off"};
   const del=o.mode==="Delivery", dineIn=o.mode==="Dine-in", c=dineIn?null:contactFor(o.id);
   let acts=[];
   const avail=riders.filter(r=>r.status==="approved"&&r.online);
-  if(o.status==="new") acts.push(["preparing", del&&!avail.length?"No rider available: accept anyway":"Accept & start cooking", "btn"]);
+  const unpaidGcash=o.payment==="GCash" && !dineIn && !o.gcashRef; // can't be accepted until the customer pays
+  // Pickup orders are cooked right away; delivery orders once a rider has accepted
+  if(o.status==="new" && !del) acts.push(unpaidGcash ? ["waitpay","Waiting for GCash payment","btn"] : ["preparing","Accept & start cooking","btn"]);
+  if(o.status==="assigned" && del) acts.push(unpaidGcash ? ["waitpay","Waiting for GCash payment","btn"] : ["preparing","Rider found: start cooking","btn"]);
   if(o.status==="preparing") acts.push(dineIn ? ["completed","Served","btn ok"]
-    : [del?"ready":"ready_pickup", del?"Food ready: call a rider":"Ready for pickup","btn ok"]);
+    : [del?"ready":"ready_pickup", del?"Food ready":"Ready for pickup","btn ok"]);
   if(o.status==="ready_pickup") acts.push(["completed","Customer picked up","btn ok"]);
-  if(o.status==="assigned" && o.payment==="Cash") acts.unshift(["riderpaid",`Rider paid ${peso(o.subtotal)} · hand over food`,"btn ok"]);
-  if(o.status==="assigned") acts.push(["reassign","Send back to riders","btn ghost small"]);
+  if(o.status==="ready" && del && o.riderUid && o.payment==="Cash") acts.unshift(["riderpaid",`Rider paid ${peso(shopAmount(o))} · hand over food`,"btn ok"]);
+  if(del && o.riderUid && ["assigned","preparing","ready"].includes(o.status)) acts.push(["reassign","Send back to riders","btn ghost small"]);
   // Only the rider marks a delivery delivered. If the customer can't show their code, the
   // seller calls the customer first, then reads the code to the rider.
   if(o.status==="picked_up" && o.hasPin) acts.push(["showpin","Customer can't show the code?","btn ghost small"]);
-  if(unsettled(o)) acts.push(["settle", o.payment==="Cash" ? `Got ${peso(o.subtotal)} from rider` : `Paid rider's ${peso(o.deliveryFee)} fee`, "btn ok"]);
+  if(unsettled(o)) acts.push(["settle", o.payment==="Cash" ? `Got ${peso(shopAmount(o))} from rider` : `Paid rider's ${peso(o.deliveryFee)} fee`, "btn ok"]);
   if(o.payment==="GCash" && !dineIn && !o.paymentConfirmed && o.status!=="cancelled") acts.unshift(["paid","GCash payment received","btn ok"]);
+  if(dineIn && ["preparing","completed"].includes(o.status) && o.cashGiven==null) acts.push(["additems","Add items","btn ghost small"]);
   if(ACTIVE.includes(o.status)) acts.push(["cancelled","Cancel","btn ghost small"]);
   const rider=o.riderName?`<b>Rider</b><span>${esc(o.riderName)} · <span class="num">${esc(o.riderPhone)}</span></span>`:
-    (o.status==="ready"?`<b>Rider</b><span class="muted">Waiting for a rider to accept (${avail.length} available)</span>`
+    (del&&["preparing","ready"].includes(o.status)?`<b>Rider</b><span style="color:var(--brand-deep)">No rider yet: finding a new one (${avail.length} available)</span>`
     : o.status==="new"&&del?`<b>Riders</b><span>${avail.length?`<span class="pill go">${avail.length} available now</span> ${avail.map(r=>esc(r.name)).join(", ")}`
-      :`<b style="color:var(--brand-deep)">No rider is available right now.</b> The customer may wait a long time. Call a rider first, or call the customer to offer pickup.`}</span>`:"");
-  const payAtPickup=o.status==="assigned"&&o.payment==="Cash"?`<b>Pickup</b><span>Hand over the food only after the rider pays you <b>${peso(o.subtotal)}</b>. The rider then collects ${peso(o.total)} from the customer and keeps the ${peso(o.deliveryFee)} fee.</span>`:"";
+      :`<b style="color:var(--brand-deep)">No rider is available right now.</b> Call a rider, or call the customer to offer pickup.`}
+      <br><span class="muted">Finding a rider for ${waitedMin(o)} min. The order comes to the kitchen once a rider accepts.</span></span>`:"");
+  const payAtPickup=o.status==="ready"&&del&&o.riderUid&&o.payment==="Cash"?`<b>Pickup</b><span>Hand over the food only after the rider pays you <b>${peso(shopAmount(o))}</b>. The rider then collects ${peso(o.total)} from the customer and keeps the ${peso(o.deliveryFee)} fee.</span>`:"";
   const settle=unsettled(o)?`<b>Settle</b><span>${o.payment==="Cash"
-    ? `Older cash order: the rider collected ${peso(o.total)} cash, keeps the ${peso(o.deliveryFee)} fee and owes you ${peso(o.subtotal)}.`
+    ? `Older cash order: the rider collected ${peso(o.total)} cash, keeps the ${peso(o.deliveryFee)} fee and owes you ${peso(shopAmount(o))}.`
     : `Paid by GCash. You owe the rider the ${peso(o.deliveryFee)} fee.${payTo(o.riderUid)}`}</span>`:"";
   return `<div class="order ${o.status==="new"?"alert":""}">
     <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${esc(st.tone)}">${esc(statusLabel(o))}</span></div>
@@ -416,10 +467,10 @@ function orderCard(o){
       ${o.cancelledBy?`<b>Cancelled by</b><span>${esc(o.cancelledBy)}${o.cancelReason?`: ${esc(o.cancelReason)}`:""}</span>`:""}</div>
     ${itemsHTML(o,true)}
     <div class="totals"><div><span>Subtotal</span><span>${peso(o.subtotal)}</span></div>
-      ${del?`<div><span>Delivery (rider)</span><span>${peso(o.deliveryFee)}</span></div>`:""}
+      ${del?`<div><span>Delivery (rider)</span><span>${peso(o.deliveryFee)}</span></div>`:""}${boxRow(o)}
       <div class="grand"><span>Total</span><span>${peso(o.total)}</span></div></div>
     ${cashBlock(o)}
-    ${cancelling[o.id]?cancelBox(o):`<div class="btnrow">${acts.map(([s,l,c])=>`<button class="${c}" data-set="${s}" data-id="${esc(o.id)}">${l}</button>`).join("")}
+    ${cancelling[o.id]?cancelBox(o):`<div class="btnrow">${acts.map(([s,l,c])=>`<button class="${c}" data-set="${s}" data-id="${esc(o.id)}"${s==="waitpay"?" disabled":""}>${l}</button>`).join("")}
       <button class="btn ghost small" data-print="${esc(o.id)}">Print receipt</button>${del&&["assigned","picked_up","delivered"].includes(o.status)?`<button class="btn ghost small" data-proofs="${esc(o.id)}">Rider photos</button>`:""}</div>`}
   </div>`;
 }
@@ -534,7 +585,7 @@ hr{border:0;border-top:1px dashed #000;margin:6px 0}.big td{font-weight:bold;fon
 <div class="c"><h1>${esc(SHOP.name)}</h1><div>${esc(SHOP.pickupAddress)}</div><div>${esc(SHOP.phone)}</div></div><hr>
 <table>${row("Order",esc(o.code))}${row("Date",when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}${row("Type",esc(o.mode))}${who}</table><hr>
 <table>${lines}</table><hr>
-<table>${row("Subtotal",peso(o.subtotal))}${o.deliveryFee?row("Delivery fee",peso(o.deliveryFee)):""}${row("TOTAL",peso(o.total),"big")}
+<table>${row("Subtotal",peso(o.subtotal))}${o.deliveryFee?row("Delivery fee",peso(o.deliveryFee)):""}${o.boxFee?row("Take-out boxes",peso(o.boxFee)):""}${row("TOTAL",peso(o.total),"big")}
 ${row("Payment",esc(o.payment))}${o.gcashRef?row("GCash Ref",esc(o.gcashRef)):""}${change}</table>
 ${o.notes?`<hr><div>Notes: ${esc(o.notes)}</div>`:""}<hr>
 <div class="c">Salamat po! Come again.<br><small>Order slip only. Not an official receipt.</small></div>
@@ -598,6 +649,7 @@ $("#board").addEventListener("click", async e=>{
     return;
   }
   const noRider=b.dataset.set==="preparing" && b.textContent.startsWith("No rider");
+  if(b.dataset.set==="additems"){ const o=orders.find(x=>x.id===b.dataset.id); if(o) openAddItems(o); return; }
   if(b.dataset.set==="showpin" && b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Called the customer and they have the food? Tap again"; return; }
   if((CONFIRM.has(b.dataset.set)||b.dataset.set==="riderpaid"||noRider) && b.dataset.sure!=="1"){
     b.dataset.sure="1"; b.textContent="Tap again to confirm"; return; }
@@ -609,7 +661,10 @@ $("#board").addEventListener("click", async e=>{
       const o=orders.find(x=>x.id===b.dataset.id);
       await updateDoc(ref,{...(o?.payment==="Cash"?{cashReceived:true}:{feePaid:true}),settled:true,settledAt:now});
     }
-    else if(set==="reassign") await updateDoc(ref,{status:"ready",riderUid:null,riderName:null,riderPhone:null,assignedAt:null});
+    else if(set==="reassign"){
+      const o=orders.find(x=>x.id===b.dataset.id);
+      await updateDoc(ref,{status:o?.status==="assigned"?"new":o?.status,riderUid:null,riderName:null,riderPhone:null,assignedAt:null});
+    }
     else if(set==="riderpaid") await updateDoc(ref,{status:"picked_up",pickedUpAt:now,riderPaid:true,riderPaidAt:now,cashReceived:true});
     else if(set==="showpin"){
       const p=await getDoc(doc(db,"pins",b.dataset.id));

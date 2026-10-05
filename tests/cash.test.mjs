@@ -26,19 +26,16 @@ function place(payment, qty) {
   b.set(doc(db, "pins", id), { pin: "1234", customerUid: uid });
   return b.commit();
 }
-console.log("Default limit (500, no settings saved)");
-await t("cash order of 418 allowed", () => assertSucceeds(place("Cash", 2)));
-await t("cash order of 607 refused", () => assertFails(place("Cash", 3)));
-await t("GCash order of 607 allowed", () => assertSucceeds(place("GCash", 3)));
-console.log("Owner settings");
-await t("seller can't change the limit", () => assertFails(setDoc(doc(as("s1"), "settings/store"), { cashMax: 0 }, { merge: true })));
-await t("seller opens and closes the store", () => assertSucceeds(setDoc(doc(as("s1"), "settings/store"), { open: true }, { merge: true })));
-await t("seller still can't change the limit once the doc exists", () => assertFails(setDoc(doc(as("s1"), "settings/store"), { cashMax: 99999 }, { merge: true })));
-await t("owner can't set a negative limit", () => assertFails(setDoc(doc(as("owner"), "settings/store"), { cashMax: -1 }, { merge: true })));
-await t("owner sets limit to 1000", () => assertSucceeds(setDoc(doc(as("owner"), "settings/store"), { cashMax: 1000 }, { merge: true })));
-await t("cash order of 607 now allowed", () => assertSucceeds(place("Cash", 3)));
-await t("cash order of 1174 refused", () => assertFails(place("Cash", 6)));
-await t("owner turns the limit off (0)", () => assertSucceeds(setDoc(doc(as("owner"), "settings/store"), { cashMax: 0 }, { merge: true })));
-await t("cash order of 1174 now allowed", () => assertSucceeds(place("Cash", 6)));
-console.log(`\n${pass} passed, ${fail} failed`);
+// Online orders (delivery and pickup) are cash only, with no amount limit.
+console.log("Cash-only online orders");
+await t("small cash order allowed", () => assertSucceeds(place("Cash", 1)));
+await t("big cash order allowed (no cash limit)", () => assertSucceeds(place("Cash", 10)));
+await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), "settings/store"), { open: true, cashMax: 300 }));
+await t("an old cash limit setting no longer blocks orders", () => assertSucceeds(place("Cash", 5)));
+await t("online GCash order refused", () => assertFails(place("GCash", 1)));
+await t("unknown payment method refused", () => assertFails(place("Card", 1)));
+await t("seller still opens and closes the store", () => assertSucceeds(setDoc(doc(as("s1"), "settings/store"), { open: true }, { merge: true })));
+await t("seller can't change other shop settings", () => assertFails(setDoc(doc(as("s1"), "settings/store"), { cashMax: 0 }, { merge: true })));
+console.log(`
+${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);

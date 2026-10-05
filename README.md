@@ -8,20 +8,19 @@ A real-time web app for a 24-hour lugaw restaurant in Los Baños, Laguna. Custom
 
 | Page | User | What it does |
 |---|---|---|
-| `index.html` | Customer | Menu, delivery or pickup ordering, cash or GCash, live order tracking, delivery code, problem reports |
-| `seller.html` | Seller | New orders with sound alerts, kitchen flow, dine-in point of sale with change calculation, receipts, GCash payment matching, rider settlement |
+| `index.html` | Customer | Menu, delivery or pickup ordering (cash on delivery or pickup), live order tracking, delivery code, problem reports |
+| `seller.html` | Seller | New orders with sound alerts, kitchen flow, dine-in point of sale with change calculation, receipts, rider settlement |
 | `rider.html` | Rider | Registration, digital rider agreement, available/offline switch, accept deliveries, proof photos, complete delivery with the customer's code |
-| `owner.html` | Owner | Sales by date range, seller leaderboard, rider earnings, best-selling items, order search, approving sellers and riders, customer reports, delivery fees and cash limits |
+| `owner.html` | Owner | Sales by date range, seller leaderboard, rider earnings, best-selling items, order search, approving sellers and riders, customer reports, delivery fees |
 
 ## Features
 
 - **Live updates:** order status changes appear instantly on every screen.
 - **Delivery zones:** delivery only to barangays in Los Baños and Bay, each with its own fee, enforced by the database.
-- **GCash payment matching:** customers enter their GCash reference number; sellers confirm it, and reused reference numbers are flagged.
 - **Delivery code (PIN):** only the assigned rider can complete a delivery, and only with the customer's 4-digit code.
 - **Proof photos:** the rider photographs the food at pickup and at the door. Photos are time-stamped by the server and can't be changed.
 - **Rider agreement:** signed in the app with a finger signature before a rider can take orders, and printable for notarization.
-- **Fraud protection:** one order a minute per customer, GCash required above a cash limit, riders pay for the food at pickup on cash orders, phone-number confirmation, and warnings when a rider's payout account changes.
+- **Fraud protection:** one order a minute per customer, riders pay for the food at pickup on cash orders, phone-number confirmation, and warnings when a rider's payout account changes.
 - **Separate logins:** owner, seller and rider accounts each see only what they need.
 - **Dine-in point of sale:** table numbers, cash received and change, and receipts for 58 mm and 80 mm printers.
 
@@ -61,7 +60,7 @@ npm install
 npm test
 ```
 
-All 225 tests in 12 files should pass.
+All tests should pass.
 
 ## Setup
 

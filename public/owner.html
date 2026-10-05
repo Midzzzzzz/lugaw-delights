@@ -62,7 +62,7 @@ table.orders td.n,table.orders th.n{text-align:right;font-variant-numeric:tabula
   <div id="dash" hidden>
     <div class="card toolbar" id="ranges"></div>
     <div class="stats">
-      <div class="stat"><b id="sSales">₱0</b><span>Food sales</span></div>
+      <div class="stat"><b id="sSales">₱0</b><span>Sales</span></div>
       <div class="stat"><b id="sOrders">0</b><span>Completed orders</span></div>
       <div class="stat"><b id="sAvg">₱0</b><span>Average order</span></div>
       <div class="stat"><b id="sFees">₱0</b><span>Rider fees</span></div>
@@ -78,7 +78,7 @@ table.orders td.n,table.orders th.n{text-align:right;font-variant-numeric:tabula
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
-import { auth, db, isConfigured, ITEMS, ACTIVE, peso, esc, STATUS, statusLabel, itemsHTML, mapsLink, cashLimitOf, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
+import { auth, db, isConfigured, ITEMS, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
 const $=s=>document.querySelector(s);
 let agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], riders=[], contacts={}, open=null, teamErr="";
@@ -200,7 +200,7 @@ function rank(rows,{main,sub,numbered=true,empty}){
 const plural=(n,w)=>`${n} ${w}${n===1?"":"s"}`;
 
 function render(){
-  const done=orders.filter(isDone), sales=done.reduce((s,o)=>s+(o.subtotal||0),0);
+  const done=orders.filter(isDone), sales=done.reduce((s,o)=>s+shopAmount(o),0);
   $("#sSales").textContent=peso(sales);
   $("#sOrders").textContent=done.length;
   $("#sAvg").textContent=peso(done.length?Math.round(sales/done.length):0);
@@ -219,7 +219,7 @@ function render(){
 $("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]"); if(b){ tab=b.dataset.tab; render(); } });
 
 function renderSales(done){
-  const food=o=>o.subtotal||0;
+  const food=o=>shopAmount(o); // food and take-out boxes
   const bySeller=group(done,o=>o.sellerUid||"_none",sellerName,food);
   const byRider=group(done.filter(o=>o.mode==="Delivery"&&o.riderUid),o=>o.riderUid,riderName,o=>o.deliveryFee||0);
   const byMode=group(done,o=>o.mode,o=>o.mode,food);
@@ -301,7 +301,7 @@ function detail(o){
     ${o.cancelledBy?`<b>Cancelled by</b><span>${esc(o.cancelledBy)}${o.cancelReason?`: ${esc(o.cancelReason)}`:""}</span>`:""}</div>
     ${itemsHTML(o,true)}
     ${o.mode==="Delivery"&&o.riderUid?`<b style="display:block;margin-top:6px">Rider photos</b>${proofsFor(o.id)}`:""}
-    <div class="muted" style="font-size:.85rem">Subtotal ${peso(o.subtotal)}${o.deliveryFee?` · delivery ${peso(o.deliveryFee)}`:""} · total ${peso(o.total)}</div>`;
+    <div class="muted" style="font-size:.85rem">Subtotal ${peso(o.subtotal)}${o.deliveryFee?` · delivery ${peso(o.deliveryFee)}`:""}${o.boxFee?` · boxes ${peso(o.boxFee)}`:""} · total ${peso(o.total)}</div>`;
 }
 $("#view").addEventListener("click",e=>{
   const f=e.target.closest("[data-filter]"); if(f){ filter=f.dataset.filter; render(); return; }
@@ -347,18 +347,7 @@ $("#view").addEventListener("click",async e=>{
 
 // ---------- Shop settings ----------
 function renderSettings(){
-  const limit=cashLimitOf(store);
-  $("#view").innerHTML=`<div class="card" style="margin-top:12px;max-width:520px;display:grid;gap:10px">
-    <h2 style="color:var(--brand-deep);font-size:1.2rem">Cash payment limit</h2>
-    <p style="margin:0">Online orders (delivery and pickup) with a total above this amount must be paid by GCash.
-      This protects your sellers and riders from fake orders: a prankster can't order a big cash meal and disappear.
-      Dine-in orders aren't affected.</p>
-    <p class="muted" style="margin:0;font-size:.88rem">Right now: ${limit?`cash is allowed up to <b>${peso(limit)}</b>`:`<b>no limit</b>, cash is allowed for any amount`}.</p>
-    <label class="f" for="cashMax">Limit in pesos (0 = no limit)
-      <input id="cashMax" type="number" inputmode="numeric" min="0" step="1" value="${limit}" style="max-width:180px"></label>
-    <div class="btnrow"><button class="btn" id="saveCashMax">Save</button><span class="muted" id="cashMaxMsg"></span></div>
-  </div>
-  <div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
+  $("#view").innerHTML=`<div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
     <h2 style="color:var(--brand-deep);font-size:1.2rem">Delivery areas and fees</h2>
     <p style="margin:0">Customers can only order delivery to the barangays ticked here, and pay that barangay's fee.
       Set higher fees for barangays farther from the stall. The fee goes to the rider.</p>
@@ -386,14 +375,6 @@ $("#view").addEventListener("click",async e=>{
   e.target.disabled=true; msg.textContent="Saving…";
   // saved whole (not merged) so unticked barangays are removed
   try{ await setDoc(doc(db,"settings","delivery"),{fees}); msg.textContent="Saved."; e.target.disabled=false; }
-  catch(x){ e.target.disabled=false; msg.textContent=friendlyError(x); }
-});
-$("#view").addEventListener("click",async e=>{
-  if(e.target.id!=="saveCashMax") return;
-  const n=Math.floor(Number($("#cashMax").value)), msg=$("#cashMaxMsg");
-  if(!Number.isFinite(n) || n<0){ msg.textContent="Type 0 or more."; return; }
-  e.target.disabled=true; msg.textContent="Saving…";
-  try{ await setDoc(doc(db,"settings","store"),{cashMax:n},{merge:true}); $("#cashMax").blur(); render(); }
   catch(x){ e.target.disabled=false; msg.textContent=friendlyError(x); }
 });
 

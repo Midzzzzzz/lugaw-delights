@@ -35,17 +35,12 @@ service cloud.firestore {
     }
     function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
     function str(v, max) { return v is string && v.size() <= max; }
+    // Take-out box fee on an order (older orders have none)
+    function boxOk(d) { return !('boxFee' in d) || amount(d.boxFee); }
     function amount(v) { return v is int && v >= 0 && v < 100000; }
     function storeOpen() {
       return !exists(/databases/$(database)/documents/settings/store) || get(/databases/$(database)/documents/settings/store).data.get('open', true) != false;
     }
-    // Online orders above this total must be paid by GCash (0 = no limit).
-    // Keep the 500 default in step with DEFAULT_CASH_MAX in common.js.
-    function cashLimit() {
-      return exists(/databases/$(database)/documents/settings/store)
-        ? get(/databases/$(database)/documents/settings/store).data.get('cashMax', 500) : 500;
-    }
-    function cashOk(d) { return d.payment == 'GCash' || cashLimit() == 0 || d.total <= cashLimit(); }
     // Delivery only to barangays on the owner's list (settings/delivery.fees, set on
     // owner.html), and the fee must be that barangay's fee.
     function deliveryOk(d) {
@@ -71,7 +66,7 @@ service cloud.firestore {
     }
 
     // Store settings. Everyone reads. Sellers can only open or close the store;
-    // the owner also sets the cash limit.
+    // the owner also sets the delivery fees.
     match /settings/{id} {
       allow read: if true;
       allow write: if (isAdmin()
@@ -259,24 +254,30 @@ service cloud.firestore {
         && request.resource.data.photo.matches('data:image/jpeg;base64,[A-Za-z0-9+/=]+')
         && request.resource.data.takenAt == request.time
         && order().riderUid == uid()
-        && order().status in (request.resource.data.kind == 'pickup' ? ['assigned', 'picked_up'] : ['picked_up']);
+        && order().status in (request.resource.data.kind == 'pickup' ? ['assigned', 'preparing', 'ready', 'picked_up'] : ['picked_up']);
       allow update, delete: if false;
+    }
+
+    // A delivery order riders can take: no rider yet, and not finished or cancelled.
+    // New delivery orders look for a rider first; the store cooks once a rider accepts.
+    function needsRider(d) {
+      return d.mode == 'Delivery' && d.riderUid == null && d.status in ['new', 'preparing', 'ready'];
     }
 
     match /orders/{orderId} {
       function newOrder(d) {
         return d.keys().hasOnly(
              ['code','customerUid','mode','address','notes','payment','hasPin','zone','zoneName',
-              'items','subtotal','deliveryFee','total','status','riderUid','createdAt'])
+              'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt'])
           && d.customerUid == uid()
           && d.status == 'new'
           && d.riderUid == null
           && d.mode in ['Delivery', 'Pickup']
-          && d.payment in ['Cash', 'GCash']
+          && d.payment == 'Cash' // online orders are cash on delivery or pickup
           && okItems(d.items)
           && amount(d.subtotal) && amount(d.deliveryFee) && amount(d.total)
-          && d.total == d.subtotal + d.deliveryFee && d.subtotal > 0
-          && (d.mode == 'Delivery' || d.deliveryFee == 0)
+          && boxOk(d) && d.total == d.subtotal + d.deliveryFee + d.get('boxFee', 0) && d.subtotal > 0
+          && (d.mode == 'Delivery' || (d.deliveryFee == 0 && d.get('boxFee', 0) == 0))
           && str(d.code, 20)
           && str(d.address, 300) && (d.mode == 'Pickup' || d.address.size() > 0)
           && str(d.notes, 300)
@@ -288,7 +289,7 @@ service cloud.firestore {
       function dineIn(d) {
         return d.keys().hasOnly(
              ['code','customerUid','mode','table','notes','payment','cashGiven','sellerUid','sellerName',
-              'items','subtotal','deliveryFee','total','status','riderUid','createdAt'])
+              'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt'])
           && d.customerUid == uid()
           && d.sellerUid == uid() && str(d.sellerName, 80)
           && d.mode == 'Dine-in'
@@ -298,7 +299,7 @@ service cloud.firestore {
           && d.payment in ['Cash', 'GCash']
           && okItems(d.items)
           && amount(d.subtotal) && d.subtotal > 0
-          && d.deliveryFee == 0 && d.total == d.subtotal
+          && d.deliveryFee == 0 && boxOk(d) && d.total == d.subtotal + d.get('boxFee', 0)
           && str(d.code, 20) && str(d.table, 30) && str(d.notes, 300)
           && d.createdAt == request.time;
       }
@@ -307,12 +308,11 @@ service cloud.firestore {
       // waiting for a rider (address only, no name or number), plus the ones they took.
       allow read: if isStaff()
         || (signedIn() && resource.data.customerUid == uid())
-        || (isApprovedRider() && (resource.data.status == 'ready' || resource.data.riderUid == uid()));
+        || (isApprovedRider() && (resource.data.riderUid == uid() || needsRider(resource.data)));
 
       allow create: if (signedIn()
         && storeOpen()
         && newOrder(request.resource.data)
-        && cashOk(request.resource.data)
         && deliveryOk(request.resource.data)
         && existsAfter(/databases/$(database)/documents/contacts/$(orderId))
         // every new delivery order carries a PIN, and says so (hasPin) so the rider app knows to ask for it
@@ -335,11 +335,36 @@ service cloud.firestore {
         // ordered or its price. A sale is credited once, to the seller who takes it,
         // and nobody else can move that credit to themselves.
         || (isSeller() && shopCanSet(request.resource.data)
+            // A delivery order is only sent to the kitchen once a rider has accepted it
+            && !(resource.data.mode == 'Delivery' && resource.data.status == 'new'
+                 && !(request.resource.data.status in ['new', 'cancelled']))
+            // and only goes back to looking for a rider before the kitchen has started on it
+            && !(resource.data.mode == 'Delivery' && request.resource.data.status == 'new'
+                 && !(resource.data.status in ['new', 'assigned']))
+            // An online GCash order isn't cooked until the customer sends their GCash reference number
+            && !(resource.data.status in ['new', 'assigned'] && request.resource.data.status == 'preparing'
+                 && resource.data.payment == 'GCash' && resource.data.mode != 'Dine-in'
+                 && !('gcashRef' in resource.data))
             && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','total','payment','createdAt'])
             && (!changed().hasAny(['cancelReason']) || str(request.resource.data.cancelReason, 150))
             && (!changed().hasAny(['sellerUid','sellerName'])
                 || (request.resource.data.sellerUid == uid() && str(request.resource.data.sellerName, 80)
                     && resource.data.get('sellerUid', null) in [null, uid()])))
+
+        // Dine-in customer orders more: a seller adds items to an unpaid dine-in order.
+        // The total can only go up, and the order goes back to the kitchen.
+        || (isSeller() && resource.data.mode == 'Dine-in'
+            && resource.data.status in ['preparing', 'completed']
+            && !('cashGiven' in resource.data)
+            && changed().hasOnly(['items','subtotal','boxFee','total','status','addedAt'])
+            && boxOk(request.resource.data)
+            && request.resource.data.get('boxFee', 0) >= resource.data.get('boxFee', 0)
+            && okItems(request.resource.data.items)
+            && request.resource.data.items.size() > resource.data.items.size()
+            && amount(request.resource.data.subtotal) && request.resource.data.subtotal > resource.data.subtotal
+            && request.resource.data.total == request.resource.data.subtotal + request.resource.data.get('boxFee', 0)
+            && request.resource.data.status == 'preparing'
+            && request.resource.data.addedAt == request.time)
 
         // Customer cancels before the shop accepts the order
         || (signedIn() && resource.data.customerUid == uid() && resource.data.status == 'new'
@@ -360,9 +385,10 @@ service cloud.firestore {
         // Rider accepts an order that is waiting for a rider (only after signing the agreement)
         || (isApprovedRider() && exists(/databases/$(database)/documents/agreements/$(uid()))
             && 'payMethod' in get(/databases/$(database)/documents/riders/$(uid())).data
-            && resource.data.status == 'ready' && resource.data.riderUid == null
+            && needsRider(resource.data)
             && changed().hasOnly(['status','riderUid','riderName','riderPhone','assignedAt'])
-            && request.resource.data.status == 'assigned'
+            // a new order becomes "rider found"; one the store is already cooking keeps its status
+            && request.resource.data.status == (resource.data.status == 'new' ? 'assigned' : resource.data.status)
             && request.resource.data.riderUid == uid()
             && request.resource.data.riderName == get(/databases/$(database)/documents/riders/$(uid())).data.name
             && request.resource.data.riderPhone == get(/databases/$(database)/documents/riders/$(uid())).data.phone
@@ -371,7 +397,7 @@ service cloud.firestore {
         // Rider moves their own order forward, or gives it back before pickup
         || (isApprovedRider() && resource.data.riderUid == uid() && (
               // A cash order is only picked up once the seller confirms the rider paid for the food
-              (resource.data.status == 'assigned' && request.resource.data.status == 'picked_up'
+              (resource.data.status in ['assigned', 'ready'] && request.resource.data.status == 'picked_up'
                 && resource.data.payment != 'Cash'
                 && changed().hasOnly(['status','pickedUpAt']) && request.resource.data.pickedUpAt == request.time)
            || (resource.data.status == 'picked_up' && request.resource.data.status == 'delivered'
@@ -384,7 +410,10 @@ service cloud.firestore {
                 // Nothing left to settle when the rider already paid for the food at pickup;
                 // GCash orders (and older cash orders) are settled later
                 && request.resource.data.settled == (resource.data.payment == 'Cash' && resource.data.get('riderPaid', false) == true))
-           || (resource.data.status == 'assigned' && request.resource.data.status == 'ready'
+           // gives it back before pickup: a new order looks for a rider again,
+           // one already in the kitchen stays there for another rider
+           || (resource.data.status in ['assigned', 'preparing', 'ready']
+                && request.resource.data.status == (resource.data.status == 'assigned' ? 'new' : resource.data.status)
                 && request.resource.data.riderUid == null
                 && changed().hasOnly(['status','riderUid','riderName','riderPhone','assignedAt']))
            ));

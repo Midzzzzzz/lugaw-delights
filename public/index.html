@@ -43,6 +43,9 @@ aside h2{font-size:1.4rem;color:var(--brand)}
 @media (max-width:860px){.bar.show{display:flex}}
 .summary{display:grid;gap:4px;background:var(--sunk);border-radius:12px;padding:10px 12px}
 .summary .lines{margin:4px 0}
+.paystep{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:16px;overflow:auto}
+.paystep .card{width:100%;max-width:440px;display:grid;gap:10px;max-height:100%;overflow:auto}
+.paysteps{margin:0;padding-left:20px;display:grid;gap:8px}
 </style>
 </head>
 <body>
@@ -54,7 +57,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
       <p class="tag">Comfort in a bowl, delivered hot to your door.</p>
       <div class="chips">
         <span class="pill brand" id="hoursPill"></span>
-        <span class="pill">Delivery</span><span class="pill">Pickup</span><span class="pill">GCash or cash</span>
+        <span class="pill">Delivery</span><span class="pill">Pickup</span><span class="pill">Cash on delivery</span>
       </div>
     </div>
   </header>
@@ -84,13 +87,8 @@ aside h2{font-size:1.4rem;color:var(--brand)}
           <label class="f" for="f-zone" id="zoneWrap">Barangay (Los Baños or Bay, Laguna only)<select id="f-zone"></select></label>
           <label class="f" for="f-addr" id="addrWrap">House no., street and landmark<textarea id="f-addr" rows="2" maxlength="200" placeholder="e.g. 12 Lopez Ave., near the chapel"></textarea></label>
           <div class="group"><span>Payment</span>
-            <div class="seg">
-              <input type="radio" name="pay" id="p-cash" value="Cash" checked><label for="p-cash" id="cashLabel">Cash on delivery</label>
-              <input type="radio" name="pay" id="p-gc" value="GCash"><label for="p-gc">GCash</label>
-            </div>
+            <p style="margin:0;font-weight:700" id="cashLabel">Cash on delivery</p>
           </div>
-          <p class="notice warn" id="cashLimitNote" hidden style="margin:0;font-size:.88rem"></p>
-          <p class="muted" id="gcashNote" hidden style="margin:0;font-size:.88rem"></p>
           <label class="f" for="f-notes">Notes (optional)<input id="f-notes" maxlength="300" placeholder="Extra spicy, no spring onion, etc."></label>
           <p class="err" id="err" hidden></p>
           <button class="btn big" id="submit" type="submit" disabled>Place order</button>
@@ -105,11 +103,11 @@ aside h2{font-size:1.4rem;color:var(--brand)}
 <script type="module">
 import { onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { collection, doc, getDoc, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { auth, db, isConfigured, SHOP, MENU, ITEMS, MAX_LINES, MAX_QTY, DEFAULT_CASH_MAX, cashLimitOf, REPORT_REASONS, phoneKey, DELIVERY_ZONES, ZONES, zoneLabel, peso, esc, STATUS, FLOW, calcTotals, itemsHTML, fmtTime, orderCode, friendlyError, setupNotice } from "./common.js";
+import { auth, db, isConfigured, SHOP, MENU, ITEMS, MAX_LINES, MAX_QTY, REPORT_REASONS, phoneKey, DELIVERY_ZONES, ZONES, zoneLabel, peso, esc, STATUS, FLOW, stepLabel, calcTotals, boxRow, itemsHTML, fmtTime, orderCode, friendlyError, setupNotice } from "./common.js";
 
 const $ = s => document.querySelector(s);
 const cart = {};
-let storeOpen = true, user = null, cashMax = DEFAULT_CASH_MAX;
+let storeOpen = true, user = null;
 // Delivery fees per barangay, from the owner's settings (null until loaded, {} if not set up)
 let fees = null;
 const zone = ()=>$("#f-zone").value;
@@ -144,7 +142,7 @@ $("#menu").addEventListener("click", e=>{
 });
 
 const mode=()=>document.querySelector('input[name="mode"]:checked').value;
-const pay=()=>document.querySelector('input[name="pay"]:checked').value;
+const pay=()=>"Cash"; // online orders are cash on delivery or cash on pickup
 const cartItems=()=>Object.entries(cart).map(([id,qty])=>({id,name:ITEMS[id].name,price:ITEMS[id].price,qty}));
 
 function renderCart(){
@@ -153,14 +151,9 @@ function renderCart(){
     <ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${esc(it.name)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
     <div class="totals"><div><span>Subtotal</span><span>${peso(t.subtotal)}</span></div>
     ${mode()==="Delivery"?`<div><span>Delivery fee</span><span>${zoneFee()!=null?peso(t.deliveryFee):"Choose your barangay"}</span></div>`:""}
+    ${boxRow(t)}
     <div class="grand"><span>Total</span><span>${peso(t.total)}</span></div></div>`
     : `<p class="empty">Your bowl is empty. Tap <b>Add</b> on anything from the menu to start your order.</p>`;
-  // Big orders must be paid by GCash (limit set by the owner)
-  const overCash = cashMax>0 && t.total>cashMax;
-  $("#p-cash").disabled = overCash;
-  if(overCash && pay()==="Cash"){ $("#p-gc").checked=true; renderPayNote(); }
-  $("#cashLimitNote").hidden = !overCash;
-  $("#cashLimitNote").textContent = `Cash is only for orders up to ${peso(cashMax)}. Please pay this order by GCash.`;
   $("#submit").disabled = !items.length || !storeOpen || !isConfigured;
   $("#submit").textContent = storeOpen ? "Place order" : "Closed right now";
   $("#bar").classList.toggle("show", items.length>0);
@@ -171,8 +164,6 @@ function renderPayNote(){
   const isDel = mode()==="Delivery";
   $("#addrWrap").hidden = !isDel; $("#zoneWrap").hidden = !isDel;
   $("#cashLabel").textContent = isDel ? "Cash on delivery" : "Cash on pickup";
-  $("#gcashNote").hidden = pay()!=="GCash";
-  $("#gcashNote").textContent = `After placing your order, send your total to GCash ${SHOP.gcashNumber} (${SHOP.gcashName}), then type the GCash reference number on your order screen so we can match your payment.`;
 }
 // Barangay list: only barangays the owner delivers to, each with its fee
 function renderZones(){
@@ -187,7 +178,7 @@ function renderZones(){
 }
 renderZones();
 $("#f-zone").addEventListener("change",renderCart);
-document.querySelectorAll('input[name="mode"],input[name="pay"]').forEach(r=>r.addEventListener("change",()=>{renderPayNote();renderCart();}));
+document.querySelectorAll('input[name="mode"]').forEach(r=>r.addEventListener("change",()=>{renderPayNote();renderCart();}));
 renderPayNote(); renderCart();
 
 const obs=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting)
@@ -201,7 +192,6 @@ if(isConfigured){
   onSnapshot(doc(db,"settings","delivery"), s=>{ fees = s.exists() ? (s.data().fees||{}) : {}; renderZones(); renderCart(); }, ()=>{});
   onSnapshot(doc(db,"settings","store"), s=>{
     storeOpen = !s.exists() || s.data().open !== false;
-    cashMax = cashLimitOf(s.exists() ? s.data() : null);
     $("#closed").hidden = storeOpen; renderCart();
   }, ()=>{});
   onAuthStateChanged(auth, u=>{
@@ -238,6 +228,7 @@ function orderSummary(o){
     ${itemsHTML(o,true)}
     <div class="totals"><div><span>Subtotal</span><span>${peso(o.subtotal)}</span></div>
       ${del?`<div><span>Delivery fee${o.zoneName?` (${esc(o.zoneName)})`:""}</span><span>${peso(o.deliveryFee)}</span></div>`:""}
+      ${boxRow(o)}
       <div class="grand"><span>Total</span><span>${peso(o.total)}</span></div></div>
     <div class="muted" style="font-size:.88rem">${del?`Deliver to: ${esc(o.address)}`:`Pickup at: ${esc(SHOP.pickupAddress)}`}
       <br>Payment: ${o.payment==="GCash"?"GCash":del?"Cash on delivery":"Cash on pickup"}${o.notes?`<br>Notes: ${esc(o.notes)}`:""}</div></div>`;
@@ -250,20 +241,21 @@ function renderTrack(){
   $("#trackBox").innerHTML = `<h2>Track your order</h2>` + list.map(o=>{
     const flow=FLOW[o.mode]||FLOW.Delivery, at=flow.indexOf(o.status), finished=FINAL.includes(o.status);
     const steps = o.status==="cancelled" ? `<p class="pill off" style="justify-self:start">Cancelled</p>` :
-      `<ol class="steps">${flow.map((s,i)=>`<li class="${i<at||finished?"done":i===at?"now":""}"><span>${esc(STATUS[s].label)}</span></li>`).join("")}</ol>`;
+      `<ol class="steps">${flow.map((s,i)=>`<li class="${i<at||finished?"done":i===at?"now":""}"><span>${esc(stepLabel(o.mode,s))}</span></li>`).join("")}</ol>`;
     const cancelNote = o.status!=="cancelled" ? "" : o.cancelledBy==="customer"
       ? `<p style="margin:0">You cancelled this order.</p>`
       : `<p style="margin:0">Sorry, we had to cancel this order${o.cancelReason?`: <b>${esc(o.cancelReason)}</b>`:"."}</p>
          <p class="muted" style="margin:0;font-size:.88rem">Questions? Call or text ${esc(SHOP.phone)}.${o.payment==="GCash"?" If you already paid by GCash, please call us about your refund.":""}</p>`;
     const doneNote = o.status==="delivered" ? `<p style="margin:0"><b>Delivered at ${fmtTime(o.deliveredAt)}.</b> Salamat po, enjoy your meal!</p>`
       : o.status==="completed" ? `<p style="margin:0"><b>Picked up.</b> Salamat po, enjoy your meal!</p>` : "";
-    const rider = o.riderName && ["assigned","picked_up"].includes(o.status)
+    const rider = o.riderName && ["assigned","preparing","ready","picked_up"].includes(o.status)
       ? `<p style="margin:0">Your rider: <b>${esc(o.riderName)}</b> · <span class="num">${esc(o.riderPhone)}</span></p>` : "";
     const cancel = o.status==="new" ? `<button class="btn ghost small" data-cancel="${o.id}">Cancel order</button>` : "";
     const hide = finished ? `<button class="btn ghost small" data-hide="${o.id}" style="justify-self:start">Hide</button>` : "";
     return `<div style="border-top:2px dashed var(--line);padding-top:10px;display:grid;gap:6px">
       <div class="btnrow" style="justify-content:space-between"><b class="num">${esc(o.code)}</b><span class="muted">${fmtTime(o.createdAt)} · ${peso(o.total)}</span></div>
-      ${steps}${cancelNote}${doneNote}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
+      ${payingId===o.id&&o.payment==="GCash"&&o.status!=="cancelled"&&!o.paymentConfirmed&&(!o.gcashRef||payDraft[o.id]?.editing)?payStep(o):""}
+      ${steps}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
   }).join("");
   if(focusKey){ const el=document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); if(el){ el.focus(); if(el.tagName==="TEXTAREA") el.setSelectionRange(el.value.length,el.value.length); } }
 }
@@ -291,10 +283,39 @@ function pinBox(o){
 // After paying, the customer types the GCash reference number so the seller can
 // find this exact payment in their GCash history, even with many orders at once.
 const payDraft={}; // order id -> { ref, sender, err, editing }
+// Full-screen "Pay with GCash" step, for GCash orders placed before online GCash was removed;
+// and stays until the customer sends their GCash reference number.
+let payingId=null;
+function payStep(o){
+  const d=payDraft[o.id]||(payDraft[o.id]={ref:"",sender:"",err:"",editing:false}), id=esc(o.id);
+  const copy=(text,label)=>`<button type="button" class="btn ghost small" data-copy="${esc(text)}">Copy ${label}</button>`;
+  return `<div class="paystep" role="dialog" aria-modal="true" aria-labelledby="ps-title-${id}"><div class="card">
+    <h2 id="ps-title-${id}" style="color:var(--brand)">Pay ${peso(o.total)} with GCash</h2>
+    <p class="muted" style="margin:0">Order <b class="num">${esc(o.code)}</b>. The shop starts cooking once you pay.</p>
+    <ol class="paysteps">
+      <li><b>Open your GCash app</b> and choose <b>Send Money</b>.</li>
+      <li>Send <b class="num">${peso(o.total)}</b> to <b class="num">${esc(SHOP.gcashNumber)}</b> (${esc(SHOP.gcashName)}).
+        <span class="btnrow" style="margin-top:4px">${copy(SHOP.gcashNumber.replace(/\s/g,""),"number")}${copy(String(o.total),"amount")}</span></li>
+      <li>In the message, type your order code <b class="num">${esc(o.code)}</b>. ${copy(o.code,"code")}</li>
+      <li>After sending, copy the <b>Ref No.</b> from your GCash receipt here:</li>
+    </ol>
+    <label class="f" for="ps-ref-${id}">GCash reference number
+      <input id="ps-ref-${id}" data-pay-ref="${id}" data-focus-key="ps-ref-${id}" inputmode="numeric" maxlength="20" autocomplete="off" value="${esc(d.ref||o.gcashRef||"")}" placeholder="e.g. 1234567890123"></label>
+    <label class="f" for="ps-sender-${id}">Your GCash name or number
+      <input id="ps-sender-${id}" data-pay-sender="${id}" data-focus-key="ps-sender-${id}" maxlength="60" value="${esc(d.sender||o.gcashSender||"")}" placeholder="Juan D. or 0917…"></label>
+    ${d.err?`<p class="err" style="margin:0">${esc(d.err)}</p>`:""}
+    <button class="btn big" data-pay-send="${id}">Send reference number</button>
+    <button class="btn ghost small" data-pay-later="${id}" style="justify-self:center">I'll pay later</button>
+  </div></div>`;
+}
 function payBox(o){
   if(o.payment!=="GCash" || o.status==="cancelled") return "";
   if(o.paymentConfirmed) return `<p style="margin:0"><span class="pill done">Paid</span> GCash payment confirmed by the shop.</p>`;
   const d=payDraft[o.id]||(payDraft[o.id]={ref:"",sender:"",err:"",editing:false}), id=esc(o.id);
+  if(!o.gcashRef && !d.editing) return `<div class="notice closed" style="margin:0;display:grid;gap:6px">
+    <div>Not paid yet. The shop starts cooking once you pay ${peso(o.total)} by GCash.</div>
+    <button class="btn small" data-pay-open="${id}" style="justify-self:start;background:#fff;color:var(--brand-deep)">Pay now</button></div>`;
+  if(payingId===o.id) return ""; // the pay step is open
   if(o.gcashRef && !d.editing) return `<div class="notice" style="margin:0;font-size:.9rem">GCash reference <b class="num">${esc(o.gcashRef)}</b> sent.
     Waiting for the shop to confirm your payment.<br><button class="btn ghost small" data-pay-edit="${id}" style="margin-top:6px">Fix the reference number</button></div>`;
   return `<div class="notice" style="margin:0;display:grid;gap:8px">
@@ -313,12 +334,13 @@ $("#trackBox").addEventListener("input",e=>{
   const s=e.target.closest("[data-pay-sender]"); if(s) payDraft[s.dataset.paySender].sender=s.value;
 });
 async function sendPayRef(id){
-  const o=live[id], d=payDraft[id], ref=(d.ref||o.gcashRef||"").trim(), sender=(d.sender||o.gcashSender||"").trim();
+  const o=live[id], d=payDraft[id], ref=(d.ref||o.gcashRef||"").replace(/[\s-]/g,""), sender=(d.sender||o.gcashSender||"").trim();
   if(!/^[0-9A-Za-z]{6,20}$/.test(ref)){ d.err="Type the reference number from your GCash receipt (the Ref No.)."; return renderTrack(); }
   if(!sender){ d.err="Type the GCash name or number you paid from."; return renderTrack(); }
   try{
     await updateDoc(doc(db,"orders",id),{gcashRef:ref,gcashSender:sender,gcashSentAt:serverTimestamp()});
     payDraft[id]={ref:"",sender:"",err:"",editing:false};
+    if(payingId===id) payingId=null; // paid: close the pay step
   }catch(x){ d.err=String(x?.code).includes("permission-denied")?"The shop already confirmed this payment, so it can't be changed. Call us if something's wrong.":friendlyError(x); }
   renderTrack();
 }
@@ -367,7 +389,12 @@ async function sendReport(id){
 
 $("#trackBox").addEventListener("click", async e=>{
   const ps=e.target.closest("[data-pay-send]"); if(ps){ ps.disabled=true; await sendPayRef(ps.dataset.paySend); return; }
-  const pe=e.target.closest("[data-pay-edit]"); if(pe){ payDraft[pe.dataset.payEdit].editing=true; renderTrack(); return; }
+  const pe=e.target.closest("[data-pay-edit]"); if(pe){ payDraft[pe.dataset.payEdit].editing=true; payingId=pe.dataset.payEdit; renderTrack(); return; }
+  const po=e.target.closest("[data-pay-open]"); if(po){ payingId=po.dataset.payOpen; renderTrack(); return; }
+  const pl=e.target.closest("[data-pay-later]"); if(pl){ payingId=null; if(payDraft[pl.dataset.payLater]) payDraft[pl.dataset.payLater].editing=false; renderTrack(); return; }
+  const cp=e.target.closest("[data-copy]"); if(cp){
+    navigator.clipboard?.writeText(cp.dataset.copy).then(()=>{ const t=cp.textContent; cp.textContent="Copied"; setTimeout(()=>cp.textContent=t,1500); }).catch(()=>{});
+    return; }
   const pc=e.target.closest("[data-pay-cancel]"); if(pc){ payDraft[pc.dataset.payCancel]={ref:"",sender:"",err:"",editing:false}; renderTrack(); return; }
   const rp=e.target.closest("[data-report]"); if(rp){ reporting[rp.dataset.report]={reason:"",details:"",err:""}; renderTrack(); return; }
   const rb=e.target.closest("[data-report-back]"); if(rb){ delete reporting[rb.dataset.reportBack]; renderTrack(); return; }
@@ -404,7 +431,7 @@ $("#form").addEventListener("submit", async e=>{
     code:orderCode(ref.id), customerUid:user.uid, mode:mode(),
     address: mode()==="Delivery"?`${address}, Brgy. ${z.name}, ${z.town}, Laguna`:"", notes, payment:pay(), items,
     ...(mode()==="Delivery"?{zone:z.id, zoneName:zoneLabel(z)}:{}),
-    subtotal:t.subtotal, deliveryFee:t.deliveryFee, total:t.total,
+    subtotal:t.subtotal, deliveryFee:t.deliveryFee, boxFee:t.boxFee, total:t.total,
     status:"new", riderUid:null, createdAt:serverTimestamp(), ...(pin?{hasPin:true}:{})
   });
   batch.set(doc(db,"contacts",ref.id),{ name, phone, customerUid:user.uid, createdAt:serverTimestamp() });

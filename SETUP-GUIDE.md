@@ -19,19 +19,28 @@ It runs on **Firebase** (Google's app backend) on the free plan. You don't need 
 
 ## How an order flows
 
-1. Customer places an order → it appears in your dashboard under **New** with a chime.
-2. You tap **Accept & start cooking** → the customer sees "Preparing".
-3. When the food is ready, tap **Food ready: call a rider** → every approved rider who is switched to **Available** sees it and hears a chime.
-4. The first rider to tap **Accept** gets it. Other riders can no longer take it.
-5. Rider taps **Picked up from shop**, then **Delivered**. The customer sees each step and the rider's name and number.
-6. **Cash orders:** the rider pays you the food cost when picking up. Hand over the food only after they pay, then tap **Rider paid ₱… · hand over food**. The rider collects the full amount from the customer and keeps the delivery fee, so there's nothing left to settle. **GCash orders:** the rider picks up without paying; at the end of the day pay the rider their fee from the **Settle with riders** tab.
-7. Before accepting a delivery order, check the **Riders** line on the order: it shows who is available right now. If no rider is available, call one first or offer the customer pickup.
+Delivery orders find a rider **before** the store cooks, so food is never left waiting without a rider.
+
+1. Customer places a delivery order → every approved rider who is switched to **Available** sees it and hears a chime. Your dashboard shows it under **Finding rider**, with how long it has waited and how many riders are available.
+2. The first rider to tap **Accept** gets it. The order moves to your **New** tab with a chime: **Rider found: start cooking**. The customer sees "Rider found".
+3. Tap **Rider found: start cooking** → the customer sees "Preparing". You can't start cooking a delivery order before a rider accepts it.
+4. When the food is ready, tap **Food ready**. The rider comes to the shop.
+5. The rider pays you the food cost. Hand over the food only after they pay, then tap **Rider paid ₱… · hand over food**. The rider collects the full amount from the customer and keeps the delivery fee.
+6. The rider delivers and finishes with the customer's delivery code. The customer sees each step and the rider's name and number.
+
+**No rider accepts?** Call a rider, or call the customer to offer pickup. If nobody can deliver, **Cancel** the order with the reason *No rider available right now*; the customer sees the reason.
+
+**A rider drops out?** Before you start cooking, the order goes back to **Finding rider**. After you start cooking, it stays in the kitchen and another rider can take it.
 
 If a rider accepts an order and doesn't show up, tap **Send back to riders** so someone else can take it. Only the rider can mark a delivery delivered, by typing the customer's delivery code. If the customer can't show the code, call the customer; once they confirm they have the food, tap **Customer can't show the code?** and read the code to the rider.
 
 Pickup orders skip the rider: **Ready for pickup** → **Customer picked up**.
 
 **Dine-in customers:** on the dashboard tap **+ Dine-in order**, tap + on what they ordered, add a table number or name if you like, choose Cash or GCash, and tap **Send to kitchen**. The order appears in the **Kitchen** tab. Tap **Served** when it's on the table. Dine-in orders count in today's sales, and you can record them even when online ordering is switched off. For cash, type the amount the customer hands you in **Cash received** and the page shows the change.
+
+**More orders from the same table:** tap **Add items** on the dine-in order (in the Kitchen or Done today tab), add what they ordered and tap **Send added items to kitchen**. The order goes back to the Kitchen with the new items marked **Added**, and the total updates. You can add items until the payment is recorded; after that, start a new dine-in order.
+
+**Take-out boxes:** Lugaw, Rice Bowl and Dumpling items need a box when taken out: ₱10 each (change `boxFee` in `config.js`). Delivery orders are always boxed, and the customer sees **Take-out boxes** in the total. For dine-in, choose **Take-out?** in the dine-in panel: **No, eating here**, **Box (+₱10 each)** or **Plastic (free)**. It applies to the items in that round, so a table that eats here and then wants some to go can use **Add items** and choose box or plastic. Add-ons and drinks never add a box fee. The rider pays the shop for food and boxes at pickup and keeps only the delivery fee.
 
 **Receipts:** every order on the dashboard has a **Print receipt** button. It opens a narrow receipt (made for 58 mm and 80 mm receipt printers, but any printer works) and the print window. The first time, your browser may ask you to allow pop-ups for the site. Say yes. On an Android phone with a Bluetooth receipt printer, install the printer's print service app (for example RawBT) so it appears in Chrome's print options. The receipt is an order slip, not a BIR official receipt.
 
@@ -129,7 +138,7 @@ Emulator data is wiped when you stop the emulators.
 
 - **Open and close:** the switch at the top of the dashboard. When closed, customers can browse but can't order.
 - **Price warning:** if an order shows "Prices don't match your menu", someone edited the order. Check the total before cooking.
-- **GCash orders:** after paying, the customer types their GCash reference number (Ref No.) on their order screen and puts the order code in the GCash message. On the seller dashboard each GCash order shows that Ref No., the sender and the amount. Find the same Ref No. in the shop's GCash app under **History**, then tap **GCash payment received**. Don't cook until it's confirmed. If two orders show the same Ref No., the page warns you: one payment can't pay for two orders.
+- **Payment:** online orders (delivery and pickup) are **cash on delivery or cash on pickup** only. Dine-in customers can still pay by cash or GCash at the counter. GCash orders placed before online GCash was removed still show the GCash reference number and **GCash payment received** button until they're finished.
 - **Rider approval:** check the rider's driver's license, OR/CR and NBI or barangay clearance in person before tapping **Approve**. Use **Suspend** if there's a problem. After you approve a rider, their app shows the **Rider Agreement** (cash held in trust, handing over money, estafa under Article 315 of the Revised Penal Code, data privacy consent). They must type their name and sign with their finger before they can take any order. See and print each signed copy in **Owner dashboard → Sellers & riders → View / print**. Have a lawyer review the wording in `public/contract.js`. For stronger evidence, print it and have it notarized. If you change the wording, change `CONTRACT_VERSION` in the same file and every rider signs again.
 - **Paying riders:** every rider gives a GCash number or bank account when they register (riders who registered earlier are asked for it before they can take orders). At the end of the day, open **Settle with riders** on the seller dashboard: the top card shows, for each rider, the cash they owe you, the fees you owe them, and the difference, with the account to send it to. Only the rider can set or change their payout account and mobile number (**My details** in the rider app, which asks for their password). The owner can see it but can't change it. If a rider changed their payout account in the last 24 hours, the seller dashboard warns you: confirm with the rider in person, or on a number you already had, before sending money.
 - **Changing the menu:** edit `MENU` in `config.js` and re-upload. Give new items new ids (like `L11`) and don't reuse an old id for a different item.
@@ -145,7 +154,6 @@ Emulator data is wiped when you stop the emulators.
 - **Proof photos.** Riders can photograph the food when they pick it up and at the customer's door. Photos are time-stamped and can't be changed or deleted. See them with **Rider photos** on the seller dashboard, in the owner's order details, and next to customer reports. Each photo uses about 40-80 KB of the free plan's 1 GB database storage; check **Firestore → Usage** monthly.
 - **Delivery code (PIN).** Every delivery order shows the customer a 4-digit code. The rider must type it to mark the order delivered, so a rider can't claim a delivery that didn't happen. Customers should give the code only after they have their food. If the customer can't show the code, the seller calls the customer and, once they confirm they have the food, reads the code to the rider (**Customer can't show the code?** on the order).
 - **Customer reports.** Customers can tap **Report a problem** on their order (food not received, rider asked for more money, rude rider, and so on). Reports appear in **Owner dashboard → Reports**, where you can call the customer, suspend the rider, and mark the report resolved.
-- **Big orders must be paid by GCash.** Online orders above ₱500 can't be paid in cash, so a fake buyer can't waste a big order. Change the amount (0 = no limit) in **Owner dashboard → Shop settings**.
 - **One order a minute per phone.** This stops someone from flooding you with fake orders. When the store is closed, the database itself refuses new orders.
 - **Personal data:** you're collecting names, numbers and addresses of customers and riders. Under the Data Privacy Act, use them only for orders and deliveries, and keep your owner login private.
 - **Riders are independent.** Agree in writing on the delivery fee, cash remittance, and what happens with cancellations or damaged food.

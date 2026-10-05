@@ -20,6 +20,7 @@ export const SHOP = {
   hours: "24 hours",
   phone: "0932 474 8114",               // shown to customers and riders
   pickupAddress: "Tabi ng old Caltex / tapat ng Novo, Hi-way, Brgy. Batong Malake, Los Baños, Laguna",
+  boxFee: 10,                            // take-out box, per piece, for menu sections marked box: true
   deliveryNote: "We deliver within Los Baños and Bay, Laguna. The fee depends on your barangay.",
   gcashName: "Ruel Calica",
   gcashNumber: "0932 474 8114"
@@ -65,11 +66,13 @@ export const DELIVERY_ZONES = [
   ]}
 ];
 
-// 3) Menu. Keep each id unique and never reuse an old id for a different item.
+// 3) Menu. Sections with box: true add SHOP.boxFee per piece when packed in a take-out box
+//    (always for delivery; for dine-in when the seller chooses "Box").
+//    Keep each id unique and never reuse an old id for a different item.
 //    Prices are whole pesos (no centavos).
 //    [id, name, price, inclusions (optional), best seller (optional)]
 export const MENU = [
-  { id: "lugaw", name: "Lugaw Series", items: [
+  { id: "lugaw", name: "Lugaw Series", box: true, items: [
     ["L01", "Plain Lugaw", 39],
     ["L02", "Lugaw with Egg and Stripe", 85],
     ["L03", "Lugaw with Chicken", 79],
@@ -81,7 +84,7 @@ export const MENU = [
     ["L09", "Lugaw Overload 2", 159, "Egg + Lechon Kawali + Chicharon Bulaklak"],
     ["L10", "Lugaw Delights", 189, "Egg + Chicken + Liver + Lechon Kawali + Chicharon Bulaklak + Tofu", true]
   ]},
-  { id: "rice", name: "Rice Bowl Series", items: [
+  { id: "rice", name: "Rice Bowl Series", box: true, items: [
     ["R01", "Plain Fried Rice", 69],
     ["R02", "Fried Rice with Egg", 99],
     ["R03", "Fried Rice with Chicken", 109],
@@ -92,7 +95,7 @@ export const MENU = [
     ["R08", "Fried Rice Overload 1", 159, "Chicken Wings + Chicken Liver + Egg + Tofu"],
     ["R09", "Fried Rice Overload 2", 159, "Lechon Kawali + Chicharon Bulaklak + Egg"]
   ]},
-  { id: "dumplings", name: "Dumpling Series", items: [
+  { id: "dumplings", name: "Dumpling Series", box: true, items: [
     ["D01", "Fried Dumplings (5 pcs)", 75],
     ["D02", "Steam Dumplings (5 pcs)", 75],
     ["D03", "Dumpling Soup (3 pcs)", 129, "With bokchoy and meatballs"]

@@ -79,10 +79,10 @@ await t("customer can't cancel after the shop accepts", async () => {
   await seed(db => updateDoc(doc(db, "orders/o3"), { status: "preparing" }));
   return assertFails(updateDoc(doc(as("carol"), "orders/o3"), { status: "cancelled", cancelledBy: "customer" }));
 });
-await seed(db => updateDoc(doc(db, "orders/o1"), { status: "ready" }));
+// o1 is a new delivery order: it looks for a rider before the store cooks
 const r1 = as("rider1", "password"), r2 = as("rider2", "password");
-await t("pending rider can't read waiting orders", () => assertFails(getDocs(query(collection(as("pending1", "password"), "orders"), where("status", "==", "ready")))));
-await t("approved rider lists waiting orders", () => assertSucceeds(getDocs(query(collection(r1, "orders"), where("status", "==", "ready")))));
+await t("pending rider can't read waiting orders", () => assertFails(getDocs(query(collection(as("pending1", "password"), "orders"), where("mode", "==", "Delivery"), where("riderUid", "==", null), where("status", "in", ["new", "preparing", "ready"])))));
+await t("approved rider lists orders needing a rider", () => assertSucceeds(getDocs(query(collection(r1, "orders"), where("mode", "==", "Delivery"), where("riderUid", "==", null), where("status", "in", ["new", "preparing", "ready"])))));
 await t("rider can't read customer contact before accepting", () => assertFails(getDoc(doc(r1, "contacts/o1"))));
 
 console.log("Delivering");
@@ -95,6 +95,8 @@ await t("second rider can't take it", () => assertFails(updateDoc(doc(r2, "order
 await t("rider reads contact after accepting", () => assertSucceeds(getDoc(doc(r1, "contacts/o1"))));
 await t("other rider still can't read contact", () => assertFails(getDoc(doc(r2, "contacts/o1"))));
 await t("rider's active-orders query", () => assertSucceeds(getDocs(query(collection(r1, "orders"), where("riderUid", "==", "rider1"), where("status", "==", "assigned")))));
+await t("store cooks once the rider has accepted", () => assertSucceeds(updateDoc(doc(as("owner", "password"), "orders/o1"), { status: "preparing" })));
+await t("store marks the food ready", () => assertSucceeds(updateDoc(doc(as("owner", "password"), "orders/o1"), { status: "ready" })));
 await t("rider can't pick up a cash order without paying the shop", () => assertFails(updateDoc(doc(r1, "orders/o1"), { status: "picked_up", pickedUpAt: serverTimestamp() })));
 await t("seller confirms the rider paid for the food", () => assertSucceeds(updateDoc(doc(as("owner", "password"), "orders/o1"), { status: "picked_up", pickedUpAt: serverTimestamp(), riderPaid: true, riderPaidAt: serverTimestamp(), cashReceived: true })));
 await t("rider who paid can't leave the order unsettled", () => assertFails(updateDoc(doc(r1, "orders/o1"),

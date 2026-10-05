@@ -29,7 +29,7 @@ if (testMode) {
 
 export const ITEMS = Object.create(null);
 MENU.forEach(c => c.items.forEach(([id, name, price, inc, best]) => {
-  ITEMS[id] = { id, name, price, inc: inc || "", best: !!best, cat: c.id };
+  ITEMS[id] = { id, name, price, inc: inc || "", best: !!best, cat: c.id, box: !!c.box };
 }));
 export const MAX_LINES = 20, MAX_QTY = 99; // also enforced in firestore.rules
 
@@ -53,22 +53,42 @@ export const STATUS = {
   completed:    { label: "Picked up",             tone: "done" },
   cancelled:    { label: "Cancelled",             tone: "off" }
 };
+// Delivery orders find a rider first; the store cooks once a rider has accepted.
 export const FLOW = {
-  Delivery: ["new", "preparing", "ready", "assigned", "picked_up", "delivered"],
+  Delivery: ["new", "assigned", "preparing", "ready", "picked_up", "delivered"],
   Pickup: ["new", "preparing", "ready_pickup", "completed"],
   "Dine-in": ["preparing", "completed"]
 };
+const DELIVERY_LABELS = { new: "Finding a rider", assigned: "Rider found", preparing: "Preparing", ready: "Ready for the rider" };
+// A step's name for an order type (used for the customer's tracking steps)
+export function stepLabel(mode, s) {
+  return (mode === "Delivery" && DELIVERY_LABELS[s]) || STATUS[s]?.label || s;
+}
 export function statusLabel(o) {
   if (o.mode === "Dine-in" && o.status === "completed") return "Served";
-  return STATUS[o.status]?.label || o.status;
+  // a rider gave the order back after the store started cooking
+  if (o.mode === "Delivery" && !o.riderUid && ["preparing", "ready"].includes(o.status)) return stepLabel(o.mode, o.status) + " · finding a rider";
+  return stepLabel(o.mode, o.status);
 }
 export const ACTIVE = ["new", "preparing", "ready", "ready_pickup", "assigned", "picked_up"];
 
 // fee: the delivery fee for the customer's barangay (only used for Delivery)
+// Totals for an order. Take-out boxes: every boxed menu item on a delivery order,
+// and dine-in items the seller marked pack: "box". Add-ons and drinks need no box.
 export function calcTotals(items, mode, fee = 0) {
   const subtotal = items.reduce((s, it) => s + it.price * it.qty, 0);
   const deliveryFee = mode === "Delivery" && subtotal > 0 ? fee : 0;
-  return { subtotal, deliveryFee, total: subtotal + deliveryFee };
+  const boxes = items.reduce((n, it) => n + (ITEMS[it.id]?.box && (mode === "Delivery" || it.pack === "box") ? Number(it.qty) || 0 : 0), 0);
+  const boxFee = boxes * (SHOP.boxFee || 0);
+  return { subtotal, deliveryFee, boxes, boxFee, total: subtotal + deliveryFee + boxFee };
+}
+// What the shop receives for an order: everything except the rider's delivery fee
+export const shopAmount = o => (o.total || 0) - (o.deliveryFee || 0);
+// The "Take-out boxes" line for an order's totals (empty when there are none)
+export function boxRow(o) {
+  if (!o.boxFee) return "";
+  const n = Math.round(o.boxFee / (SHOP.boxFee || 1));
+  return `<div><span>Take-out box${n === 1 ? "" : "es"} (${n})</span><span>${peso(o.boxFee)}</span></div>`;
 }
 
 // Delivery areas: id -> { id, name, town, fee (starting fee) }. The live fees are
@@ -87,7 +107,7 @@ export function priceCheck(order) {
   if (!ok) return false;
   // the delivery fee itself is checked against the barangay fee list by firestore.rules
   const t = calcTotals(items, order.mode, order.deliveryFee);
-  return t.subtotal === order.subtotal && t.deliveryFee === order.deliveryFee && t.total === order.total;
+  return t.subtotal === order.subtotal && t.deliveryFee === order.deliveryFee && t.boxFee === (order.boxFee || 0) && t.total === order.total;
 }
 
 // Order lines as HTML. Names always come from the menu, never from the order,
@@ -97,7 +117,9 @@ export function itemsHTML(order, withAmounts) {
   return `<ul class="lines">${items.map(it => {
     const known = it && ITEMS[it.id], qty = Number(it?.qty) || 0;
     const name = known ? known.name : "Unknown item: " + String(it?.name ?? it?.id ?? "?");
-    return `<li><span class="q">${esc(qty)}×</span><span>${esc(name)}</span><span class="amt">${withAmounts ? peso(Number(it?.price) * qty) : ""}</span></li>`;
+    const added = (Number(it?.round) > 1 ? ` <span class="pill new" style="font-size:.7rem">Added</span>` : "") // dine-in items added later
+      + (it?.pack ? ` <span class="pill work" style="font-size:.7rem">Take-out · ${it.pack === "box" ? "box" : "plastic"}</span>` : "");
+    return `<li><span class="q">${esc(qty)}×</span><span>${esc(name)}${added}</span><span class="amt">${withAmounts ? peso(Number(it?.price) * qty) : ""}</span></li>`;
   }).join("")}</ul>`;
 }
 
