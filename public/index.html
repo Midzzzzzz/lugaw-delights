@@ -28,6 +28,10 @@ section.cat h2 small{font-family:var(--body);font-size:.8rem;color:var(--muted);
 .step span{min-width:24px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums}
 aside#side{position:sticky;top:70px;display:grid;gap:14px;scroll-margin-top:70px}
 @media (max-width:860px){aside#side{position:static}}
+/* While an order is in progress the page shows only its tracking */
+body.tracking #menu,body.tracking #cats,body.tracking #orderBox,body.tracking #bar,body.tracking #closed{display:none!important}
+body.tracking .layout{grid-template-columns:minmax(0,1fr)}
+body.tracking aside#side{position:static;max-width:560px;width:100%;margin:0 auto}
 aside h2{font-size:1.4rem;color:var(--brand)}
 .track{display:grid;gap:10px}
 .steps{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:0}
@@ -231,6 +235,10 @@ function renderTrack(){
   const list=Object.values(live).filter(o=>{ const d=endedAt(o); return !FINAL.includes(o.status) || !d || Date.now()-d.getTime()<KEEP_FINISHED; })
     .sort((a,b)=>(b.createdAt?.seconds||9e9)-(a.createdAt?.seconds||9e9));
   $("#trackBox").hidden=!list.length;
+  // An order still in progress: show only its tracking. The menu comes back once it's delivered or cancelled.
+  const busy=list.some(o=>!FINAL.includes(o.status));
+  if(document.body.classList.contains("tracking") && !busy) window.scrollTo({top:0,behavior:"smooth"});
+  document.body.classList.toggle("tracking",busy);
   $("#trackBox").innerHTML = `<h2>Track your order</h2>` + list.map(o=>{
     const flow=FLOW[o.mode]||FLOW.Delivery, at=flow.indexOf(o.status), finished=FINAL.includes(o.status);
     const steps = o.status==="cancelled" ? `<p class="pill off" style="justify-self:start">Cancelled</p>` :
