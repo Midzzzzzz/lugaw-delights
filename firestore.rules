@@ -180,7 +180,9 @@ service cloud.firestore {
     match /contacts/{orderId} {
       allow read: if isStaff()
         || (signedIn() && resource.data.customerUid == uid())
-        || (isApprovedRider() && get(/databases/$(database)/documents/orders/$(orderId)).data.riderUid == uid());
+        || (isApprovedRider() && get(/databases/$(database)/documents/orders/$(orderId)).data.riderUid == uid())
+        // riders call the customer to check the order is real before accepting it
+        || (isApprovedRider() && needsRider(get(/databases/$(database)/documents/orders/$(orderId)).data));
 
       allow create: if signedIn()
         && request.resource.data.keys().hasOnly(['name','phone','customerUid','createdAt'])
@@ -348,7 +350,8 @@ service cloud.firestore {
             // Payment is recorded once: cash received (covering the total) or GCash marked received
             && (!changed().hasAny(['cashGiven']) || (!('cashGiven' in resource.data)
                  && amount(request.resource.data.cashGiven) && request.resource.data.cashGiven >= resource.data.total))
-            && (!changed().hasAny(['paid']) || (request.resource.data.paid == true && resource.data.get('paid', false) != true))
+            && (!changed().hasAny(['paid']) || (request.resource.data.paid == true && resource.data.get('paid', false) != true
+                 && request.resource.data.get('gcashRef', '') is string && request.resource.data.get('gcashRef', '').matches('[0-9A-Za-z]{6,20}')))
             // (items, prices, box fees and the removal log only change through the dine-in change rule below)
             && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','boxFee','total','payment','createdAt',
                                   'addedAt','removed','editedAt','editedBy','editedByName'])
@@ -395,6 +398,13 @@ service cloud.firestore {
             && request.resource.data.gcashRef is string && request.resource.data.gcashRef.matches('[0-9A-Za-z]{6,20}')
             && str(request.resource.data.gcashSender, 60)
             && request.resource.data.gcashSentAt == request.time)
+
+        // Rider couldn't confirm the customer by phone: flags the order for the shop
+        || (isApprovedRider() && needsRider(resource.data)
+            && changed().hasOnly(['unconfirmedAt','unconfirmedBy','unconfirmedByName'])
+            && request.resource.data.unconfirmedAt == request.time
+            && request.resource.data.unconfirmedBy == uid()
+            && request.resource.data.unconfirmedByName == get(/databases/$(database)/documents/riders/$(uid())).data.name)
 
         // Rider accepts an order that is waiting for a rider (only after signing the agreement)
         || (isApprovedRider() && exists(/databases/$(database)/documents/agreements/$(uid()))

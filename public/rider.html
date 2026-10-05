@@ -365,7 +365,11 @@ function card(o, kind){
       : `<div><b>Pay the shop ${food}</b> when you pick up the food. Then collect <span class="collect">${peso(o.total)}</span> cash from the customer: ${food} pays you back and ${fee} is your fee.</div>`)
     : `<div><span class="pill go">Paid by GCash</span> Collect nothing. The shop pays your ${fee} fee.</div>`;
   let actions="";
-  if(kind==="open") actions=`<button class="btn big" data-act="accept" data-id="${o.id}">Accept delivery · earn ${peso(o.deliveryFee)}</button>`;
+  if(kind==="open") actions=called[o.id]
+    ? `<button class="btn big" data-act="accept" data-id="${o.id}">Customer confirmed · Accept delivery · earn ${peso(o.deliveryFee)}</button>
+       <button class="btn ghost small" data-act="noconfirm" data-id="${o.id}">Couldn't confirm (no answer or fake order)</button>`
+    : `<p class="muted" style="margin:0;font-size:.88rem">Call the customer first to check the order is real.</p>
+       <button class="btn big" disabled>Accept delivery · earn ${peso(o.deliveryFee)}</button>`;
   const kitchen={assigned:"The shop has your order and will start cooking now.",preparing:"The shop is cooking. Head to the shop.",ready:"The food is ready. Pick it up at the shop."}[o.status];
   if(kitchen && kind==="mine") actions=`<p style="margin:0"><b>${kitchen}</b></p><div class="btnrow">${o.status!=="ready"?""
        : o.payment==="Cash"
@@ -379,8 +383,12 @@ function card(o, kind){
     <p class="muted" style="margin:0;font-size:.85rem">Hand over the food first. The customer sees the code on their order screen. No code? Call the shop.</p>
     <button class="btn big ok" data-act="delivered" data-id="${o.id}">Delivered</button>`;
   const c=contacts[o.id];
-  const contact = kind==="open" ? "" : `<b>Customer</b><span>${c&&c!=="loading"
-    ? `${esc(c.name)} · <a class="num" href="tel:${esc(String(c.phone).replace(/[^\d+]/g,""))}">${esc(c.phone)}</a>` : `<span class="muted">Loading…</span>`}</span>`;
+  const tel=c&&c!=="loading"?esc(String(c.phone).replace(/[^\d+]/g,"")):"";
+  const contact = `<b>Customer</b><span>${c&&c!=="loading"
+    ? (kind==="open"
+      ? `${esc(c.name)} · <span class="num">${esc(c.phone)}</span><br><a class="btn small" href="tel:${tel}" data-call="${esc(o.id)}" style="margin-top:4px">📞 Call customer</a>`
+      : `${esc(c.name)} · <a class="num" href="tel:${tel}">${esc(c.phone)}</a>`)
+    : `<span class="muted">Loading…</span>`}</span>`;
   return `<div class="order ${kind==="open"?"alert":""}">
     <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${STATUS[o.status]?.tone}">${esc(statusLabel(o))}</span></div>
     <div class="kv"><b>Pick up</b><span>${esc(SHOP.pickupAddress)}</span>
@@ -397,7 +405,7 @@ function render(){
   if(focusKey) document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`)?.focus();
   $("#waitCount").textContent=openOrders.length;
   $("#open").innerHTML = !rider?.online ? `<p class="empty">Switch to <b>Available</b> to see and accept orders.</p>`
-    : openOrders.length ? openOrders.map(o=>card(o,"open")).join("") : `<p class="empty">No orders waiting right now. New ones will appear here.</p>`;
+    : openOrders.filter(o=>o.unconfirmedBy!==me.uid).length ? openOrders.filter(o=>o.unconfirmedBy!==me.uid).map(o=>{ loadContact(o.id); return card(o,"open"); }).join("") : `<p class="empty">No orders waiting right now. New ones will appear here.</p>`;
   const done=mine.filter(o=>o.status==="delivered" && o.deliveredDate===day);
   const unsettled=mine.filter(o=>o.status==="delivered" && o.settled===false);
   $("#sTrips").textContent=done.length;
@@ -450,15 +458,28 @@ $("#riderView").addEventListener("click",async e=>{
   }
 });
 
+const called={}; // open orders whose customer this rider has phoned
 const pinDraft={}, cardErr={}; // typed codes, and the last error on each order card (kept across refreshes)
 $("#riderView").addEventListener("input",e=>{
   const i=e.target.closest("[data-pin-for]"); if(!i) return;
   i.value=i.value.replace(/\D/g,"").slice(0,4); pinDraft[i.dataset.pinFor]=i.value; delete cardErr[i.dataset.pinFor];
 });
+$("#riderView").addEventListener("click",e=>{
+  const c=e.target.closest("[data-call]"); if(!c) return;
+  called[c.dataset.call]=true; setTimeout(render,500); // let the phone app open first
+});
 $("#riderView").addEventListener("click", async e=>{
   const b=e.target.closest("[data-act]"); if(!b) return;
   const id=b.dataset.id, ref=doc(db,"orders",id), act=b.dataset.act;
   const fail=m=>{ cardErr[id]=m; const p=document.querySelector(`[data-err="${id}"]`); if(p){p.textContent=m;p.hidden=false;} b.disabled=false; };
+  if(act==="noconfirm"){
+    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Tell the shop you couldn't confirm? Tap again"; return; }
+    b.disabled=true;
+    try{ await updateDoc(ref,{unconfirmedAt:serverTimestamp(),unconfirmedBy:me.uid,unconfirmedByName:rider.name}); }
+    catch(x){ fail(friendlyError(x)); }
+    return;
+  }
+  if(act==="accept" && !called[id]) return fail("Call the customer first to check the order is real.");
   if(act==="release" && b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Tap again to give it back"; return; }
   b.disabled=true;
   try{

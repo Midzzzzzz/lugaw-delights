@@ -27,7 +27,10 @@ await t("cash received can't be erased", () => assertFails(up("c1", { cashGiven:
 await t("a paid order can't be changed", () => assertFails(up("c1", { items: [{ id: "L01", name: "Plain Lugaw", price: 39, qty: 1 }], subtotal: 39, total: 39,
   removed: [{ id: "L01", name: "Plain Lugaw", price: 39, qty: 1, by: "S", at: 1 }], editedAt: serverTimestamp(), editedBy: "s1", editedByName: "S" })));
 console.log("GCash");
-await t("served table's GCash marked received", () => assertSucceeds(up("g1", { paid: true, paidAt: serverTimestamp() })));
+await t("GCash can't be marked paid without a Ref No.", () => assertFails(up("g1", { paid: true, paidAt: serverTimestamp() })));
+await t("GCash can't be marked paid with a made-up short Ref No.", () => assertFails(up("g1", { paid: true, paidAt: serverTimestamp(), gcashRef: "12" })));
+await t("Ref No. with symbols refused", () => assertFails(up("g1", { paid: true, paidAt: serverTimestamp(), gcashRef: "1234-5678-90" })));
+await t("served table's GCash marked received with its Ref No.", () => assertSucceeds(up("g1", { paid: true, paidAt: serverTimestamp(), gcashRef: "1234567890123" })));
 await t("a paid order can't be marked unpaid again", () => assertFails(up("g1", { paid: false })));
 await t("a GCash-paid order can't be changed", () => assertFails(up("g1", { items: [{ id: "L01", name: "Plain Lugaw", price: 39, qty: 3 }], subtotal: 117, total: 117, status: "preparing", addedAt: serverTimestamp() })));
 await t("customer can't mark an order paid", () => assertFails(updateDoc(doc(as("cust", "anonymous"), "orders/c1"), { paid: true })));

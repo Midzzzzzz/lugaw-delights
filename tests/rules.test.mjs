@@ -83,7 +83,8 @@ await t("customer can't cancel after the shop accepts", async () => {
 const r1 = as("rider1", "password"), r2 = as("rider2", "password");
 await t("pending rider can't read waiting orders", () => assertFails(getDocs(query(collection(as("pending1", "password"), "orders"), where("mode", "==", "Delivery"), where("riderUid", "==", null), where("status", "in", ["new", "preparing", "ready"])))));
 await t("approved rider lists orders needing a rider", () => assertSucceeds(getDocs(query(collection(r1, "orders"), where("mode", "==", "Delivery"), where("riderUid", "==", null), where("status", "in", ["new", "preparing", "ready"])))));
-await t("rider can't read customer contact before accepting", () => assertFails(getDoc(doc(r1, "contacts/o1"))));
+await t("rider can read the customer contact to call before accepting", () => assertSucceeds(getDoc(doc(r1, "contacts/o1"))));
+await t("pending rider can't read the customer contact", () => assertFails(getDoc(doc(as("pending1", "password"), "contacts/o1"))));
 
 console.log("Delivering");
 await t("rider accepts (transaction)", () => assertSucceeds(runTransaction(r1, async tx => {

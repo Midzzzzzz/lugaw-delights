@@ -494,6 +494,7 @@ function orderCard(o){
     : `Paid by GCash. You owe the rider the ${peso(o.deliveryFee)} fee.${payTo(o.riderUid)}`}</span>`:"";
   return `<div class="order ${o.status==="new"?"alert":""}">
     <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${esc(st.tone)}">${esc(statusLabel(o))}</span></div>
+    ${o.unconfirmedAt&&o.status==="new"?`<div class="flag">Rider ${esc(o.unconfirmedByName||"")} couldn't confirm this customer by phone (${fmtTime(o.unconfirmedAt)}). Call the customer; if it's a fake order, cancel it.</div>`:""}
     ${priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
     ${!dineIn && c && ["new","preparing"].includes(o.status) && phoneConfirmed(c.phone)===false?`<div class="flag">New number. Call ${esc(c.phone)} to check the order is real before cooking.</div>`:""}
     <div class="kv"><b>Time</b><span>${fmtTime(o.createdAt)} · ${esc(o.mode)}</span>
@@ -521,12 +522,23 @@ const changeText=(o,v)=>{
   if(v==="" || !Number.isFinite(n)) return "";
   return n>=o.total ? `Change: <b>${peso(n-o.total)}</b>` : `<span style="color:var(--brand-deep)">Short by ${peso(o.total-n)}</span>`;
 };
+// GCash Ref No. typed for each dine-in order (kept across board refreshes)
+const refDraft={};
+const cleanRef=v=>String(v||"").replace(/[\s-]/g,"");
+// The same Ref No. on another order means one payment is being counted twice
+function refReused(o){
+  const on=orders.filter(x=>x.id!==o.id && x.gcashRef && x.gcashRef===o.gcashRef).map(x=>x.code);
+  return on.length?`<div class="flag">This GCash Ref No. is also on ${on.map(esc).join(", ")}. One payment can't pay for two orders.</div>`:"";
+}
 function cashBlock(o){
   if(o.mode!=="Dine-in" || o.status==="cancelled") return "";
   const due=isPaid(o)?"":`<div class="flag">Not paid yet · ${peso(o.total)}</div>`;
   if(o.payment!=="Cash") return o.paid
-    ? `<div><span class="pill done">Paid</span> GCash</div>`
-    : `${due}<div class="btnrow"><button class="btn small ok" data-gcash-paid="${esc(o.id)}">GCash payment received</button></div>`;
+    ? `<div><span class="pill done">Paid</span> GCash${o.gcashRef?` · Ref <b class="num">${esc(o.gcashRef)}</b>`:""}</div>${refReused(o)}`
+    : `${due}<div class="btnrow"><input inputmode="numeric" maxlength="24" autocomplete="off" placeholder="GCash Ref No." aria-label="GCash reference number"
+        data-ref-for="${esc(o.id)}" data-focus-key="ref-${esc(o.id)}" value="${esc(refDraft[o.id]||"")}" style="max-width:200px">
+        <button class="btn small ok" data-gcash-paid="${esc(o.id)}">Save payment</button></div>
+      <div class="muted" style="font-size:.85rem">Find the payment in your GCash History and type its Ref No.</div>`;
   if(o.cashGiven==null) return due+cashInput(o);
   if(o.cashGiven!=null) return `<div class="totals">
     <div><span>Paid (cash)</span><span>${peso(o.cashGiven)}</span></div>
@@ -541,6 +553,7 @@ function cashInput(o){
     <div data-change-for="${esc(o.id)}" style="font-size:1.05rem">${changeText(o,v)}</div></div>`;
 }
 $("#board").addEventListener("input",e=>{
+  const r=e.target.closest("[data-ref-for]"); if(r){ refDraft[r.dataset.refFor]=r.value; return; }
   const i=e.target.closest("[data-given-for]"); if(!i) return;
   const id=i.dataset.givenFor, o=orders.find(x=>x.id===id); givenDraft[id]=i.value;
   const out=document.querySelector(`[data-change-for="${CSS.escape(id)}"]`); if(o&&out) out.innerHTML=changeText(o,i.value);
@@ -689,9 +702,12 @@ $("#board").addEventListener("click", async e=>{
     b.closest(".btnrow").after(box); b.remove(); return;
   }
   if(b.dataset.gcashPaid){
-    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Found it in GCash? Tap again"; return; }
+    const id=b.dataset.gcashPaid, ref=cleanRef(refDraft[id]);
+    if(!/^[0-9A-Za-z]{6,20}$/.test(ref)){ b.textContent="Type the GCash Ref No. first"; return; }
+    const dup=orders.find(x=>x.id!==id && x.gcashRef===ref);
+    if(dup && b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent=`Ref already on ${dup.code}. Save anyway?`; return; }
     b.disabled=true;
-    try{ await updateDoc(doc(db,"orders",b.dataset.gcashPaid),{paid:true,paidAt:serverTimestamp()}); }
+    try{ await updateDoc(doc(db,"orders",id),{paid:true,paidAt:serverTimestamp(),gcashRef:ref}); delete refDraft[id]; }
     catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
     return;
   }
