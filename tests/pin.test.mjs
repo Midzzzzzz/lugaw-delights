@@ -39,7 +39,7 @@ await t("delivery order with a 3-digit PIN refused", () => assertFails(place("a2
 await t("delivery order with letters in PIN refused", () => assertFails(place("a3", "Delivery", { pin: "12a4" }).done));
 const good = place("cust", "Delivery");
 await t("delivery order with a PIN works", () => assertSucceeds(good.done));
-await t("pickup order needs no PIN", () => assertSucceeds(place("a4", "Pickup", { withPin: false }).done));
+await t("customers can't place pickup orders", () => assertFails(place("a4", "Pickup", { withPin: false }).done));
 
 console.log("Who can see the PIN");
 await t("customer reads their PIN", () => assertSucceeds(getDoc(doc(as("cust", "anonymous"), "pins", good.id))));
@@ -81,7 +81,9 @@ await t("rider can't read reports", () => assertFails(getDoc(doc(r1, "reports", 
 await t("seller can't read reports", () => assertFails(getDoc(doc(as("s1"), "reports", good.id))));
 await t("owner reads the report", () => assertSucceeds(getDoc(doc(as("owner"), "reports", good.id))));
 await t("owner marks it resolved", () => assertSucceeds(updateDoc(doc(as("owner"), "reports", good.id), { status: "resolved" })));
-await t("pickup order report (no rider)", async () => { const p = place("cust3", "Pickup", { withPin: false }); await p.done;
+await t("older pickup order can still be reported (no rider)", async () => {
+  const p = { id: "oldpickup" };
+  await seed(db => setDoc(doc(db, "orders", p.id), { code: "LD-P", customerUid: "cust3", mode: "Pickup", status: "completed", riderUid: null, total: 78 }));
   await assertSucceeds(rep(as("cust3", "anonymous"), p.id, { customerUid: "cust3", riderUid: null, riderName: null, mode: "Pickup", reason: "Wrong or missing items" })); });
 
 console.log(`\n${pass} passed, ${fail} failed`);

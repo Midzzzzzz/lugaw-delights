@@ -272,7 +272,7 @@ service cloud.firestore {
           && d.customerUid == uid()
           && d.status == 'new'
           && d.riderUid == null
-          && d.mode in ['Delivery', 'Pickup']
+          && d.mode == 'Delivery' // customers order delivery only (pickup orders from before stay valid)
           && d.payment == 'Cash' // online orders are cash on delivery or pickup
           && okItems(d.items)
           && amount(d.subtotal) && amount(d.deliveryFee) && amount(d.total)

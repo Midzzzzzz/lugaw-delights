@@ -31,7 +31,7 @@ await t("delivery with 2 boxes: 78 + 40 + 20 = 138", () => assertSucceeds(place(
 await t("total that leaves out the boxes refused", () => assertFails(place("Delivery", { boxFee: 20, total: 118 })));
 await t("negative box fee refused", () => assertFails(place("Delivery", { boxFee: -20, total: 98 })));
 await t("older app without a box fee still accepted (seller sees a price warning)", () => assertSucceeds(place("Delivery", { total: 118 })));
-await t("pickup has no box fee", () => assertSucceeds(place("Pickup", { boxFee: 0, total: 78 })));
+await t("customers can't place pickup orders", () => assertFails(place("Pickup", { boxFee: 0, total: 78 })));
 await t("pickup with a box fee refused", () => assertFails(place("Pickup", { boxFee: 20, total: 98 })));
 
 console.log("Dine-in");

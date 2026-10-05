@@ -448,7 +448,7 @@ function orderCard(o){
   const rider=o.riderName?`<b>Rider</b><span>${esc(o.riderName)} · <span class="num">${esc(o.riderPhone)}</span></span>`:
     (del&&["preparing","ready"].includes(o.status)?`<b>Rider</b><span style="color:var(--brand-deep)">No rider yet: finding a new one (${avail.length} available)</span>`
     : o.status==="new"&&del?`<b>Riders</b><span>${avail.length?`<span class="pill go">${avail.length} available now</span> ${avail.map(r=>esc(r.name)).join(", ")}`
-      :`<b style="color:var(--brand-deep)">No rider is available right now.</b> Call a rider, or call the customer to offer pickup.`}
+      :`<b style="color:var(--brand-deep)">No rider is available right now.</b> Call a rider, or call the customer to let them know.`}
       <br><span class="muted">Finding a rider for ${waitedMin(o)} min. The order comes to the kitchen once a rider accepts.</span></span>`:"");
   const payAtPickup=o.status==="ready"&&del&&o.riderUid&&o.payment==="Cash"?`<b>Pickup</b><span>Hand over the food only after the rider pays you <b>${peso(shopAmount(o))}</b>. The rider then collects ${peso(o.total)} from the customer and keeps the ${peso(o.deliveryFee)} fee.</span>`:"";
   const settle=unsettled(o)?`<b>Settle</b><span>${o.payment==="Cash"

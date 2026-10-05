@@ -26,7 +26,7 @@ function place({ mode = "Delivery", zone = "lb-anos", fee = 40, withZone = true 
 }
 console.log("Before the owner has saved any delivery areas");
 await t("delivery refused", () => assertFails(place()));
-await t("pickup still works", () => assertSucceeds(place({ mode: "Pickup" })));
+await t("customers can't place pickup orders", () => assertFails(place({ mode: "Pickup" })));
 
 console.log("Owner sets fees");
 await t("seller can't change delivery fees", () => assertFails(setDoc(doc(as("s1"), "settings/delivery"), { fees: { "lb-anos": 0 } })));
@@ -41,7 +41,7 @@ await t("free delivery refused", () => assertFails(place({ fee: 0 })));
 await t("Bicutan, Taguig refused", () => assertFails(place({ zone: "taguig-bicutan", fee: 40 })));
 await t("barangay the owner unticked refused", () => assertFails(place({ zone: "lb-tadlac", fee: 40 })));
 await t("delivery without a barangay refused", () => assertFails(place({ withZone: false })));
-await t("pickup needs no barangay", () => assertSucceeds(place({ mode: "Pickup" })));
+await t("pickup still refused once delivery areas exist", () => assertFails(place({ mode: "Pickup" })));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);

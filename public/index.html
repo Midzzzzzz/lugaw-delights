@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Lugaw Delights – Order Online</title>
-<meta name="description" content="Order lugaw, rice bowls and dumplings from Lugaw Delights for delivery or pickup.">
+<meta name="description" content="Order lugaw, rice bowls and dumplings from Lugaw Delights for delivery.">
 <link rel="icon" href="icon.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&display=swap">
 <link rel="stylesheet" href="style.css">
@@ -57,7 +57,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
       <p class="tag">Comfort in a bowl, delivered hot to your door.</p>
       <div class="chips">
         <span class="pill brand" id="hoursPill"></span>
-        <span class="pill">Delivery</span><span class="pill">Pickup</span><span class="pill">Cash on delivery</span>
+        <span class="pill">Delivery</span><span class="pill">Cash on delivery</span>
       </div>
     </div>
   </header>
@@ -76,12 +76,6 @@ aside h2{font-size:1.4rem;color:var(--brand)}
         <h2>Your order</h2>
         <div id="cartBox"></div>
         <form class="stack" id="form" novalidate>
-          <div class="group"><span>How do you want it?</span>
-            <div class="seg">
-              <input type="radio" name="mode" id="m-del" value="Delivery" checked><label for="m-del">Delivery</label>
-              <input type="radio" name="mode" id="m-pick" value="Pickup"><label for="m-pick">Pickup</label>
-            </div>
-          </div>
           <label class="f" for="f-name">Name<input id="f-name" autocomplete="name" maxlength="80" placeholder="Juan Dela Cruz"></label>
           <label class="f" for="f-phone">Mobile number<input id="f-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="09XX XXX XXXX"></label>
           <label class="f" for="f-zone" id="zoneWrap">Barangay (Los Baños or Bay, Laguna only)<select id="f-zone"></select></label>
@@ -115,7 +109,7 @@ const zoneFee = ()=>fees && zone() in fees ? fees[zone()] : null;
 
 // ---------- Menu ----------
 $("#hoursPill").textContent = "Open " + SHOP.hours;
-$("#foot").innerHTML = `${esc(SHOP.deliveryNote)} Pickup at ${esc(SHOP.pickupAddress)}. Questions? Call or text ${esc(SHOP.phone)}.<br>
+$("#foot").innerHTML = `${esc(SHOP.deliveryNote)} Questions? Call or text ${esc(SHOP.phone)}.<br>
   <a href="rider.html">Ride with us</a>`;
 $("#cats").innerHTML = MENU.map((c,i)=>`<a href="#${c.id}" class="${i?"":"on"}">${esc(c.name.replace(" Series",""))}</a>`).join("");
 $("#menu").innerHTML = MENU.map(c => `
@@ -141,8 +135,8 @@ $("#menu").addEventListener("click", e=>{
   renderCtl(id); renderCart();
 });
 
-const mode=()=>document.querySelector('input[name="mode"]:checked').value;
-const pay=()=>"Cash"; // online orders are cash on delivery or cash on pickup
+const mode=()=>"Delivery"; // customers order delivery only
+const pay=()=>"Cash"; // online orders are cash on delivery
 const cartItems=()=>Object.entries(cart).map(([id,qty])=>({id,name:ITEMS[id].name,price:ITEMS[id].price,qty}));
 
 function renderCart(){
@@ -178,7 +172,6 @@ function renderZones(){
 }
 renderZones();
 $("#f-zone").addEventListener("change",renderCart);
-document.querySelectorAll('input[name="mode"]').forEach(r=>r.addEventListener("change",()=>{renderPayNote();renderCart();}));
 renderPayNote(); renderCart();
 
 const obs=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting)
@@ -413,7 +406,7 @@ $("#form").addEventListener("submit", async e=>{
   e.preventDefault();
   const name=$("#f-name").value.trim(), phone=$("#f-phone").value.trim(), address=$("#f-addr").value.trim(), notes=$("#f-notes").value.trim();
   const miss=[]; if(!name) miss.push("your name"); if(!phoneKey(phone)) miss.push("a valid mobile number (09XX XXX XXXX)");
-  if(mode()==="Delivery" && fees && !Object.keys(fees).length) return showErr("Sorry, delivery isn't available right now. Please choose Pickup or call us.");
+  if(mode()==="Delivery" && fees && !Object.keys(fees).length) return showErr("Sorry, delivery isn't available right now. Please call us.");
   if(mode()==="Delivery" && zoneFee()==null) miss.push("your barangay (we deliver in Los Baños and Bay only)");
   if(mode()==="Delivery" && !address) miss.push("your house no., street and landmark");
   if(miss.length) return showErr("Please add "+miss.join(", ")+".");
