@@ -28,6 +28,7 @@
 
   <!-- Signed out -->
   <div id="authView" class="narrow" hidden>
+    <div id="getApp" style="margin-bottom:12px"></div>
     <div class="tabs" style="position:static;border:0"><button class="on" data-tab="login">Sign in</button><button data-tab="register">Register as rider</button></div>
 
     <form class="stack card" id="loginForm" novalidate>
@@ -39,7 +40,6 @@
     </form>
 
     <form class="stack card" id="regForm" novalidate hidden>
-      <div id="getApp"></div>
       <p style="margin:0">Fill this in, then bring your <b>driver's license, OR/CR, and NBI or barangay clearance</b> to the shop so we can verify you. You can accept orders once we approve you.</p>
       <label class="f" for="r-name">Full name<input id="r-name" autocomplete="name" maxlength="80"></label>
       <label class="f" for="r-phone">Mobile number<input id="r-phone" type="tel" inputmode="tel" maxlength="20" placeholder="09XX XXX XXXX"></label>
@@ -209,6 +209,7 @@ function getAppHTML(afterSignup){
       If it warns about an unknown app, tap <b>Install anyway</b>: it'"'"'s our own app, not from the Play Store yet.</span></div>`;
 }
 $("#getApp").innerHTML=getAppHTML(false);
+if(location.hash==="#register") document.querySelector("[data-tab=register]")?.click();
 
 function showWaiting(){
   show("waitView");

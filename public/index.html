@@ -114,7 +114,7 @@ const zoneFee = ()=>fees && zone() in fees ? fees[zone()] : null;
 // ---------- Menu ----------
 $("#hoursPill").textContent = "Open " + SHOP.hours;
 $("#foot").innerHTML = `${esc(SHOP.deliveryNote)} Questions? Call or text ${esc(SHOP.phone)}.<br>
-  <a href="rider.html">Ride with us</a>`;
+  <a href="rider.html#register">Ride with us</a>`;
 $("#cats").innerHTML = MENU.map((c,i)=>`<a href="#${c.id}" class="${i?"":"on"}">${esc(c.name.replace(" Series",""))}</a>`).join("");
 $("#menu").innerHTML = MENU.map(c => `
   <section class="cat" id="${c.id}"><h2>${esc(c.name)}${c.note?`<small>${esc(c.note)}</small>`:""}</h2>
