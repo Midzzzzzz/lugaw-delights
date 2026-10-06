@@ -9,3 +9,6 @@ node_modules/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# The Rider app download (public/apps/*.apk) is built from lugaw-mobile; rebuild it rather than storing it in Git
+public/apps/*.apk

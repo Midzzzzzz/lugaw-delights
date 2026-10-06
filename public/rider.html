@@ -39,6 +39,7 @@
     </form>
 
     <form class="stack card" id="regForm" novalidate hidden>
+      <div id="getApp"></div>
       <p style="margin:0">Fill this in, then bring your <b>driver's license, OR/CR, and NBI or barangay clearance</b> to the shop so we can verify you. You can accept orders once we approve you.</p>
       <label class="f" for="r-name">Full name<input id="r-name" autocomplete="name" maxlength="80"></label>
       <label class="f" for="r-phone">Mobile number<input id="r-phone" type="tel" inputmode="tel" maxlength="20" placeholder="09XX XXX XXXX"></label>
@@ -191,6 +192,24 @@ $("#regForm").onsubmit=async e=>{
   }catch(x){ err("#r-err",friendlyError(x)); }
 };
 
+// ---------- Rider app (Android) ----------
+// Riders using the website are asked to install the Rider app. Hidden inside the app itself.
+const RIDER_APK="apps/LugawDelightsRider.apk";
+const inApp=!!window.Capacitor?.isNativePlatform?.();
+const isIPhone=/iPhone|iPad|iPod/i.test(navigator.userAgent);
+function getAppHTML(afterSignup){
+  if(inApp) return "";
+  if(isIPhone) return `<div class="notice" style="margin:0"><b>Using an iPhone?</b> The Rider app is for Android only.
+    Keep using this page in Safari${afterSignup?"":" after you register"}: it works the same.</div>`;
+  return `<div class="notice" style="margin:0;display:grid;gap:8px">
+    <b>${afterSignup?"Next: install the Rider app":"Install the Lugaw Delights Rider app"}</b>
+    <span>Riders use the Android app to get orders, call customers and take proof photos.${afterSignup?" Sign in there with the email and password you just used.":" Register here, then sign in to the app with the same email and password."}</span>
+    <a class="btn" href="${RIDER_APK}" download="LugawDelightsRider.apk" style="justify-self:start">Download the Rider app (Android)</a>
+    <span class="muted" style="font-size:.85rem">After it downloads, tap the file and choose <b>Install</b>. If your phone asks, allow installing apps from your browser.
+      If it warns about an unknown app, tap <b>Install anyway</b>: it'"'"'s our own app, not from the Play Store yet.</span></div>`;
+}
+$("#getApp").innerHTML=getAppHTML(false);
+
 function showWaiting(){
   show("waitView");
   const msg={
@@ -198,7 +217,7 @@ function showWaiting(){
     rejected:["Application not approved","Sorry, we can't take you on as a rider right now. Call the shop if you have questions."],
     suspended:["Account paused","Your rider account is paused. Please talk to the shop owner."]
   }[rider.status]||["Account on hold","Please contact the shop."];
-  $("#waitView").innerHTML=`<h2 style="color:var(--brand)">${msg[0]}</h2><p>${msg[1]}</p><p class="muted">Shop: ${esc(SHOP.phone)}</p>`;
+  $("#waitView").innerHTML=`<h2 style="color:var(--brand)">${msg[0]}</h2><p>${msg[1]}</p>${rider.status==="pending"?getAppHTML(true):""}<p class="muted">Shop: ${esc(SHOP.phone)}</p>`;
 }
 
 // ---------- Rider agreement ----------
