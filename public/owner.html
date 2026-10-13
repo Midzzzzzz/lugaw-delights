@@ -76,12 +76,12 @@ table.orders td.n,table.orders th.n{text-align:right;font-variant-numeric:tabula
 
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { auth, db, isConfigured, ITEMS, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
 const $=s=>document.querySelector(s);
-let agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], riders=[], contacts={}, open=null, teamErr="";
+let ledger=[], ledgerErr="", agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], riders=[], contacts={}, open=null, teamErr="";
 let range="today", tab="sales", filter="all", search="";
 const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
 $("#setup").innerHTML=setupNotice();
@@ -121,6 +121,12 @@ $("#create").onclick=async()=>{ lerr();
   try{ await createUserWithEmailAndPassword(auth,$("#l-email").value.trim(),$("#l-pass").value); }catch(x){ lerr(friendlyError(x)); } };
 
 function start(){
+  // Savings book: money set aside from sales, and expenses paid from it (owner only)
+  subs.push(onSnapshot(query(collection(db,"ledger"),orderBy("date","desc")), s=>{
+    // newest first: by date, then by when it was recorded
+    const t=e=>e.createdAt?.toMillis?.()??Infinity;
+    ledger=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.date===b.date?t(b)-t(a):(a.date<b.date?1:-1)); ledgerErr=""; if(tab==="savings") render();
+  }, e=>{ ledgerErr="Couldn't load savings: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; if(tab==="savings") render(); }));
   subs.push(onSnapshot(collection(db,"sellers"), s=>{ sellers=s.docs.map(d=>({id:d.id,...d.data()})); teamErr=""; render(); }, e=>{ teamErr="Couldn't load sellers: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; render(); }));
   subs.push(onSnapshot(collection(db,"riders"), s=>{ riders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   // Signed rider agreements, by rider id
@@ -199,7 +205,14 @@ function rank(rows,{main,sub,numbered=true,empty}){
 }
 const plural=(n,w)=>`${n} ${w}${n===1?"":"s"}`;
 
-function render(){
+// While the owner is typing in a form, wait: a redraw would wipe what they typed.
+// Updates are shown as soon as they leave the box (but not mid-tap on a button).
+let renderWaiting=false;
+$("#view").addEventListener("focusout",()=>setTimeout(()=>{ const a=document.activeElement;
+  if(renderWaiting && !(a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.closest("#view"))){ renderWaiting=false; render(); } },400));
+function render(force){
+  const a=document.activeElement;
+  if(force!==true && a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.closest("#view") && a.id!=="search"){ renderWaiting=true; return; }
   const done=orders.filter(isDone), sales=done.reduce((s,o)=>s+shopAmount(o),0);
   $("#sSales").textContent=peso(sales);
   $("#sOrders").textContent=done.length;
@@ -208,12 +221,13 @@ function render(){
   $("#sOpen").textContent=orders.filter(o=>ACTIVE.includes(o.status)).length;
   $("#sCancel").textContent=orders.filter(o=>o.status==="cancelled").length;
   const pending=sellers.filter(s=>s.status==="pending").length+riders.filter(r=>r.status==="pending").length;
-  $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Sellers & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["settings","Shop settings"]]
+  $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Sellers & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["savings","Savings"],["settings","Shop settings"]]
     .map(([id,l,n])=>`<button class="${tab===id?"on":""}" data-tab="${id}">${l}${n?`<span class="count">${n}</span>`:""}</button>`).join("");
   if(tab==="sales") renderSales(done);
   else if(tab==="orders") renderOrders();
   else if(tab==="team") renderTeam();
   else if(tab==="reports") renderReports();
+  else if(tab==="savings") renderSavings();
   else renderSettings();
 }
 $("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]"); if(b){ tab=b.dataset.tab; render(); } });
@@ -344,6 +358,110 @@ $("#view").addEventListener("click",async e=>{
   b.disabled=true;
   try{ await updateDoc(doc(db,"reports",b.dataset.reportStatus),{status:b.dataset.to}); }
   catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
+});
+
+// ---------- Savings ----------
+const EXPENSE_TYPES=["Ingredients","Supplies","Rent","Utilities","Salaries","Equipment","Other"];
+const todayStr=()=>ymd(new Date());
+const monthOf=d=>String(d||"").slice(0,7);
+let savMonth=todayStr().slice(0,7), salesHint={};
+// Sales (food and boxes, not rider fees) from completed orders placed on a given day
+async function salesOn(day){
+  if(salesHint[day]!==undefined) return salesHint[day];
+  const a=new Date(day+"T00:00"), b=addDays(a,1);
+  const s=await getDocs(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<",Timestamp.fromDate(b))));
+  return salesHint[day]=s.docs.map(d=>d.data()).filter(isDone).reduce((t,o)=>t+shopAmount(o),0);
+}
+function renderSavings(){
+  const saved=ledger.filter(e=>e.type==="saving").reduce((t,e)=>t+e.amount,0);
+  const spent=ledger.filter(e=>e.type==="expense").reduce((t,e)=>t+e.amount,0);
+  const inMonth=ledger.filter(e=>monthOf(e.date)===savMonth);
+  const mSaved=inMonth.filter(e=>e.type==="saving").reduce((t,e)=>t+e.amount,0), mSpent=inMonth.filter(e=>e.type==="expense").reduce((t,e)=>t+e.amount,0);
+  // running balance after each entry, oldest first
+  const run={}; let bal=0;
+  [...ledger].reverse().forEach(e=>{ bal+=e.type==="saving"?e.amount:-e.amount; run[e.id]=bal; });
+  const months=[...new Set([todayStr().slice(0,7),...ledger.map(e=>monthOf(e.date))])].sort().reverse();
+  const mName=m=>new Date(m+"-01T00:00").toLocaleDateString("en-PH",{month:"long",year:"numeric"});
+  $("#view").innerHTML=`${ledgerErr?`<div class="flag" style="margin-top:12px">${esc(ledgerErr)}</div>`:""}
+  <div class="stats" style="margin-top:12px">
+    <div class="stat"><b>${peso(saved-spent)}</b><span>Savings balance</span></div>
+    <div class="stat"><b>${peso(saved)}</b><span>Total saved</span></div>
+    <div class="stat"><b>${peso(spent)}</b><span>Total spent</span></div>
+  </div>
+  <div class="panels">
+    <form class="card panel" id="savForm" novalidate style="display:grid;gap:10px">
+      <h2>Add savings</h2>
+      <label class="f" for="sv-date">Sales date<input type="date" id="sv-date" value="${todayStr()}" max="${todayStr()}"></label>
+      <p class="muted" style="margin:0;font-size:.88rem" id="sv-hint">Checking sales…</p>
+      <label class="f" for="sv-amt">Amount to save (₱)<input id="sv-amt" type="number" inputmode="numeric" min="1" step="1" placeholder="e.g. 1500"></label>
+      <label class="f" for="sv-note">Note (optional)<input id="sv-note" maxlength="120" placeholder="e.g. From today's sales, deposited at bank"></label>
+      <p class="err" id="sv-err" hidden></p>
+      <button class="btn" type="submit">Save to savings</button>
+    </form>
+    <form class="card panel" id="expForm" novalidate style="display:grid;gap:10px">
+      <h2>Add expense</h2>
+      <label class="f" for="ex-date">Date<input type="date" id="ex-date" value="${todayStr()}" max="${todayStr()}"></label>
+      <label class="f" for="ex-cat">Category<select id="ex-cat">${EXPENSE_TYPES.map(c=>`<option>${c}</option>`).join("")}</select></label>
+      <label class="f" for="ex-amt">Amount (₱)<input id="ex-amt" type="number" inputmode="numeric" min="1" step="1" placeholder="e.g. 800"></label>
+      <label class="f" for="ex-note">What was it for?<input id="ex-note" maxlength="120" placeholder="e.g. 2 sacks of rice"></label>
+      <p class="err" id="ex-err" hidden></p>
+      <button class="btn" type="submit">Pay from savings</button>
+    </form>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <div class="toolbar" style="justify-content:space-between"><h2 style="color:var(--brand-deep);font-size:1.2rem">History</h2>
+      <select id="sv-month" aria-label="Month" style="width:auto">${months.map(m=>`<option value="${m}"${m===savMonth?" selected":""}>${mName(m)}</option>`).join("")}</select></div>
+    <p style="margin:8px 0">${esc(mName(savMonth))}: saved <b>${peso(mSaved)}</b> · spent <b>${peso(mSpent)}</b> · net <b>${peso(mSaved-mSpent)}</b></p>
+    <div class="tablewrap"><table class="orders"><thead><tr><th>Date</th><th>Type</th><th>Details</th><th class="n">Amount</th><th class="n">Balance</th><th></th></tr></thead>
+    <tbody>${inMonth.map(e=>`<tr><td>${esc(new Date(e.date+"T00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric"}))}</td>
+      <td>${e.type==="saving"?`<span class="pill go">Saved</span>`:`<span class="pill work">${esc(e.category||"Expense")}</span>`}</td>
+      <td>${esc(e.note||"")}</td>
+      <td class="n" style="color:${e.type==="saving"?"var(--ok)":"var(--brand-deep)"}">${e.type==="saving"?"+":"−"}${peso(e.amount)}</td>
+      <td class="n">${peso(run[e.id])}</td>
+      <td><button class="btn ghost small" data-ledger-del="${esc(e.id)}">Delete</button></td></tr>`).join("")
+      || `<tr><td colspan="6" class="muted">Nothing recorded in ${esc(mName(savMonth))} yet.</td></tr>`}</tbody></table></div>
+  </div>`;
+  showSalesHint();
+}
+async function showSalesHint(){
+  const day=$("#sv-date")?.value; if(!day) return;
+  const hint=$("#sv-hint"); hint.textContent="Checking sales…";
+  try{
+    const total=await salesOn(day);
+    if($("#sv-date")?.value!==day) return;
+    const already=ledger.filter(e=>e.type==="saving"&&e.date===day).reduce((t,e)=>t+e.amount,0);
+    hint.innerHTML=`Sales on this day: <b>${peso(total)}</b>${already?` · already saved ${peso(already)}`:""}
+      ${total-already>0?` <button type="button" class="btn ghost small" id="sv-use">Use ${peso(total-already)}</button>`:total?" · all saved":""}`;
+  }catch(x){ hint.textContent="Couldn't check sales: "+friendlyError(x); }
+}
+$("#view").addEventListener("change",e=>{
+  if(e.target.id==="sv-date") showSalesHint();
+  if(e.target.id==="sv-month"){ savMonth=e.target.value; e.target.blur(); render(true); }
+});
+$("#view").addEventListener("click",async e=>{
+  if(e.target.id==="sv-use"){ const n=(e.target.textContent.match(/[\d,]+/)||["0"])[0].replace(/,/g,""); $("#sv-amt").value=n; $("#sv-amt").focus(); return; }
+  const d=e.target.closest("[data-ledger-del]"); if(!d) return;
+  if(d.dataset.sure!=="1"){ d.dataset.sure="1"; d.textContent="Delete? Tap again"; return; }
+  d.disabled=true;
+  try{ await deleteDoc(doc(db,"ledger",d.dataset.ledgerDel)); }catch(x){ d.disabled=false; d.textContent=friendlyError(x); }
+});
+$("#view").addEventListener("submit",async e=>{
+  const sav=e.target.id==="savForm", exp=e.target.id==="expForm"; if(!sav&&!exp) return;
+  e.preventDefault();
+  const p=sav?"sv":"ex", err=m=>{ const el=$(`#${p}-err`); el.textContent=m||""; el.hidden=!m; };
+  const amount=Math.floor(Number($(`#${p}-amt`).value)), date=$(`#${p}-date`).value, note=$(`#${p}-note`).value.trim();
+  if(!Number.isFinite(amount)||amount<1) return err("Type an amount of ₱1 or more.");
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||date>todayStr()) return err("Choose a date (not in the future).");
+  if(exp&&!note) return err("Say what the expense was for.");
+  const balance=ledger.reduce((t,x)=>t+(x.type==="saving"?x.amount:-x.amount),0);
+  const btn=e.target.querySelector("button[type=submit]");
+  if(exp&&amount>balance&&btn.dataset.sure!=="1"){ btn.dataset.sure="1"; btn.textContent=`More than the ${peso(balance)} balance. Pay anyway?`; return; }
+  btn.disabled=true;
+  try{
+    await addDoc(collection(db,"ledger"),{type:sav?"saving":"expense",amount,date,note,...(exp?{category:$("#ex-cat").value}:{}),
+      createdAt:serverTimestamp(),createdBy:auth.currentUser.uid});
+    savMonth=date.slice(0,7); document.activeElement?.blur(); render(true);
+  }catch(x){ btn.disabled=false; err(friendlyError(x)); }
 });
 
 // ---------- Shop settings ----------

@@ -266,6 +266,22 @@ service cloud.firestore {
       return d.mode == 'Delivery' && d.riderUid == null && d.status in ['new', 'preparing', 'ready'];
     }
 
+    // Savings book: money the owner sets aside from sales, and expenses paid from it.
+    // Owner only. Entries are added or deleted, never edited.
+    match /ledger/{entryId} {
+      allow read, delete: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['type','amount','date','note','category','createdAt','createdBy'])
+        && request.resource.data.type in ['saving', 'expense']
+        && request.resource.data.amount is int && request.resource.data.amount > 0 && request.resource.data.amount < 10000000
+        && request.resource.data.date is string && request.resource.data.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')
+        && str(request.resource.data.note, 120)
+        && (request.resource.data.type == 'saving' ? !('category' in request.resource.data) : str(request.resource.data.category, 30))
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.createdBy == uid();
+      allow update: if false;
+    }
+
     match /orders/{orderId} {
       function newOrder(d) {
         return d.keys().hasOnly(
