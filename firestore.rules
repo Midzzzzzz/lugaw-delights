@@ -290,12 +290,16 @@ service cloud.firestore {
       // ordering is closed. Credited to whoever records it.
       function dineIn(d) {
         return d.keys().hasOnly(
-             ['code','customerUid','mode','table','notes','payment','cashGiven','sellerUid','sellerName',
+             ['code','customerUid','mode','table','notes','payment','cashGiven','paid','paidAt','gcashRef','sellerUid','sellerName',
               'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt'])
           && d.customerUid == uid()
           && d.sellerUid == uid() && str(d.sellerName, 80)
           && d.mode == 'Dine-in'
           && (!('cashGiven' in d) || (amount(d.cashGiven) && d.cashGiven >= d.total))
+          // paid by GCash at the counter: needs the GCash Ref No.
+          && (!('paid' in d) || (d.paid == true && d.payment == 'GCash' && d.paidAt == request.time
+                && d.get('gcashRef', '') is string && d.get('gcashRef', '').matches('[0-9A-Za-z]{6,20}')))
+          && (!('gcashRef' in d) || ('paid' in d))
           && d.status == 'preparing'
           && d.riderUid == null
           && d.payment in ['Cash', 'GCash']
@@ -352,6 +356,8 @@ service cloud.firestore {
                  && amount(request.resource.data.cashGiven) && request.resource.data.cashGiven >= resource.data.total))
             && (!changed().hasAny(['paid']) || (request.resource.data.paid == true && resource.data.get('paid', false) != true
                  && request.resource.data.get('gcashRef', '') is string && request.resource.data.get('gcashRef', '').matches('[0-9A-Za-z]{6,20}')))
+            // the GCash Ref No. and payment time are set together with the payment, never edited later
+            && (!changed().hasAny(['gcashRef','paidAt']) || changed().hasAny(['paid']))
             // (items, prices, box fees and the removal log only change through the dine-in change rule below)
             && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','boxFee','total','payment','createdAt',
                                   'addedAt','removed','editedAt','editedBy','editedByName'])

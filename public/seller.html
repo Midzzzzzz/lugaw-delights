@@ -80,6 +80,7 @@
               <input type="radio" name="dpay" id="d-gc" value="GCash"><label for="d-gc">GCash</label>
             </div>
           </div>
+          <label class="f" for="d-ref" id="refWrap" hidden>GCash Ref No. (if they paid already)<input id="d-ref" inputmode="numeric" maxlength="24" autocomplete="off" placeholder="From the GCash notification"></label>
           <label class="f" for="d-given" id="givenWrap">Cash received (optional)<input id="d-given" type="number" inputmode="numeric" min="0" step="1" placeholder="e.g. 500"></label>
           <div class="group"><span>Take-out?</span>
             <div class="seg" style="grid-template-columns:repeat(3,1fr)">
@@ -112,7 +113,7 @@
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { auth, db, isConfigured, SHOP, MENU, ITEMS, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
+import { auth, db, isConfigured, SHOP, MENU, ITEMS, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 
 const $=s=>document.querySelector(s);
 let subs=[], lists={}, orders=[], riders=[], contacts={}, asked=new Set(), tab="new", known=null;
@@ -294,6 +295,7 @@ $("#dineCart").addEventListener("click",e=>{
 function renderDineTotals(){
   const items=dineItems(), t=calcTotals(items,"Dine-in"), given=cashGiven();
   $("#givenWrap").hidden=dinePay()!=="Cash" || !!addingTo;
+  $("#refWrap").hidden=dinePay()!=="GCash" || !!addingTo;
   const change = given===null ? "" : given>=t.total
     ? `<div><span>Cash received</span><span>${peso(given)}</span></div><div class="grand"><span>Change</span><span>${peso(given-t.total)}</span></div>`
     : `<div style="color:var(--brand-deep);font-weight:700"><span>Short by</span><span>${peso(t.total-given)}</span></div>`;
@@ -309,7 +311,7 @@ $("#d-given").addEventListener("input",renderDineTotals);
 document.querySelectorAll('input[name="dpack"]').forEach(r=>r.addEventListener("change",renderDineTotals));
 $("#d-pack-box-label").textContent=`Box (+${peso(SHOP.boxFee)} each)`;
 document.querySelectorAll('input[name="dpay"]').forEach(r=>r.addEventListener("change",renderDineTotals));
-function closeDine(){ Object.keys(dine).forEach(k=>delete dine[k]); $("#d-table").value=""; $("#d-notes").value=""; $("#d-given").value=""; $("#d-cash").checked=true; $("#d-pack-no").checked=true; dineErr(); $("#dinePanel").hidden=true; setAdding(null); }
+function closeDine(){ Object.keys(dine).forEach(k=>delete dine[k]); $("#d-table").value=""; $("#d-notes").value=""; $("#d-given").value=""; $("#d-ref").value=""; $("#d-cash").checked=true; $("#d-pack-no").checked=true; dineErr(); $("#dinePanel").hidden=true; setAdding(null); }
 // Switch the panel between a new dine-in order and adding to an existing one
 function setAdding(o){
   addingTo=o;
@@ -362,6 +364,11 @@ $("#dineForm").onsubmit=async e=>{
     table:$("#d-table").value.trim(), notes:$("#d-notes").value.trim(), payment:dinePay(), items,
     subtotal:t.subtotal, deliveryFee:0, boxFee:t.boxFee, total:t.total, status:"preparing", riderUid:null, createdAt:serverTimestamp() };
   if(given!==null) order.cashGiven=given;
+  const gref=cleanRef($("#d-ref").value);
+  if(dinePay()==="GCash" && gref){
+    if(!/^[0-9A-Za-z]{6,20}$/.test(gref)){ $("#dineSave").disabled=false; return dineErr("That GCash Ref No. looks too short. Check it in your GCash History."); }
+    Object.assign(order,{paid:true,paidAt:serverTimestamp(),gcashRef:gref});
+  }
   try{
     await setDoc(ref,order);
     closeDine(); tab="kitchen"; render();
@@ -623,7 +630,7 @@ $("#board").addEventListener("input",e=>{
 function receiptHTML(o){
   const c=o.mode==="Dine-in"?null:contacts[o.id], when=o.createdAt?.toDate?.()||new Date();
   const row=(l,r,cls="")=>`<tr class="${cls}"><td>${l}</td><td class="r">${r}</td></tr>`;
-  const lines=(Array.isArray(o.items)?o.items:[]).map(it=>{
+  const lines=mergedLines(o.items).map(it=>{
     const k=ITEMS[it?.id], qty=Number(it?.qty)||0, price=Number(it?.price)||0;
     return row(`${esc(qty)} × ${esc(k?k.name:"Item "+String(it?.id??""))}<br><small>@ ${peso(price)}</small>`, peso(price*qty));
   }).join("");

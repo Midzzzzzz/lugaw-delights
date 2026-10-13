@@ -1,0 +1,27 @@
+// Dine-in GCash: a payment needs the GCash Ref No., whether entered on the order form or later on the card.
+import { readFileSync } from "node:fs";
+import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebase/rules-unit-testing";
+import { doc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+
+const env = await initializeTestEnvironment({ projectId: "demo-lugaw",
+  firestore: { rules: readFileSync(new URL("../firestore.rules", import.meta.url), "utf8"), host: "127.0.0.1", port: 8080 } });
+await env.clearFirestore();
+let pass = 0, fail = 0;
+const t = async (n, f) => { try { await f(); pass++; console.log("  ok  ", n); } catch (e) { fail++; console.log("  FAIL", n); } };
+const as = (u, p = "password") => env.authenticatedContext(u, { firebase: { sign_in_provider: p } }).firestore();
+await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), "sellers/s1"), { name: "S", phone: "09170000001", email: "", status: "approved" }));
+const s1 = as("s1");
+const dine = over => ({ code: "LD-D", customerUid: "s1", sellerUid: "s1", sellerName: "S", mode: "Dine-in", table: "Juan", notes: "", payment: "GCash",
+  items: [{ id: "L01", name: "Plain Lugaw", price: 39, qty: 2 }], subtotal: 78, deliveryFee: 0, total: 78, status: "preparing", riderUid: null, createdAt: serverTimestamp(), ...over });
+const now = { paid: true, paidAt: serverTimestamp() };
+
+await t("GCash dine-in, pay later (no Ref No. yet)", () => assertSucceeds(setDoc(doc(s1, "orders/g1"), dine())));
+await t("GCash dine-in paid now with its Ref No.", () => assertSucceeds(setDoc(doc(s1, "orders/g2"), dine({ ...now, gcashRef: "1234567890123" }))));
+await t("paid now without a Ref No. refused", () => assertFails(setDoc(doc(s1, "orders/g3"), dine(now))));
+await t("paid now with a too-short Ref No. refused", () => assertFails(setDoc(doc(s1, "orders/g4"), dine({ ...now, gcashRef: "123" }))));
+await t("a Ref No. without marking paid refused", () => assertFails(setDoc(doc(s1, "orders/g5"), dine({ gcashRef: "1234567890123" }))));
+await t("cash order can't be marked GCash-paid", () => assertFails(setDoc(doc(s1, "orders/g6"), dine({ payment: "Cash", ...now, gcashRef: "1234567890123" }))));
+await t("pay-later order paid on the card with its Ref No.", () => assertSucceeds(updateDoc(doc(s1, "orders/g1"), { ...now, gcashRef: "9876543210123" })));
+await t("a paid order can't be paid again", () => assertFails(updateDoc(doc(s1, "orders/g2"), { ...now, gcashRef: "5555555555555" })));
+console.log(`\n${pass} passed, ${fail} failed`);
+await env.cleanup(); process.exit(fail ? 1 : 0);

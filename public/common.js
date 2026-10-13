@@ -112,12 +112,25 @@ export function priceCheck(order) {
 
 // Order lines as HTML. Names always come from the menu, never from the order,
 // and every value is escaped, so a tampered order can't inject anything.
+// Order lines with the same item (and packing) added in later rounds merged into one:
+// 3 Lugaw + 1 Lugaw added later = "4× Lugaw (+1 added)". addedQty = how many came later.
+export function mergedLines(items) {
+  const m = new Map();
+  for (const it of Array.isArray(items) ? items : []) {
+    if (!it) continue;
+    const k = `${it.id}|${it.pack || ""}|${it.price}`, q = Number(it.qty) || 0;
+    const r = m.get(k) || { ...it, qty: 0, addedQty: 0 };
+    r.qty += q; if (Number(it.round) > 1) r.addedQty += q;
+    m.set(k, r);
+  }
+  return [...m.values()];
+}
 export function itemsHTML(order, withAmounts) {
-  const items = Array.isArray(order.items) ? order.items : [];
+  const items = mergedLines(order.items);
   return `<ul class="lines">${items.map(it => {
     const known = it && ITEMS[it.id], qty = Number(it?.qty) || 0;
     const name = known ? known.name : "Unknown item: " + String(it?.name ?? it?.id ?? "?");
-    const added = (Number(it?.round) > 1 ? ` <span class="pill new" style="font-size:.7rem">Added</span>` : "") // dine-in items added later
+    const added = (it.addedQty ? ` <span class="pill new" style="font-size:.7rem">${it.addedQty < qty ? `+${it.addedQty} added` : "Added"}</span>` : "") // dine-in items added later
       + (it?.pack ? ` <span class="pill work" style="font-size:.7rem">Take-out · ${it.pack === "box" ? "box" : "plastic"}</span>` : "");
     return `<li><span class="q">${esc(qty)}×</span><span>${esc(name)}${added}</span><span class="amt">${withAmounts ? peso(Number(it?.price) * qty) : ""}</span></li>`;
   }).join("")}</ul>`;
