@@ -351,6 +351,9 @@ service cloud.firestore {
             && !(resource.data.status in ['new', 'assigned'] && request.resource.data.status == 'preparing'
                  && resource.data.payment == 'GCash' && resource.data.mode != 'Dine-in'
                  && !('gcashRef' in resource.data))
+            // A paid order can't be cancelled (the sale stays on the books)
+            && !(resource.data.mode == 'Dine-in' && request.resource.data.status == 'cancelled' && resource.data.status != 'cancelled'
+                 && (('cashGiven' in resource.data) || resource.data.get('paid', false) == true))
             // Payment is recorded once: cash received (covering the total) or GCash marked received
             && (!changed().hasAny(['cashGiven']) || (!('cashGiven' in resource.data)
                  && amount(request.resource.data.cashGiven) && request.resource.data.cashGiven >= resource.data.total))

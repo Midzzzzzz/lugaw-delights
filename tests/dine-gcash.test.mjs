@@ -23,5 +23,14 @@ await t("a Ref No. without marking paid refused", () => assertFails(setDoc(doc(s
 await t("cash order can't be marked GCash-paid", () => assertFails(setDoc(doc(s1, "orders/g6"), dine({ payment: "Cash", ...now, gcashRef: "1234567890123" }))));
 await t("pay-later order paid on the card with its Ref No.", () => assertSucceeds(updateDoc(doc(s1, "orders/g1"), { ...now, gcashRef: "9876543210123" })));
 await t("a paid order can't be paid again", () => assertFails(updateDoc(doc(s1, "orders/g2"), { ...now, gcashRef: "5555555555555" })));
+await t("the Ref No. on a paid order can't be edited", () => assertFails(updateDoc(doc(s1, "orders/g2"), { gcashRef: "5555555555555" })));
+
+// Cancelling a served dine-in order (e.g. the customer left without paying)
+const cancel = id => updateDoc(doc(s1, "orders", id), { status: "cancelled", cancelledAt: serverTimestamp(), cancelledBy: "shop", cancelReason: "Customer left without paying" });
+await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), "orders/u1"), { ...dine(), status: "completed", createdAt: new Date() }));
+await t("served but unpaid order can be cancelled", () => assertSucceeds(cancel("u1")));
+await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), "orders/u2"), { ...dine({ payment: "Cash" }), status: "completed", cashGiven: 100, createdAt: new Date() }));
+await t("cash-paid order can't be cancelled", () => assertFails(cancel("u2")));
+await t("GCash-paid order can't be cancelled", () => assertFails(cancel("g2")));
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);
