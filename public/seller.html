@@ -94,7 +94,7 @@
   <div id="dash" hidden>
     <div class="card profile" id="profile"></div>
     <div class="card toolbar">
-      <label class="switch"><input type="checkbox" id="storeOpen"><span id="storeLabel">Store open</span></label>
+      <span class="pill" id="storeLabel" style="font-size:.9rem;padding:5px 12px">Store…</span>
       <div class="btnrow">
         <button class="btn small" id="dineBtn">+ Dine-in order</button>
         <button class="btn small" id="soundBtn">Turn on order alerts</button>
@@ -149,7 +149,7 @@
 
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes } from "./escpos.js";
 import { shiftSummary } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -261,9 +261,12 @@ $("#soundBtn").onclick=()=>{ if(enableSound()){ chime(); $("#soundBtn").textCont
 // older order that still needs action never drops off the dashboard.
 function start(){
   watchShift();
+  // The store is open for online orders exactly while a shift is open
   subs.push(onSnapshot(doc(db,"settings","store"), s=>{
-    const open=!s.exists()||s.data().open!==false;
-    $("#storeOpen").checked=open; $("#storeLabel").textContent=open?"Store open: taking orders":"Store closed";
+    storeOpen=!s.exists()||s.data().open!==false;
+    $("#storeLabel").textContent=storeOpen?"Store open: taking orders":"Store closed: open a shift to start";
+    $("#storeLabel").className="pill "+(storeOpen?"go":"off");
+    syncStore();
   }, ()=>{}));
   const orderList=(key,q)=>subs.push(onSnapshot(q, s=>{ lists[key]=s.docs.map(d=>({id:d.id,...d.data()})); merge(); },
     e=>{ $("#board").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; }));
@@ -303,12 +306,15 @@ function contactFor(id){
   }
   return contacts[id];
 }
-$("#storeOpen").onchange=e=>{
-  const want=e.target.checked;
-  setDoc(doc(db,"settings","store"),{open:want},{merge:true}).catch(x=>{
-    e.target.checked=!want; $("#storeLabel").textContent="Couldn't change: "+friendlyError(x);
-  });
-};
+// Store open = a shift is open. Opening and closing a shift open and close the store in the same
+// save; this also puts them back in step if they ever differ (for example from before shifts).
+let storeOpen=null, shiftLoaded=false, syncing=false;
+function syncStore(){
+  if(storeOpen===null || !shiftLoaded || syncing) return;
+  const want=!!shift; if(want===storeOpen) return;
+  syncing=true;
+  setDoc(doc(db,"settings","store"),{open:want},{merge:true}).catch(()=>{}).finally(()=>{ syncing=false; });
+}
 
 // ---------- Dine-in orders (recorded at the counter) ----------
 const dine={};
@@ -931,7 +937,7 @@ const SHIFT_REASONS={in:["Change fund","Owner added cash"],out:["Bought supplies
 function watchShift(){
   subs.push(onSnapshot(query(collection(db,"shifts"),where("closedAt","==",null)), s=>{
     const list=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})).sort((a,b)=>(b.openedAt?.toMillis?.()||0)-(a.openedAt?.toMillis?.()||0));
-    const was=shift?.id; shift=list[0]||null;
+    const was=shift?.id; shift=list[0]||null; shiftLoaded=true; syncStore();
     if(shift?.id!==was){
       stopShiftOrders?.(); stopShiftOrders=null; shiftOrders=[];
       if(shift?.openedAt) stopShiftOrders=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",shift.openedAt)),
@@ -959,7 +965,7 @@ function renderShift(){
   }
   if(!shift){
     const v=shiftDraft.start??"";
-    box.innerHTML=`<div class="shift-head"><b>No shift open</b><span class="muted" style="font-size:.88rem">Count the cash in the drawer, then open a shift to start selling.</span></div>
+    box.innerHTML=`<div class="shift-head"><b>No shift open</b><span class="muted" style="font-size:.88rem">Count the cash in the drawer, then open a shift to start selling. Opening the shift also opens the store for online orders; closing it closes the store.</span></div>
       <div class="quick" style="margin-top:8px">${[0,500,1000,2000].map(n=>`<button type="button" class="${String(n)===String(v)?"on":""}" data-sh="startamt" data-amt="${n}">${peso(n)}</button>`).join("")}</div>
       <div class="btnrow" style="margin-top:8px"><input type="number" inputmode="numeric" min="0" step="1" id="shiftStart" value="${esc(v)}" placeholder="Starting cash" aria-label="Starting cash" style="max-width:170px">
         <button class="btn" data-sh="open">Open shift</button></div>${msg}`;
@@ -1025,7 +1031,12 @@ $("#shiftCard").addEventListener("click",async e=>{
     if(shiftDraft.start===undefined||shiftDraft.start===""||!(n>=0)){ shiftMsg="Type or tap the starting cash in the drawer (₱0 if empty)."; return done(); }
     if(shift){ return done(); } // someone else just opened one
     b.disabled=true;
-    try{ await setDoc(doc(collection(db,"shifts")),{openedAt:serverTimestamp(),openedBy:me.uid,openedByName:myName,startCash:n,moves:[],closedAt:null}); shiftDraft={}; lastClosed=null; }
+    try{
+      const batch=writeBatch(db); // the shift and the store open together
+      batch.set(doc(collection(db,"shifts")),{openedAt:serverTimestamp(),openedBy:me.uid,openedByName:myName,startCash:n,moves:[],closedAt:null});
+      batch.set(doc(db,"settings","store"),{open:true},{merge:true});
+      await batch.commit(); shiftDraft={}; lastClosed=null;
+    }
     catch(x){ shiftMsg=friendlyError(x); b.disabled=false; }
     return done();
   }
@@ -1045,7 +1056,10 @@ $("#shiftCard").addEventListener("click",async e=>{
     if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Close the shift now? Tap again"; return; }
     const s={...shiftNow(),counted:n}; b.disabled=true;
     try{
-      await updateDoc(doc(db,"shifts",shift.id),{closedAt:serverTimestamp(),closedBy:me.uid,closedByName:myName,countedCash:n,summary:s});
+      const batch=writeBatch(db); // the shift and the store close together
+      batch.update(doc(db,"shifts",shift.id),{closedAt:serverTimestamp(),closedBy:me.uid,closedByName:myName,countedCash:n,summary:s});
+      batch.set(doc(db,"settings","store"),{open:false},{merge:true});
+      await batch.commit();
       lastClosed={...shift,closedAt:new Date(),closedByName:myName,summary:s}; shiftForm=""; shiftDraft={};
       if(printer()) btPrint(shiftBytes(s,lastClosed,SHOP));
     }catch(x){ shiftMsg=friendlyError(x); b.disabled=false; }

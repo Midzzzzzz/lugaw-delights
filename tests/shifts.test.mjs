@@ -1,7 +1,7 @@
 // Cashier shifts: open with starting cash, pay in / pay out, close once with the counted cash.
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, arrayUnion } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, writeBatch } from "firebase/firestore";
 
 const env = await initializeTestEnvironment({ projectId: "demo-lugaw",
   firestore: { rules: readFileSync(new URL("../firestore.rules", import.meta.url), "utf8"), host: "127.0.0.1", port: 8080 } });
@@ -44,6 +44,11 @@ await t("a closed shift can't be closed again", () => assertFails(updateDoc(doc(
 await t("no pay out after closing", () => assertFails(updateDoc(doc(s1, "shifts/a"), { moves: arrayUnion(move({ at: 1 })) })));
 await t("a seller can't delete a shift", () => assertFails(deleteDoc(doc(s1, "shifts/a"))));
 await t("owner deletes a shift", () => assertSucceeds(deleteDoc(doc(owner, "shifts/a"))));
+
+console.log("Store follows the shift");
+await t("seller opens a shift and the store in one save", () => { const b = writeBatch(s1); b.set(doc(s1, "shifts/z"), open()); b.set(doc(s1, "settings/store"), { open: true }, { merge: true }); return assertSucceeds(b.commit()); });
+await t("seller closes the shift and the store in one save", () => { const b = writeBatch(s1); b.update(doc(s1, "shifts/z"), close()); b.set(doc(s1, "settings/store"), { open: false }, { merge: true }); return assertSucceeds(b.commit()); });
+await t("customer can't open the store", () => assertFails(setDoc(doc(cust, "settings/store"), { open: true }, { merge: true })));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);
