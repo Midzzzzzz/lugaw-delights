@@ -384,10 +384,11 @@ function detail(o){
 // The owner can delete orders, e.g. test orders. Each order goes with its customer contact details
 // and delivery code. Deleted orders leave the sales totals and inventory counts; it can't be undone.
 const picked=new Set();
-let delMsg="";
+let delMsg="", delFailed=false;
 function delBar(shown){
   const ids=[...picked].filter(id=>orders.some(o=>o.id===id));
-  if(!ids.length) return delMsg?`<p class="muted" style="font-size:.88rem;margin:8px 0 0">${esc(delMsg)}</p>`:"";
+  if(!ids.length) return delMsg?(delFailed?`<div class="flag" style="margin-top:10px;background:var(--brand);color:var(--on-brand)">${esc(delMsg)}</div>`
+    :`<p class="muted" style="font-size:.88rem;margin:8px 0 0">${esc(delMsg)}</p>`):"";
   const total=ids.reduce((s,id)=>s+(orders.find(o=>o.id===id)?.total||0),0);
   return `<div class="flag" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
     <span>${plural(ids.length,"order")} selected (${peso(total)}). Deleted orders disappear from sales and inventory and can't be brought back.</span>
@@ -416,9 +417,9 @@ $("#view").addEventListener("click",async e=>{
   if(b.dataset.unpick!==undefined){ picked.clear(); return render(true); }
   const ids=b.dataset.delone?[b.dataset.delone]:[...picked].filter(id=>orders.some(o=>o.id===id));
   if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent=`Delete ${ids.length===1?"this order":plural(ids.length,"order")} for good? Tap again`; return; }
-  b.disabled=true; b.textContent="Deleting…";
+  b.disabled=true; b.textContent="Deleting…"; delFailed=false;
   try{ await deleteOrders(ids); ids.forEach(id=>picked.delete(id)); if(ids.includes(open)) open=null; delMsg=`Deleted ${plural(ids.length,"order")}.`; }
-  catch(x){ delMsg="Couldn't delete: "+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase."; }
+  catch(x){ delFailed=true; delMsg=`Not deleted: ${friendlyError(x)} The orders are back because Firebase refused. Publish the latest firestore.rules in the Firebase console (Firestore → Rules → Publish), then try again.`; }
   render(true);
 });
 $("#view").addEventListener("click",e=>{

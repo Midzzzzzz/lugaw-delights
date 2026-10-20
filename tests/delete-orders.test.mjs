@@ -1,7 +1,7 @@
 // Only the owner deletes orders (with their contact details and delivery code).
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebase/rules-unit-testing";
-import { doc, setDoc, deleteDoc, Timestamp } from "firebase/firestore";
+import { doc, setDoc, deleteDoc, Timestamp, writeBatch } from "firebase/firestore";
 
 const env = await initializeTestEnvironment({ projectId: "demo-lugaw",
   firestore: { rules: readFileSync(new URL("../firestore.rules", import.meta.url), "utf8"), host: "127.0.0.1", port: 8080 } });
@@ -30,6 +30,11 @@ await t("seller can't delete contact details", () => assertFails(deleteDoc(doc(s
 await t("owner deletes an order", () => assertSucceeds(deleteDoc(doc(owner, "orders/o1"))));
 await t("owner deletes its contact details", () => assertSucceeds(deleteDoc(doc(owner, "contacts/o1"))));
 await t("owner deletes its delivery code", () => assertSucceeds(deleteDoc(doc(owner, "pins/o1"))));
+// The owner page deletes an order, its contact details and its delivery code in one batch, even
+// for orders that never had contact details or a delivery code (dine-in, imported sales)
+await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), "orders/d9"), { code: "LV-5-0001", mode: "Dine-in", status: "completed", customerUid: "owner", manual: true, source: "loyverse", createdAt: Timestamp.now() }));
+await t("owner deletes a dine-in or imported order in one batch", () => { const b = writeBatch(owner);
+  ["orders", "contacts", "pins"].forEach(c => b.delete(doc(owner, c, "d9"))); return assertSucceeds(b.commit()); });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);
