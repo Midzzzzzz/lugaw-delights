@@ -85,7 +85,38 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['soldOut', 'left', 'updatedAt'])
           && request.resource.data.soldOut is list && request.resource.data.soldOut.size() <= 300
           && (!('left' in request.resource.data) || (request.resource.data.left is map && request.resource.data.left.size() <= 300))
-          && request.resource.data.updatedAt == request.time);
+          && request.resource.data.updatedAt == request.time)
+        // Stock tracker (settings/inventory): the owner sets each ingredient's standard stock
+        // (par) once. base = what was on hand at the last refill (since); what's on hand now is
+        // base minus what the orders since then used. Closing a shift asks the kitchen to refill;
+        // the kitchen refills and resets base to what's now on hand.
+        || (isSeller() && id == 'inventory' && resource != null
+          && changed().hasOnly(['refillDue','refillAskedAt','refillAskedBy','refillAskedByName'])
+          && request.resource.data.refillDue == true
+          && request.resource.data.refillAskedAt == request.time
+          && request.resource.data.refillAskedBy == uid() && str(request.resource.data.refillAskedByName, 80))
+        || (isKitchen() && id == 'inventory' && resource != null
+          && changed().hasOnly(['base','since','refillDue','refilledAt','refilledBy','refilledByName'])
+          && request.resource.data.base is map && request.resource.data.base.size() <= 300
+          && request.resource.data.since == request.time
+          && request.resource.data.refillDue == false
+          && request.resource.data.refilledAt == request.time
+          && request.resource.data.refilledBy == uid() && str(request.resource.data.refilledByName, 80));
+    }
+
+    // Refill history: one record each time the kitchen refills (what was bought, and the stock
+    // before and after). Added by the kitchen, never changed; the owner can delete.
+    match /refills/{refillId} {
+      allow read: if isStaff() || isKitchen();
+      allow create: if isKitchen()
+        && request.resource.data.keys().hasOnly(['at','by','byName','bought','before','after'])
+        && request.resource.data.at == request.time
+        && request.resource.data.by == uid() && str(request.resource.data.byName, 80)
+        && request.resource.data.bought is map && request.resource.data.bought.size() <= 300
+        && request.resource.data.before is map && request.resource.data.before.size() <= 300
+        && request.resource.data.after is map && request.resource.data.after.size() <= 300;
+      allow update: if false;
+      allow delete: if isAdmin();
     }
 
     // Seller applications and profiles. Sellers sign up on seller.html and the

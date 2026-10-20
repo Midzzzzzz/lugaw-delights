@@ -114,7 +114,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndP
 import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
-import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
+import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
 const $=s=>document.querySelector(s);
 let ledger=[], ledgerErr="", agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], kitchen=[], riders=[], contacts={}, open=null, teamErr="";
@@ -191,14 +191,17 @@ function start(){
   // Saved menu changes (recipes, prices) count right away, without a refresh
   subs.push(onSnapshot(doc(db,"settings","menu"), s=>{
     menuDoc=s.exists()?s.data():null; if(menuDoc) applyMenu(menuDoc.sections);
-    const open=openCount(); if(open && invKey.startsWith(open.id+":")) publishStock(ingredientsLeft(open,invOrders));
+    if(invDoc) publishStock(ingredientsLeft(trackerCount(invDoc),invOrders));
     if(tab==="menu"||tab==="inventory") render();
   }, ()=>{}));
   subs.push(onSnapshot(collection(db,"menuPhotos"), s=>{ photos={}; s.docs.forEach(d=>photos[d.id]=d.data().photo); if(tab==="menu") render(); }, ()=>{}));
-  subs.push(onSnapshot(doc(db,"settings","ingredients"), s=>{ ingDoc=s.exists()?s.data():null; if(tab==="menu"||tab==="inventory") render(); }, ()=>{}));
-  subs.push(onSnapshot(query(collection(db,"inventory"),orderBy("since","desc"),limit(30)), s=>{
-    counts=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})); countsErr=""; if(tab==="inventory") render();
-  }, e=>{ countsErr="Couldn't load inventory: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; if(tab==="inventory") render(); }));
+  subs.push(onSnapshot(doc(db,"settings","ingredients"), s=>{ ingDoc=s.exists()?s.data():null; if(ingMsg!=="Not saved yet.") ingDraft=null; if(tab==="menu"||tab==="inventory") render(); }, ()=>{}));
+  // Stock tracker and refill history
+  subs.push(onSnapshot(doc(db,"settings","inventory"), s=>{ invDoc=s.exists()?s.data({serverTimestamps:"estimate"}):null; invErr=""; if(ingMsg!=="Not saved yet.") ingDraft=null; watchInv(); if(tab==="inventory") render(); },
+    e=>{ invErr="Couldn't load inventory: "+friendlyError(e); if(tab==="inventory") render(); }));
+  subs.push(onSnapshot(query(collection(db,"refills"),orderBy("at","desc"),limit(30)), s=>{ refills=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})); if(tab==="inventory") render(); },
+    ()=>{}));
+  subs.push(()=>{ invSub?.(); invSub=null; invSince=null; });
   renderRanges(); watchOrders();
 }
 
@@ -849,187 +852,96 @@ async function saveMenu(b){
   render(true);
 }
 
-// ---------- Inventory (by ingredient) ----------
-// The owner keeps a list of ingredients (egg, rice, chicken…). At the start of a shift they
-// record how much of each they have. Every order placed since then (not cancelled) takes off
-// what its items use (recipe × quantity), so the table shows what's left, and items whose
-// ingredients run short show as sold out. Ending the shift saves the breakdown.
-let counts=[], countsErr="", invView=null, invEdit=false, invDraft={}, invOrders=[], invSub=null, invKey="", invMsg="";
-let ingDraft=null, ingMsg="", ingOpen=false;
+// ---------- Inventory (stock tracker) ----------
+// Set once, like the delivery fees: the owner lists the ingredients and each one's standard
+// stock (how much to keep on hand). What's on hand is worked out live from the stock at the last
+// refill minus what the orders since then used, so deleting an order puts its ingredients back.
+// When a seller closes their shift the kitchen is asked to refill everything below standard;
+// the kitchen does it and the stock on hand goes back up. The owner doesn't count or end anything.
+let invDoc=null, invErr="", invOrders=[], invSub=null, invSince=null, refills=[], ingDraft=null, ingMsg="";
 const UNITS=["pcs","g","kg","ml","L","cups","packs","servings"];
-const openCount=()=>counts.find(c=>!c.closedAt);
 const tsDate=t=>t?.toDate?.()||null;
 const when=t=>tsDate(t)?.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})||"—";
 const fmtQ=n=>String(Math.round(n*100)/100);
-// Orders placed during a count (a finished count keeps its own saved breakdown)
-function watchInv(c){
-  const key=c?c.id+":"+(tsDate(c.since)?.getTime()||0)+":"+(tsDate(c.closedAt)?.getTime()||0):"";
-  if(key===invKey) return; invSub?.(); invSub=null; invKey=key; invOrders=[];
-  if(!c || !tsDate(c.since) || c.result) return;
-  const w=[where("createdAt",">=",c.since)]; if(c.closedAt) w.push(where("createdAt","<",c.closedAt));
-  invSub=onSnapshot(query(collection(db,"orders"),...w,orderBy("createdAt","desc")),
-    s=>{ invOrders=s.docs.map(d=>d.data()); if(tab==="inventory") render();
-      if(!c.closedAt && c.id===openCount()?.id) publishStock(ingredientsLeft(c,invOrders)); }, ()=>{});
+// Orders since the last refill
+function watchInv(){
+  const since=invDoc?.since?.toMillis?.()??null; if(since===invSince) return;
+  invSince=since; invSub?.(); invSub=null; invOrders=[];
+  if(since==null) return;
+  invSub=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",invDoc.since)),
+    s=>{ invOrders=s.docs.map(d=>d.data()); publishStock(ingredientsLeft(trackerCount(invDoc),invOrders)); if(tab==="inventory") render(); }, ()=>{});
 }
-// One row per counted ingredient: beginning, used, left
-function breakdown(c){
-  const left=c.result?null:ingredientsLeft({...c,closedAt:null},invOrders);
-  return Object.keys(c.items||{}).map(id=>{
-    const begin=c.items[id], l=c.result?(c.result[id]?.remaining??begin):left[id];
-    return { id, name:ingName(id), unit:ingUnit(id), begin, used:Math.round((begin-l)*100)/100, left:l };
-  });
-}
+const onHandNow=()=>ingredientsLeft(trackerCount(invDoc),invOrders)||{};
 // Publish the items that are sold out right now for the customer page (the seller dashboard
 // does the same as orders come in). Only written when the list changes.
-// left: what's left of each counted ingredient (null when no count is open)
 let lastSoldOut="";
 function publishStock(left){
   const soldOut=soldOutFrom(left), k=JSON.stringify([soldOut,left||{}]); if(k===lastSoldOut) return; lastSoldOut=k;
   setDoc(doc(db,"settings","stock"),{soldOut,left:left||{},updatedAt:serverTimestamp()}).catch(()=>{ lastSoldOut=""; });
 }
-const isLow=r=>r.left>0 && r.left<=r.begin*0.2;
-// Whether the kitchen has refilled what an ended count used
-function refillStatus(c){
-  const r=c.refill; if(!r) return "";
-  if(r.status==="pending") return `<p class="flag" style="margin-top:10px">Waiting for the kitchen to refill ${plural(Object.keys(r.items||{}).length,"ingredient")}. The kitchen sees the list on its page.</p>`;
-  const diff=Object.entries(r.bought||{}).filter(([g,n])=>n!==(r.items||{})[g]).map(([g,n])=>`${ingName(g)} ${fmtQ(n)} (used ${fmtQ(r.items?.[g]||0)})`);
-  return `<p style="margin:10px 0 0;font-size:.9rem"><span class="pill go">Refilled</span> by ${esc(r.doneByName||"the kitchen")} · ${esc(when(r.doneAt))}${diff.length?`<br><span class="muted">Bought a different amount: ${esc(diff.join(", "))}</span>`:""}</p>`;
-}
-// Ingredients the menu uses that aren't in this count: items needing them can't be sold
-// while the count is open. Plus items ordered that have no ingredients set at all.
-function notCounted(c){
-  const have=c.items||{}, missing={};
+// Ingredients the menu uses that have no standard stock: their dishes show as sold out
+function notTracked(){
+  const par=invDoc?.par||{}, missing={};
   Object.values(ITEMS).forEach(it=>{ if(it.off) return;
-    [...Object.keys(it.recipe||{}),...Object.keys(it.takeout||{})].forEach(g=>{ if(!(g in have)) (missing[g]=missing[g]||new Set()).add(it.name); }); });
-  const n={};
-  invOrders.filter(o=>o.status!=="cancelled").forEach(o=>(o.items||[]).forEach(it=>{
-    const r=ITEMS[it.id]; if(r && !Object.keys(r.recipe||{}).length && !Object.keys(r.takeout||{}).length) n[it.id]=(n[it.id]||0)+(Number(it.qty)||0); }));
-  const miss=Object.entries(missing).map(([g,names])=>`${ingName(g)} (${[...names].slice(0,4).join(", ")}${names.size>4?"…":""})`);
-  const free=Object.entries(n).map(([id,q])=>`${ITEMS[id]?.name||id} ×${q}`);
-  return (miss.length?`<div class="flag" style="margin-top:8px">Not in this count, so the items that need them are sold out: ${esc(miss.join("; "))}.
-      Tap <b>Change beginning stock</b> to add how much you have.</div>`:"")
-    +(free.length?`<div class="flag" style="margin-top:8px">Sold without counting: ${esc(free.join(", "))}. These items have no ingredients set.
-      In the <b>Menu</b> tab, open <b>Ingredients</b> on each one (for drinks, tap <b>Count this item itself</b>).</div>`:"");
-}
-function invTable(rows){
-  if(!rows.length) return `<p class="empty">No ingredients counted.</p>`;
-  return `<div class="tablewrap"><table class="inv"><thead><tr><th>Ingredient</th><th class="n">Beginning</th><th class="n">Used</th><th class="n">Left</th><th class="n">To restock</th></tr></thead><tbody>
-    ${rows.map(r=>`<tr class="${r.left<=0?"out":isLow(r)?"low":""}"><td>${esc(r.name)}${r.left<=0?" · out":isLow(r)?" · low":""}</td>
-      <td class="n">${fmtQ(r.begin)} ${esc(r.unit)}</td><td class="n">${fmtQ(r.used)}</td><td class="n">${fmtQ(r.left)}</td><td class="n"><b>${fmtQ(Math.max(0,r.used))} ${esc(r.unit)}</b></td></tr>`).join("")}
-    </tbody></table></div>`;
-}
-function ingEditor(){
-  const l=ingDraft||(ingDraft=clone(ingList()));
-  return `<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep);font-size:1.1rem">Ingredients</h2>
-    <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Everything you want to keep count of. Then, in the <b>Menu</b> tab, open <b>Ingredients</b> on each item to say how much one serving uses.</p>
-    ${l.map((g,i)=>`<div class="rrow2"><input data-ing="${i}" data-f="name" value="${esc(g.name)}" maxlength="60" placeholder="e.g. Egg" aria-label="Ingredient name">
-      <select data-ing="${i}" data-f="unit" aria-label="Unit">${[...new Set([...UNITS,g.unit])].map(u=>`<option${u===g.unit?" selected":""}>${esc(u)}</option>`).join("")}</select>
-      <button data-iact="ingdel" data-i="${i}" aria-label="Remove ingredient">✕</button></div>`).join("")||`<p class="empty">No ingredients yet.</p>`}
-    <div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-iact="ingadd">+ Add ingredient</button>
-      <button class="btn small" data-iact="ingsave">Save ingredients</button><button class="btn ghost small" data-iact="ingclose">Close</button>
-      <span class="muted" style="font-size:.88rem">${esc(ingMsg)}</span></div></section>`;
-}
-function invForm(c){
-  const rows=ingList().map(g=>`<tr><td>${esc(g.name)}</td><td class="n"><input type="number" inputmode="decimal" min="0" step="any" data-inv="${esc(g.id)}" value="${invDraft[g.id]??""}" aria-label="Beginning amount of ${esc(g.name)}"> ${esc(g.unit)}</td></tr>`).join("");
-  const last=counts.find(x=>x.closedAt);
-  if(!ingList().length) return `<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep)">Start a count</h2>
-    <p>First add your ingredients (egg, rice, chicken…), then set what each menu item uses in the <b>Menu</b> tab.</p>
-    <button class="btn" data-iact="ingopen">Add ingredients</button></section>`;
-  return `<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep)">${c?"Change the beginning stock":"Start a count"}</h2>
-    <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Type how much of each ingredient you have at the start of the shift.
-      Leave one blank if you have none: items that need it show as sold out until you add it. ${c?"If more stock arrived, add it to the number here.":"Orders from the moment you tap <b>Start count</b> are taken off."}</p>
-    ${!c&&last?`<button class="btn ghost small" data-iact="copy">Fill in what was left last shift</button>`:""}
-    <div class="tablewrap"><table class="inv"><thead><tr><th>Ingredient</th><th class="n">Beginning stock</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="err">${esc(invMsg)}</p>
-    <div class="btnrow" style="margin-top:8px"><button class="btn" data-iact="${c?"saveEdit":"start"}">${c?"Save stock":"Start count"}</button>
-      ${c?`<button class="btn ghost small" data-iact="cancelEdit">Cancel</button>`:""}</div></section>`;
+    [...Object.keys(it.recipe||{}),...Object.keys(it.takeout||{})].forEach(g=>{ if(!(g in par)) (missing[g]=missing[g]||new Set()).add(it.name); }); });
+  const list=Object.entries(missing).map(([g,n])=>`${ingName(g)} (${[...n].slice(0,3).join(", ")}${n.size>3?"…":""})`);
+  return list.length?`<div class="flag" style="margin-top:10px">No standard stock yet, so the dishes that need them show as sold out: ${esc(list.join("; "))}.</div>`:"";
 }
 function renderInventory(){
-  const open=openCount(), view=invView?counts.find(c=>c.id===invView):open;
-  watchInv(invEdit?null:view);
-  let main;
-  if(countsErr) main=`<div class="flag" style="margin-top:12px">${esc(countsErr)}</div>`;
-  else if(invEdit || !view) main=invForm(invEdit?open:null);
-  else {
-    const rows=breakdown(view), live=!view.closedAt;
-    const out=live?soldOutFrom(ingredientsLeft(view,invOrders)).map(id=>ITEMS[id]?.name).filter(Boolean):[];
-    main=`<section class="card" style="margin-top:12px">
-      <h2 style="color:var(--brand-deep)">${live?"Current shift":"Shift ended"}</h2>
-      <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Started ${esc(when(view.since))}${view.closedAt?` · ended ${esc(when(view.closedAt))}`:" · counting orders as they come in"}.
-        ${live?"Yellow rows are running low, red rows are out.":""} <b>To restock</b> is how much was used: what you need to fill back up to the beginning stock.</p>
-      ${invTable(rows)}
-      ${!live?refillStatus(view):""}
-      ${live?`<p style="margin:10px 0 0;font-size:.9rem"><b>Sold out now:</b> ${out.length?esc(out.join(", ")):"nothing"}</p>${notCounted(view)}`:""}
-      ${live?`<p class="muted" style="margin:10px 0 0;font-size:.85rem">The count ends when the seller closes the shift; the kitchen then gets the refill list and starts the next count.</p>`:""}
-      <div class="btnrow" style="margin-top:10px">${live?`<button class="btn ghost small" data-iact="edit">Change beginning stock</button>`:(open?"":`<button class="btn" data-iact="new">Start next count</button>`)}
-        ${invView?`<button class="btn ghost small" data-iact="back">Back to ${open?"current shift":"inventory"}</button>`:""}
-        <button class="btn ghost small" data-iact="del" data-id="${esc(view.id)}">Delete this count</button></div></section>`;
-  }
-  const past=counts.filter(c=>c.closedAt);
-  $("#view").innerHTML=main+(ingOpen?ingEditor():`<div style="margin-top:12px"><button class="btn ghost small" data-iact="ingopen">Ingredients list (${ingList().length})</button></div>`)
-    +(past.length?`<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep);font-size:1.1rem">Past shifts</h2>
-    <div class="btnrow" style="margin-top:8px">${past.map(c=>`<button class="chip ${invView===c.id?"on":""}" data-iact="view" data-id="${esc(c.id)}">${esc(when(c.since))}${c.refill?.status==="pending"?" · to refill":""}</button>`).join("")}</div></section>`:"");
+  watchInv();
+  const l=ingDraft||(ingDraft=ingList().map(g=>({...g,par:invDoc?.par?.[g.id]??""}))), left=onHandNow();
+  const due=invDoc?.refillDue, asked=invDoc?.refillAskedAt, done=invDoc?.refilledAt;
+  const status=!invDoc?"":due?`<p class="flag" style="margin:0 0 10px">Refill asked by ${esc(invDoc.refillAskedByName||"the seller")} · ${esc(when(asked))}. Waiting for the kitchen.</p>`
+    :done?`<p style="margin:0 0 10px;font-size:.9rem"><span class="pill go">Refilled</span> by ${esc(invDoc.refilledByName||"the kitchen")} · ${esc(when(done))}</p>`:"";
+  const out=invDoc?soldOutFrom(left,false).map(id=>ITEMS[id]?.name).filter(Boolean):[];
+  $("#view").innerHTML=`<section class="card" style="margin-top:12px">
+    <h2 style="color:var(--brand-deep)">Inventory</h2>
+    <p class="muted" style="font-size:.88rem;margin:4px 0 10px">Set this up once: each ingredient and its <b>standard stock</b>, how much you want on hand. <b>On hand</b> goes down by itself as orders come in (and back up if an order is deleted).
+      When a seller closes their shift, the kitchen is asked to refill everything below standard. Set what each menu item uses in the <b>Menu</b> tab (<b>Ingredients</b>).</p>
+    ${invErr?`<div class="flag">${esc(invErr)}</div>`:""}${status}
+    <div class="tablewrap"><table class="inv"><thead><tr><th>Ingredient</th><th>Unit</th><th class="n">Standard stock</th><th class="n">On hand</th><th class="n">To refill</th><th></th></tr></thead><tbody>
+    ${l.map((g,i)=>{ const par=Number(invDoc?.par?.[g.id]), has=invDoc && g.id in (invDoc.par||{}), oh=has?(left[g.id]??invDoc.base?.[g.id]??0):null, need=has?Math.max(0,par-oh):null;
+      return `<tr class="${has&&oh<=0?"out":has&&oh<par*0.2?"low":""}"><td><input data-ing="${i}" data-f="name" value="${esc(g.name)}" maxlength="60" placeholder="e.g. Egg" aria-label="Ingredient name" style="width:100%;text-align:left"></td>
+        <td><select data-ing="${i}" data-f="unit" aria-label="Unit" style="width:auto">${[...new Set([...UNITS,g.unit||"pcs"])].map(u=>`<option${u===(g.unit||"pcs")?" selected":""}>${esc(u)}</option>`).join("")}</select></td>
+        <td class="n"><input type="number" inputmode="decimal" min="0" step="any" data-ing="${i}" data-f="par" value="${esc(g.par)}" aria-label="Standard stock of ${esc(g.name)}"></td>
+        <td class="n">${has?fmtQ(oh):"—"}</td><td class="n">${need?`<b>${fmtQ(need)}</b>`:has?"0":"—"}</td>
+        <td><button class="btn ghost small" data-iact="ingdel" data-i="${i}" aria-label="Remove ${esc(g.name)}">✕</button></td></tr>`; }).join("")
+      ||`<tr><td colspan="6" class="muted">No ingredients yet. Tap + Add ingredient.</td></tr>`}</tbody></table></div>
+    <div class="btnrow" style="margin-top:10px"><button class="btn ghost small" data-iact="ingadd">+ Add ingredient</button>
+      <button class="btn" data-iact="save">Save inventory</button><span class="muted" style="font-size:.88rem">${esc(ingMsg)}</span></div>
+    ${invDoc?`<p style="margin:10px 0 0;font-size:.9rem"><b>Sold out now:</b> ${out.length?esc(out.join(", ")):"nothing"}</p>`:""}
+    ${invDoc?notTracked():""}</section>
+    ${refills.length?`<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep);font-size:1.1rem">Refill history</h2>
+      <div class="tablewrap"><table class="inv"><thead><tr><th>When</th><th>Kitchen</th><th>Bought</th></tr></thead><tbody>
+      ${refills.map(r=>`<tr><td>${esc(when(r.at))}</td><td>${esc(r.byName||"")}</td><td>${esc(Object.entries(r.bought||{}).map(([g,n])=>`${ingName(g)} ${fmtQ(n)} ${ingUnit(g)}`).join(", ")||"—")}</td></tr>`).join("")}
+      </tbody></table></div></section>`:""}`;
 }
 $("#view").addEventListener("input",e=>{ if(tab!=="inventory") return;
-  const i=e.target.closest("[data-inv]"); if(i){ invDraft[i.dataset.inv]=i.value===""?null:Math.max(0,Number(i.value)); return; }
-  const g=e.target.closest("[data-ing]"); if(g){ ingDraft[+g.dataset.ing][g.dataset.f]=g.value; ingMsg="Not saved yet."; } });
+  const g=e.target.closest("[data-ing]"); if(g){ ingDraft[+g.dataset.ing][g.dataset.f]=g.dataset.f==="par"?(g.value===""?"":Math.max(0,Number(g.value))):g.value; ingMsg="Not saved yet."; } });
 $("#view").addEventListener("change",e=>{ const g=e.target.closest("select[data-ing]"); if(g && tab==="inventory"){ ingDraft[+g.dataset.ing].unit=g.value; ingMsg="Not saved yet."; } });
 $("#view").addEventListener("click",async e=>{
   const b=e.target.closest("[data-iact]"); if(!b || tab!=="inventory") return;
-  const a=b.dataset.iact, open=openCount();
-  const items=()=>{ const o={}; Object.entries(invDraft).forEach(([k,v])=>{ if(typeof v==="number" && v>=0 && ingList().some(g=>g.id===k)) o[k]=v; }); return o; };
-  invMsg="";
-  if(a==="ingopen"){ ingOpen=true; ingDraft=null; ingMsg=""; return render(true); }
-  if(a==="ingclose"){ ingOpen=false; ingDraft=null; return render(true); }
-  if(a==="ingadd"){ ingDraft.push({id:"g"+Date.now().toString(36),name:"",unit:"pcs"}); render(true); const r=document.querySelectorAll('[data-ing][data-f="name"]'); r[r.length-1]?.focus(); return; }
+  const a=b.dataset.iact;
+  if(a==="ingadd"){ ingDraft.push({id:"g"+Date.now().toString(36),name:"",unit:"pcs",par:""}); ingMsg="Not saved yet."; render(true); const r=document.querySelectorAll('[data-ing][data-f="name"]'); r[r.length-1]?.focus(); return; }
   if(a==="ingdel"){ if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Remove?"; return; } ingDraft.splice(+b.dataset.i,1); ingMsg="Not saved yet."; return render(true); }
-  if(a==="ingsave"){
+  if(a==="save"){
     const list=ingDraft.map(g=>({id:g.id,name:String(g.name).trim(),unit:g.unit||"pcs"}));
     if(list.some(g=>!g.name)){ ingMsg="Every ingredient needs a name."; return render(true); }
-    b.disabled=true;
-    try{ await setDoc(doc(db,"settings","ingredients"),{list,updatedAt:serverTimestamp()}); ingMsg="Saved."; ingDraft=null; }
-    catch(x){ ingMsg=friendlyError(x); }
-    return render(true);
-  }
-  if(a==="view"){ invView=b.dataset.id; invEdit=false; return render(true); }
-  if(a==="del"){
-    // Removes the count (and its saved breakdown). Orders aren't touched.
-    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Delete this count for good? Tap again"; return; }
-    const id=b.dataset.id, wasOpen=open?.id===id; b.disabled=true;
-    try{ await deleteDoc(doc(db,"inventory",id)); if(wasOpen) publishStock(null); invView=null; invEdit=false; invDraft={}; invMsg=""; }
-    catch(x){ b.disabled=false; b.textContent=friendlyError(x); return; }
-    return render(true);
-  }
-  if(a==="back"){ invView=null; return render(true); }
-  if(a==="new"){ invView="_none"; invEdit=false; invDraft={}; return render(true); }
-  if(a==="edit"){ invEdit=true; invDraft={...open.items}; return render(true); }
-  if(a==="cancelEdit"){ invEdit=false; return render(true); }
-  if(a==="copy"){ const last=counts.find(x=>x.closedAt); invDraft={}; Object.entries(last.result||{}).forEach(([k,r])=>invDraft[k]=Math.max(0,r.remaining)); return render(true); }
-  if(a==="start" || a==="saveEdit"){
-    const it=items(); if(!Object.keys(it).length){ invMsg="Type the beginning stock of at least one ingredient."; return render(true); }
+    const par={}; ingDraft.forEach(g=>{ if(g.par!=="" && g.par!=null) par[g.id]=Number(g.par); });
+    // new ingredients start full (on hand = standard stock); the rest keep what's on hand
+    const base={}; Object.keys(par).forEach(id=>{ base[id]=invDoc?.base&&id in invDoc.base?invDoc.base[id]:par[id]; });
     b.disabled=true;
     try{
-      if(a==="start"){
-        await addDoc(collection(db,"inventory"),{since:serverTimestamp(),createdAt:serverTimestamp(),closedAt:null,items:it,by:auth.currentUser.uid});
-        publishStock(ingredientsLeft({items:it,since:{toMillis:()=>Date.now()}},[]));
-      } else {
-        await updateDoc(doc(db,"inventory",open.id),{items:it});
-        publishStock(ingredientsLeft({...open,items:it},invOrders));
-      }
-      invEdit=false; invDraft={}; invView=null;
-    }catch(x){ invMsg=friendlyError(x); b.disabled=false; }
+      const batch=writeBatch(db);
+      batch.set(doc(db,"settings","ingredients"),{list,updatedAt:serverTimestamp()});
+      if(invDoc) batch.update(doc(db,"settings","inventory"),{par,base});
+      else batch.set(doc(db,"settings","inventory"),{par,base,since:serverTimestamp(),refillDue:false});
+      await batch.commit(); ingDraft=null; ingMsg="Saved.";
+    }catch(x){ ingMsg="Couldn't save: "+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase."; b.disabled=false; }
     return render(true);
   }
-  if(a==="end"){
-    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="End the shift now? Tap again"; return; }
-    const result={}, items={}; breakdown(open).forEach(r=>{ result[r.id]={used:r.used,remaining:r.left}; if(r.used>0) items[r.id]=r.used; });
-    b.disabled=true;
-    // the kitchen gets the refill list, the same as when a seller closes their shift
-    try{ await updateDoc(doc(db,"inventory",open.id),{closedAt:serverTimestamp(),result,refill:{status:"pending",items}}); publishStock(null); invView=open.id; }
-    catch(x){ b.disabled=false; b.textContent=friendlyError(x); return; }
-    render(true);
-  }
 });
+
 // ---------- Adding a sale by hand ----------
 // For sales that weren't recorded in the app (for example on an earlier day). The sale is saved
 // as a finished, paid dine-in order on the date and time picked, so it counts in that day's sales.

@@ -94,6 +94,16 @@ export function ingredientsLeft(count, orders) {
   });
   return left;
 }
+// Stock tracker (settings/inventory): par = the standard stock the owner set, base = what was on
+// hand at the last refill (since). As a "count" for ingredientsLeft: base minus orders since then.
+export const trackerCount = inv => inv && inv.base && inv.since ? { items: inv.base, since: inv.since, closedAt: null } : null;
+// What to refill: every ingredient with a standard stock that's below it (left: ingredientsLeft)
+export function belowStandard(inv, left) {
+  return Object.entries(inv?.par || {}).map(([g, par]) => {
+    const onHand = Math.round((left?.[g] ?? inv?.base?.[g] ?? 0) * 100) / 100;
+    return { g, par, onHand, need: Math.round((par - onHand) * 100) / 100 };
+  }).filter(r => r.need > 0);
+}
 // How many more servings of an item the ingredients allow (null: the item has no ingredients set,
 // so it isn't limited). While a count is open, an ingredient it needs that wasn't counted is
 // treated as none left, so the item can't be sold until that ingredient's stock is entered.
