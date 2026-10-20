@@ -130,7 +130,7 @@ $("#menu").innerHTML = MENU.map(c => `
     <div class="ctl" data-id="${id}"></div></div>`}).join("")}</section>`).join("");
 
 // Items sold out because an ingredient ran out (settings/stock, kept up to date by the shop)
-let soldOut=new Set(), stockLeftNow=null; // stockLeftNow: what's left of each counted ingredient
+let soldOut=new Set(), removed=new Set(), stockLeftNow=null; // stockLeftNow: what's left of each counted ingredient
 // Whether the cart (plus one more of an item) can still be made; returns a message or ""
 function stockProblem(extra){
   const lines=Object.entries(cart).map(([id,qty])=>({id,qty})); if(extra) lines.push(extra);
@@ -141,6 +141,7 @@ function stockProblem(extra){
 function renderCtl(id){
   const el=document.querySelector(`.ctl[data-id="${id}"]`), q=cart[id]||0;
   if(!el) return;
+  if(removed.has(id)){ el.closest(".item").classList.add("sold"); el.innerHTML=`<span class="soldtag">Not available</span>`; return; }
   el.closest(".item").classList.toggle("sold",soldOut.has(id));
   if(soldOut.has(id) && !q){ el.innerHTML=`<span class="soldtag">Sold out</span>`; return; }
   el.innerHTML = q ? `<div class="step"><button type="button" data-d="-1" aria-label="Remove one">−</button><span>${q}</span><button type="button" data-d="1" aria-label="Add one"${q>=MAX_QTY?" disabled":""}>+</button></div>`
@@ -152,6 +153,7 @@ $("#menu").addEventListener("click", e=>{
   const id=b.closest(".ctl").dataset.id, q=(cart[id]||0)+ +b.dataset.d;
   if(!cart[id] && Object.keys(cart).length>=MAX_LINES) return showErr(`You can order up to ${MAX_LINES} different items at a time.`);
   if(q>MAX_QTY) return;
+  if(+b.dataset.d>0 && removed.has(id)) return showErr(`Sorry, ${ITEMS[id].name} is no longer on the menu.`);
   if(+b.dataset.d>0 && soldOut.has(id)) return showErr(`Sorry, ${ITEMS[id].name} is sold out right now.`);
   if(+b.dataset.d>0){ const p=stockProblem({id,qty:1}); if(p) return showErr(p); }
   showErr("");
@@ -219,6 +221,14 @@ $("#menu").addEventListener("click",e=>{
 $("#setup").innerHTML = setupNotice();
 if(isConfigured){
   onSnapshot(doc(db,"settings","delivery"), s=>{ fees = s.exists() ? (s.data().fees||{}) : {}; renderZones(); renderCart(); }, ()=>{});
+  // Items the owner deleted since this page opened can't be ordered (shown as not available)
+  onSnapshot(doc(db,"settings","menu"), s=>{
+    if(!s.exists()) return;
+    const live=new Set(); (s.data().sections||[]).forEach(c=>(c.items||[]).forEach(it=>{ if(!it.off) live.add(it.id); }));
+    removed=new Set(Object.keys(ITEMS).filter(id=>!live.has(id)));
+    removed.forEach(id=>{ delete cart[id]; });
+    MENU.forEach(c=>c.items.forEach(([id])=>renderCtl(id))); renderCart();
+  }, ()=>{});
   onSnapshot(doc(db,"settings","stock"), s=>{
     soldOut=new Set(s.exists()?s.data().soldOut||[]:[]);
     const l=s.exists()?s.data().left:null; stockLeftNow=l&&Object.keys(l).length?l:null;

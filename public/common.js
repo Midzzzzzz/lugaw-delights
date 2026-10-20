@@ -62,12 +62,20 @@ MENU_SECTIONS.forEach(c => (c.items || []).forEach(it => {
 // Bring ITEMS up to date with a newer saved menu (recipes, prices, names) without reloading,
 // so a change the owner just saved counts right away. New items still need a page refresh
 // to appear on the menus.
+// MENU is updated in place too, so a page that redraws its menu (the seller's dine-in buttons)
+// also drops deleted items and shows new ones.
 export function applyMenu(sections) {
-  (sections || []).forEach(c => (c.items || []).forEach(it => {
+  if (!Array.isArray(sections)) return;
+  const live = new Set();
+  sections.forEach(c => (c.items || []).forEach(it => {
+    live.add(it.id);
     const t = ITEMS[it.id] || (ITEMS[it.id] = { id: it.id });
     Object.assign(t, { name: it.name, price: it.price, inc: it.inc || "", best: !!it.best, cat: c.id, box: !!c.box,
       off: !!it.off, was: it.was || [], recipe: it.recipe || {}, takeout: it.takeout || {} });
   }));
+  Object.values(ITEMS).forEach(t => { if (!live.has(t.id)) t.off = true; }); // deleted: kept for older orders, not sold
+  MENU.splice(0, MENU.length, ...sections.map(c => ({ ...c, items: (c.items || []).filter(it => !it.off).map(it => [it.id, it.name, it.price, it.inc, it.best]) }))
+    .filter(c => c.items.length));
 }
 
 // ---------- Ingredient stock ----------

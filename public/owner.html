@@ -848,8 +848,12 @@ async function saveMenu(b){
     }) }));
   b.disabled=true; menuMsg="Saving…"; $("#menuMsg").textContent=menuMsg;
   try{
-    await setDoc(doc(db,"settings","menu"),{sections,retired:[...new Set(menuRetired)],updatedAt:serverTimestamp()});
-    menuDraft=null; openRecipe=null; menuMsg="Saved. Refresh the customer page and seller app to see the new menu.";
+    // a category left with no items is removed (e.g. after deleting its only item)
+    const kept=sections.filter(c=>c.items.length), dropped=sections.length-kept.length, retired=[...new Set(menuRetired)];
+    await setDoc(doc(db,"settings","menu"),{sections:kept,retired,updatedAt:serverTimestamp()});
+    menuDoc={...(menuDoc||{}),sections:kept,retired}; applyMenu(kept); menuCat=0;
+    menuDraft=null; openRecipe=null;
+    menuMsg=`Saved.${dropped?` ${plural(dropped,"empty category")} removed.`:""} Customers see the new menu when they refresh the page or app; the seller's screen updates by itself.`;
   }catch(x){ menuMsg="Couldn't save: "+friendlyError(x); }
   render(true);
 }
