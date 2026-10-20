@@ -10,5 +10,5 @@ node_modules/
 .DS_Store
 Thumbs.db
 
-# The Rider app download (public/apps/*.apk) is built from lugaw-mobile; rebuild it rather than storing it in Git
+# The app downloads (public/apps/*.apk) are built from lugaw-mobile; rebuild them rather than storing them in Git
 public/apps/*.apk
