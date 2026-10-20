@@ -257,7 +257,7 @@ export function itemsHTML(order, withAmounts) {
   const items = mergedLines(order.items);
   return `<ul class="lines">${items.map(it => {
     const known = it && ITEMS[it.id], qty = Number(it?.qty) || 0;
-    const name = known ? known.name : "Unknown item: " + String(it?.name ?? it?.id ?? "?");
+    const name = known ? known.name : it?.name ? String(it.name) : "Unknown item: " + String(it?.id ?? "?");
     const added = (it.addedQty ? ` <span class="pill new" style="font-size:.7rem">${it.addedQty < qty ? `+${it.addedQty} added` : "Added"}</span>` : "") // dine-in items added later
       + (it?.pack ? ` <span class="pill work" style="font-size:.7rem">Take-out · ${it.pack === "box" ? "box" : "plastic"}</span>` : "");
     return `<li><span class="q">${esc(qty)}×</span><span>${esc(name)}${added}</span><span class="amt">${withAmounts ? peso(Number(it?.price) * qty) : ""}</span></li>`;

@@ -296,7 +296,7 @@ function renderSales(done){
   const byPay=group(done,o=>o.payment,o=>o.payment,food);
   const items=new Map();
   done.forEach(o=>(o.items||[]).forEach(it=>{
-    const k=it.id, r=items.get(k)||{key:k,label:ITEMS[k]?.name||"Unknown item",count:0,value:0};
+    const k=it.id, r=items.get(k)||{key:k,label:ITEMS[k]?.name||it.name||"Unknown item",count:0,value:0};
     r.count+=Number(it.qty)||0; r.value+=(Number(it.price)||0)*(Number(it.qty)||0); items.set(k,r);
   }));
   const topItems=[...items.values()].sort((x,y)=>y.count-x.count||y.value-x.value).slice(0,10).map(r=>({...r,value:r.count,sales:r.value}));

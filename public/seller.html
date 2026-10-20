@@ -161,7 +161,7 @@ let subs=[], lists={}, orders=[], riders=[], contacts={}, asked=new Set(), tab="
 let me=null, myName="", myProfile=null, watchSeller=null, registering=false;
 const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
 $("#setup").innerHTML=setupNotice();
-function stopData(){ subs.forEach(f=>f()); subs=[]; shift=null; lastClosed=null; lists={}; orders=[]; contacts={}; asked=new Set(); known=null; }
+function stopData(){ subs.forEach(f=>f()); subs=[]; shift=null; lastClosed=null; shiftLoaded=false; storeOpen=null; stockCount=null; countOrders=[]; publishedSoldOut=null; lists={}; orders=[]; contacts={}; asked=new Set(); known=null; }
 
 // Only sellers the owner approved can use this page. The owner has their own
 // login on owner.html; to work the counter, the owner registers a seller account.
@@ -278,9 +278,17 @@ function start(){
   }, ()=>{}));
   subs.push(onSnapshot(collection(db,"riders"), s=>{ riders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   // The owner's open inventory count, to show what's left on the dine-in menu
+  let stopCountOrders=null, countSince=null;
   subs.push(onSnapshot(query(collection(db,"inventory"),orderBy("since","desc"),limit(1)), s=>{
-    const c=s.docs[0]?.data({serverTimestamps:"estimate"}); stockCount=c&&!c.closedAt?c:null; updateStock(); if(!$("#dinePanel").hidden) renderDine();
+    const c=s.docs[0]?.data({serverTimestamps:"estimate"}); stockCount=c&&!c.closedAt?c:null;
+    // every order since the count started (the board only keeps the latest 300)
+    const since=stockCount?.since?.toMillis?.()??null;
+    if(since!==countSince){ countSince=since; stopCountOrders?.(); stopCountOrders=null; countOrders=[];
+      if(since!=null) stopCountOrders=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",stockCount.since)),
+        q=>{ countOrders=q.docs.map(d=>({id:d.id,...d.data()})); updateStock(); if(!$("#dinePanel").hidden) renderDine(); }, ()=>{}); }
+    updateStock(); if(!$("#dinePanel").hidden) renderDine();
   }, ()=>{}));
+  subs.push(()=>{ stopCountOrders?.(); stopCountOrders=null; countSince=null; });
   // Menu changes the owner saves (recipes, prices) count right away, without a refresh
   subs.push(onSnapshot(doc(db,"settings","menu"), s=>{ if(s.exists()){ applyMenu(s.data().sections); updateStock(); if(!$("#dinePanel").hidden) renderDine(); } }, ()=>{}));
   // The sold-out list as last published (by this or another seller, or the owner)
@@ -330,14 +338,15 @@ let dineCat="all", gcashNow=false;
 // Inventory: the owner's open count holds the beginning amount of each ingredient; every order
 // since then uses its items' recipes. stockLeft(id): servings of an item still possible
 // (null when nothing it uses is counted). 0 = sold out.
-let stockCount=null, leftNow=null;
+let stockCount=null, leftNow=null, countOrders=[];
 // counted with its take-out box when the seller has "Box" picked for this round
 const stockLeft=id=>servingsLeft(id,leftNow,dinePack()==="box");
 // Work out what's left and publish it for the customer page: the sold-out items, and how much
 // of each ingredient is left (so customers can't order more than that). Only written on a change.
 let publishedSoldOut=null;
 function updateStock(){
-  leftNow=ingredientsLeft(stockCount,orders);
+  const m=new Map(); [...countOrders,...orders].forEach(o=>m.set(o.id,o)); // newest copy of each order wins
+  leftNow=ingredientsLeft(stockCount,[...m.values()]);
   const out=JSON.stringify([soldOutFrom(leftNow),leftNow||{}]);
   if(publishedSoldOut!==null && out!==publishedSoldOut){
     const [soldOut,left]=JSON.parse(out);
@@ -684,7 +693,7 @@ function orderCard(o){
     <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${esc(st.tone)}">${esc(statusLabel(o))}</span></div>
     ${del?deliverySteps(o):""}
     ${o.unconfirmedAt&&o.status==="new"?`<div class="flag">Rider ${esc(o.unconfirmedByName||"")} couldn't confirm this customer by phone (${fmtTime(o.unconfirmedAt)}). Call the customer; if it's a fake order, cancel it.</div>`:""}
-    ${priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
+    ${o.manual||priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
     ${!dineIn && c && ["new","preparing"].includes(o.status) && phoneConfirmed(c.phone)===false?`<div class="flag">New number. Call ${esc(c.phone)} to check the order is real before cooking.</div>`:""}
     <div class="kv"><b>Time</b><span>${fmtTime(o.createdAt)} · ${esc(o.mode)}</span>
       ${dineIn?(o.table?`<b>Table/Customer</b><span style="font-size:1.1rem;font-weight:800">${esc(o.table)}</span>`:"")
