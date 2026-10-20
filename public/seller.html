@@ -968,7 +968,8 @@ function renderShift(){
   if(lastClosed && !shift){
     const s=lastClosed.summary, d=s.counted-s.expected;
     box.innerHTML=`<div class="shift-head"><b>Shift closed</b> <span class="pill ${d===0?"go":"work"}">${d===0?"Cash exact":d>0?`Over ${peso(d)}`:`Short ${peso(-d)}`}</span></div>
-      ${shiftTable(s)}${lastClosed.refillCount!=null?`<p class="muted" style="margin:8px 0 0;font-size:.88rem">Inventory count ended. ${lastClosed.refillCount?`The kitchen got the refill list (${plural(lastClosed.refillCount,"ingredient")}).`:"Nothing was used, so there's nothing to refill."}</p>`:""}
+      ${shiftTable(s)}${lastClosed.refillCount!=null?`<p class="muted" style="margin:8px 0 0;font-size:.88rem">Inventory count ended. ${lastClosed.refillCount?`The kitchen got the refill list (${plural(lastClosed.refillCount,"ingredient")}).`:"Nothing counted was used, so the kitchen's list is empty."}</p>`
+        :`<p class="flag" style="margin:8px 0 0">No inventory count was open, so the kitchen got no refill list. The owner starts the first count in Owner dashboard → Inventory.</p>`}
       <div class="btnrow" style="margin-top:8px">${printer()?`<button class="btn ghost small" data-sh="print">Print shift report</button>`:""}
       <button class="btn small" data-sh="done">Done</button></div>`;
     return;
@@ -993,6 +994,7 @@ function renderShift(){
   } else if(shiftForm==="close"){
     const c=shiftDraft.counted, n=c===""||c==null?null:Math.floor(Number(c)), diff=n==null?null:n-s.expected;
     form=`<div class="shift-form"><b>Close shift: count the cash in the drawer</b>
+      <p class="muted" style="margin:0;font-size:.85rem">${stockCount?.id?"The inventory count ends too, and the kitchen gets the refill list.":"No inventory count is open, so the kitchen won't get a refill list."}</p>
       ${s.unpaidCount?`<p class="flag" style="margin:0">${plural(s.unpaidCount,"dine-in order")} not paid yet (${peso(s.unpaid)}). Collect them before closing, or they stay unpaid.</p>`:""}
       <div class="btnrow"><input type="number" inputmode="numeric" min="0" step="1" id="countedCash" value="${esc(c??"")}" placeholder="Cash counted" aria-label="Cash counted" style="max-width:170px">
         <button type="button" class="btn ghost small" data-sh="exact">Exactly ${peso(s.expected)}</button></div>

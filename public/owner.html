@@ -960,8 +960,8 @@ function renderInventory(){
       ${invTable(rows)}
       ${!live?refillStatus(view):""}
       ${live?`<p style="margin:10px 0 0;font-size:.9rem"><b>Sold out now:</b> ${out.length?esc(out.join(", ")):"nothing"}</p>${notCounted(view)}`:""}
-      <div class="btnrow" style="margin-top:10px">${live?`<button class="btn ghost small" data-iact="edit">Change beginning stock</button>
-        <button class="btn" data-iact="end">End shift</button>`:(open?"":`<button class="btn" data-iact="new">Start next count</button>`)}
+      ${live?`<p class="muted" style="margin:10px 0 0;font-size:.85rem">The count ends when the seller closes the shift; the kitchen then gets the refill list and starts the next count.</p>`:""}
+      <div class="btnrow" style="margin-top:10px">${live?`<button class="btn ghost small" data-iact="edit">Change beginning stock</button>`:(open?"":`<button class="btn" data-iact="new">Start next count</button>`)}
         ${invView?`<button class="btn ghost small" data-iact="back">Back to ${open?"current shift":"inventory"}</button>`:""}
         <button class="btn ghost small" data-iact="del" data-id="${esc(view.id)}">Delete this count</button></div></section>`;
   }

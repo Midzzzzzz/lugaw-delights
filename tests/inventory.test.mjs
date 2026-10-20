@@ -28,8 +28,9 @@ await t("customer can't read the count", () => assertFails(getDoc(doc(cust, "inv
 await t("seller can't change the stock", () => assertFails(updateDoc(doc(s1, "inventory/c1"), { items: { L01: 999 } })));
 await t("owner adds stock that arrived mid-shift", () => assertSucceeds(updateDoc(doc(owner, "inventory/c1"), { items: { L01: 70, B02: 24 } })));
 await t("result can't be saved without ending the shift", () => assertFails(updateDoc(doc(owner, "inventory/c1"), { result: { L01: { used: 3, remaining: 67 } } })));
-await t("owner ends the shift with the breakdown", () => assertSucceeds(updateDoc(doc(owner, "inventory/c1"),
+await t("owner can't end the count (only the seller, with the shift)", () => assertFails(updateDoc(doc(owner, "inventory/c1"),
   { closedAt: serverTimestamp(), result: { L01: { used: 3, remaining: 67 }, B02: { used: 0, remaining: 24 } } })));
+await env.withSecurityRulesDisabled(c => updateDoc(doc(c.firestore(), "inventory/c1"), { closedAt: new Date() }));
 await t("a closed count can't be changed", () => assertFails(updateDoc(doc(owner, "inventory/c1"), { items: { L01: 1 } })));
 await t("owner deletes a count", () => assertSucceeds(deleteDoc(doc(owner, "inventory/c1"))));
 
@@ -73,6 +74,7 @@ const done = (over = {}) => ({ refill: { status: "done", items: refill.items, bo
 await t("kitchen can't change what the list asked for", () => assertFails(updateDoc(doc(k1, "inventory/r1"), done({ items: { egg: 1 } }))));
 await t("kitchen can't mark it in someone else's name", () => assertFails(updateDoc(doc(k1, "inventory/r1"), done({ doneBy: "s1" }))));
 await t("a seller can't mark it refilled", () => assertFails(updateDoc(doc(s1, "inventory/r1"), done({ doneBy: "s1" }))));
+await t("the owner can't mark it refilled (the kitchen does)", () => assertFails(updateDoc(doc(owner, "inventory/r1"), done({ doneBy: "owner" }))));
 await t("kitchen marks everything refilled", () => assertSucceeds(updateDoc(doc(k1, "inventory/r1"), done())));
 await t("it can't be marked refilled twice", () => assertFails(updateDoc(doc(k1, "inventory/r1"), done())));
 await t("kitchen starts the next count with the refilled stock", () => assertSucceeds(setDoc(doc(k1, "inventory/r2"), count({ by: "k1", items: { egg: 30, rice: 20 }, refillOf: "r1" }))));

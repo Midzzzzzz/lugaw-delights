@@ -136,12 +136,10 @@ service cloud.firestore {
         && request.resource.data.closedAt == null
         && request.resource.data.items is map && request.resource.data.items.size() <= 300
         && request.resource.data.by == uid();
+      // the owner only changes the beginning stock of an open count (more stock arrived)
       allow update: if (isAdmin() && resource.data.closedAt == null
-        && changed().hasOnly(['items','closedAt','result','refill'])
-        && (!changed().hasAny(['refill']) || (refillPending(request.resource.data.refill) && changed().hasAny(['closedAt'])))
-        && request.resource.data.items is map && request.resource.data.items.size() <= 300
-        && (!changed().hasAny(['closedAt']) || request.resource.data.closedAt == request.time)
-        && (!changed().hasAny(['result']) || (request.resource.data.result is map && changed().hasAny(['closedAt']))))
+        && changed().hasOnly(['items'])
+        && request.resource.data.items is map && request.resource.data.items.size() <= 300)
         // a seller ends the count when they close their shift: only the end time, who ended it
         // and the breakdown; the stock numbers can't be changed
         || (isSeller() && resource.data.closedAt == null
@@ -150,9 +148,9 @@ service cloud.firestore {
           && request.resource.data.closedBy == uid()
           && request.resource.data.result is map && request.resource.data.result.size() <= 300
           && (!changed().hasAny(['refill']) || refillPending(request.resource.data.refill)))
-        // the kitchen (or the owner) marks an ended count's refill list as done, once; the list
-        // itself can't be changed, only what was actually bought is added
-        || ((isKitchen() || isAdmin()) && resource.data.closedAt != null
+        // the kitchen marks an ended count's refill list as done, once; the list itself can't be
+        // changed, only what was actually bought is added
+        || (isKitchen() && resource.data.closedAt != null
           && resource.data.get('refill', {}).get('status', '') == 'pending'
           && changed().hasOnly(['refill'])
           && request.resource.data.refill.keys().hasOnly(['status','items','bought','doneBy','doneByName','doneAt'])
