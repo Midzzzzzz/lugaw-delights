@@ -31,29 +31,42 @@ export function parseDate(s) {
   return new Date(y, +mo - 1, +d, h, +mi, +(sec || 0));
 }
 
-const norm = s => String(s || "").toLowerCase().replace(/^add-on:\s*/, "").replace(/[^a-z0-9]/g, "");
+const norm = s => String(s || "").toLowerCase().replace(/^add-on:\s*/, "").replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
+// Looser key for names written a little differently: "w/" = "with", "&" = "and", plurals, word order of fillers
+const loose = s => String(s || "").toLowerCase().replace(/^add-on:\s*/, "").replace(/&/g, " and ").replace(/(^|\s)w\//g, " with ")
+  .split(/[^a-z0-9]+/).filter(w => w && !["and", "with", "w", "the", "of", "pcs", "pc"].includes(w))
+  .map(w => w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w).join("");
 const isBowl = name => /take\s*-?\s*out\s*(bowl|box)/i.test(name);
 const isDelivery = name => /^delivery\b/i.test(String(name).trim());
 
 // Finds the menu item for a Loyverse item name. items: { id: { name } }
-export function matcher(items) {
-  const index = {};
-  Object.values(items).forEach(it => { const k = norm(it.name); if (k && !(k in index)) index[k] = it.id; });
+// links: { "Loyverse name": menu item id } chosen by the owner, used first
+export function matcher(items, links = {}) {
+  const index = {}, looseIndex = {};
+  Object.values(items).forEach(it => {
+    const k = norm(it.name); if (k && !(k in index)) index[k] = it.id;
+    const l = loose(it.name); if (l) looseIndex[l] = looseIndex[l] === undefined ? it.id : null; // null: two items share it
+  });
   const keys = Object.keys(index);
   return name => {
+    if (links[name] && items[links[name]]) return links[name];
     const n = norm(name); if (!n) return null;
+    const l = loose(name); if (looseIndex[l]) return looseIndex[l];
     const tries = [n];
     if (n.startsWith("extra")) tries.push(n.slice(5));
     tries.push("plain" + n, n.replace("withliver", "withchickenliver"));
     for (const t of tries) if (index[t]) return index[t];
     const pre = keys.filter(k => k.startsWith(n));
-    return pre.length === 1 ? index[pre[0]] : null;
+    if (pre.length === 1) return index[pre[0]];
+    // a longer menu name that contains it ("Chicken rice meal" → "Fried Chicken Rice Meal"), if only one does
+    const inside = n.length >= 6 ? keys.filter(k => k.includes(n)) : [];
+    return inside.length === 1 ? index[inside[0]] : null;
   };
 }
 
 // Returns { orders, unmatched: { name: qty }, problems: [text], refunds, refundsUnmatched }
 // orders: [{ receipt, when (Date), mode, items: [{ id, name, price, qty }], subtotal, boxFee, deliveryFee, total }]
-export function readLoyverse(text, items) {
+export function readLoyverse(text, items, links = {}) {
   const rows = parseCSV(text);
   if (!rows.length) return { orders: [], unmatched: {}, problems: ["The file is empty."], refunds: 0, refundsUnmatched: 0 };
   const head = rows[0].map(h => h.trim().toLowerCase()), col = name => head.indexOf(name);
@@ -61,7 +74,7 @@ export function readLoyverse(text, items) {
   const missing = need.filter(n => col(n) < 0);
   if (missing.length) return { orders: [], unmatched: {}, problems: [`This doesn't look like a Loyverse "Receipts by item" export (missing: ${missing.join(", ")}).`], refunds: 0, refundsUnmatched: 0 };
   const get = (r, n) => (col(n) >= 0 ? (r[col(n)] ?? "") : "").trim();
-  const match = matcher(items), problems = [];
+  const match = matcher(items, links), problems = [];
 
   // Group the lines by receipt
   const byReceipt = new Map();

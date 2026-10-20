@@ -1072,20 +1072,21 @@ $("#view").addEventListener("click",async e=>{
 // The owner picks a Loyverse "Receipts by item" export (CSV). Each receipt becomes a finished,
 // paid order on its own date (see loyverse.js). Receipts imported before are skipped, so the
 // same file can be imported again safely.
-let lvPlan=null, lvMsg="", lvBusy=false;
+let lvPlan=null, lvMsg="", lvBusy=false, lvLinks={}; // lvLinks: Loyverse item name -> menu item id the owner picked
 const lvInput=document.createElement("input");
 lvInput.type="file"; lvInput.accept=".csv,text/csv"; lvInput.hidden=true; document.body.append(lvInput);
 lvInput.onchange=async()=>{
   const f=lvInput.files[0]; lvInput.value=""; if(!f) return;
   lvMsg="Reading the file…"; lvPlan=null; render(true);
   try{
-    const r=readLoyverse(await f.text(),ITEMS);
+    const text=await f.text(); lvLinks={};
+    const r=readLoyverse(text,ITEMS);
     if(!r.orders.length){ lvMsg=r.problems[0]||"No sales found in that file."; return render(true); }
     // which receipts are already here
     const done=new Set();
     for(let i=0;i<r.orders.length;i+=25)
       await Promise.all(r.orders.slice(i,i+25).map(o=>getDoc(doc(db,"orders","loyverse-"+o.receipt)).then(s=>{ if(s.exists()) done.add(o.receipt); }).catch(()=>{})));
-    lvPlan={...r,file:f.name,already:done,todo:r.orders.filter(o=>!done.has(o.receipt)&&o.items.length<=MAX_LINES)};
+    lvPlan={...r,text,file:f.name,already:done,todo:r.orders.filter(o=>!done.has(o.receipt)&&o.items.length<=MAX_LINES)};
     lvMsg="";
   }catch(x){ lvMsg="Couldn't read that file: "+(x.message||friendlyError(x)); }
   render(true);
@@ -1105,12 +1106,28 @@ function lvPreview(){
       <tr class="sec"><td>All</td><td class="n">${p.todo.length}</td><td class="n">${peso(total)}</td></tr></tbody></table></div>
       ${fees?`<p class="muted" style="font-size:.85rem;margin:6px 0 0">Includes ${peso(fees)} in delivery fees, which go to riders and aren't counted in shop sales.</p>`:""}`
       :`<p class="empty">Everything in this file is already imported.</p>`}
-    ${un.length?`<div class="flag" style="margin-top:8px">Not on your menu, imported with their Loyverse name and price: ${esc(un.map(([n,q])=>`${n} ×${q}`).join(", "))}.</div>`:""}
+    ${un.length?`<div class="flag" style="margin-top:8px;display:grid;gap:6px">
+      <span>Not matched to your menu. Pick the menu item for each, or leave it to import with its Loyverse name and price:</span>
+      ${un.map(([n,q])=>`<label style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;color:var(--fg);font-weight:600">${esc(n)} ×${q}
+        <select data-lvlink="${esc(n)}" style="width:auto;max-width:100%" aria-label="Menu item for ${esc(n)}">
+          <option value="">Keep the Loyverse name</option>
+          ${savedMenu().map(c=>`<optgroup label="${esc(c.name)}">${(c.items||[]).map(it=>`<option value="${esc(it.id)}">${esc(it.name)} (${peso(it.price)})</option>`).join("")}</optgroup>`).join("")}
+        </select></label>`).join("")}</div>`:""}
+    ${Object.keys(lvLinks).length?`<p class="muted" style="font-size:.85rem;margin:6px 0 0">Linked: ${esc(Object.entries(lvLinks).map(([n,id])=>`${n} → ${ITEMS[id]?.name||id}`).join(", "))}</p>`:""}
     ${p.problems.length?`<div class="flag" style="margin-top:8px">${p.problems.slice(0,5).map(esc).join("<br>")}</div>`:""}
     ${lvMsg?`<p class="err">${esc(lvMsg)}</p>`:""}
     <div class="btnrow" style="margin-top:10px">${p.todo.length?`<button class="btn" data-lvgo${lvBusy?" disabled":""}>Import ${plural(p.todo.length,"receipt")} · ${peso(total)}</button>`:""}
       <button class="btn ghost small" data-lvclose>${p.todo.length?"Cancel":"Close"}</button></div></section>`;
 }
+// The owner links a Loyverse item to a menu item: work the receipts out again with that link
+$("#view").addEventListener("change",e=>{
+  const sel=e.target.closest("[data-lvlink]"); if(!sel || tab!=="orders" || !lvPlan) return;
+  if(sel.value) lvLinks[sel.dataset.lvlink]=sel.value; else delete lvLinks[sel.dataset.lvlink];
+  sel.blur();
+  const r=readLoyverse(lvPlan.text,ITEMS,lvLinks), done=lvPlan.already;
+  lvPlan={...lvPlan,...r,todo:r.orders.filter(o=>!done.has(o.receipt)&&o.items.length<=MAX_LINES)};
+  render(true);
+});
 $("#view").addEventListener("click",async e=>{
   if(tab!=="orders") return;
   const b=e.target.closest("[data-lvpick],[data-lvgo],[data-lvclose]"); if(!b) return;

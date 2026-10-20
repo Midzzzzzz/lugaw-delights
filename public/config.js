@@ -75,6 +75,7 @@ export const MENU = [
   { id: "lugaw", name: "Lugaw Series", box: true, items: [
     ["L01", "Plain Lugaw", 39],
     ["L11", "Lugaw with Egg", 59],
+    ["L02", "Lugaw with Egg and Stripe", 85],  // same id it had before, so older orders still match
     ["L03", "Lugaw with Chicken", 79],
     ["L04", "Lugaw with Liver", 69],
     ["L05", "Lugaw with Lechon Kawali", 89],
@@ -96,7 +97,8 @@ export const MENU = [
     ["R09", "Fried Rice Overload 2", 159, "Lechon Kawali + Chicharon Bulaklak + Egg"],
     ["R10", "Plain Rice with Fried Dumplings (3 pcs)", 79],
     ["R11", "Plain Rice with Shanghai Rolls (3 pcs)", 79],
-    ["R12", "Plain Rice with Chicken and Liver Adobo", 99]
+    ["R12", "Plain Rice with Chicken and Liver Adobo", 99],
+    ["R13", "Fried Chicken Rice Meal", 119]  // "Chicken rice meal" in Loyverse
   ]},
   { id: "dumplings", name: "Dumpling Series", box: true, items: [
     ["D01", "Fried Dumplings (5 pcs)", 75],
