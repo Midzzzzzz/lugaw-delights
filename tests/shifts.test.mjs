@@ -1,7 +1,7 @@
 // Cashier shifts: open with starting cash, pay in / pay out, close once with the counted cash.
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebase/rules-unit-testing";
-import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, writeBatch } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, deleteDoc, serverTimestamp, arrayUnion, writeBatch, Timestamp } from "firebase/firestore";
 
 const env = await initializeTestEnvironment({ projectId: "demo-lugaw",
   firestore: { rules: readFileSync(new URL("../firestore.rules", import.meta.url), "utf8"), host: "127.0.0.1", port: 8080 } });
@@ -49,6 +49,15 @@ console.log("Store follows the shift");
 await t("seller opens a shift and the store in one save", () => { const b = writeBatch(s1); b.set(doc(s1, "shifts/z"), open()); b.set(doc(s1, "settings/store"), { open: true }, { merge: true }); return assertSucceeds(b.commit()); });
 await t("seller closes the shift and the store in one save", () => { const b = writeBatch(s1); b.update(doc(s1, "shifts/z"), close()); b.set(doc(s1, "settings/store"), { open: false }, { merge: true }); return assertSucceeds(b.commit()); });
 await t("customer can't open the store", () => assertFails(setDoc(doc(cust, "settings/store"), { open: true }, { merge: true })));
+
+console.log("Past shifts recorded from the order timeline");
+const ago = h => Timestamp.fromDate(new Date(Date.now() - h * 3600000));
+const past = (by = "owner", over = {}) => ({ past: true, openedAt: ago(30), closedAt: ago(25), openedBy: by, openedByName: "Recorded from orders", startCash: 0, moves: [], summary: { orders: 12, sales: 1500 }, ...over });
+await t("owner records a past shift", () => assertSucceeds(setDoc(doc(owner, "shifts/past-1"), past())));
+await t("a past shift can't end in the future", () => assertFails(setDoc(doc(owner, "shifts/past-2"), past("owner", { closedAt: Timestamp.fromDate(new Date(Date.now() + 3600000)) }))));
+await t("a past shift can't end before it starts", () => assertFails(setDoc(doc(owner, "shifts/past-3"), past("owner", { openedAt: ago(20), closedAt: ago(25) }))));
+await t("a seller can't record a past shift", () => assertFails(setDoc(doc(s1, "shifts/past-4"), past("s1"))));
+await t("a recorded past shift can't be changed", () => assertFails(updateDoc(doc(owner, "shifts/past-1"), { summary: { orders: 1 } })));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);

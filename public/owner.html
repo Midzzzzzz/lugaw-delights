@@ -114,6 +114,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndP
 import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
+import { findShifts } from "./pastshifts.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
 const $=s=>document.querySelector(s);
@@ -1109,7 +1110,7 @@ $("#view").addEventListener("click",async e=>{
 let allShifts=[], shiftsErr="", shiftOpen=null;
 function renderShifts(){
   const t=v=>v?.toDate?.()?.toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"—";
-  const diffCell=x=>{ const s=x.summary; if(!s||s.counted==null) return `<span class="muted">—</span>`; const d=s.counted-s.expected;
+  const diffCell=x=>{ const s=x.summary; if(x.past) return `<span class="pill">From orders</span>`; if(!s||s.counted==null) return `<span class="muted">—</span>`; const d=s.counted-s.expected;
     return d===0?`<span class="pill go">Exact</span>`:d>0?`<span class="pill work">Over ${peso(d)}</span>`:`<span class="pill new">Short ${peso(-d)}</span>`; };
   const row=(l,v,b)=>`<div${b?' class="grand"':""}><span>${l}</span><span>${v}</span></div>`;
   const detail=x=>{ const s=x.summary;
@@ -1118,21 +1119,84 @@ function renderShifts(){
         +row("Starting cash",peso(s.startCash))+row("Cash sales",peso(s.cashSales))+(s.riderCash?row("Cash from riders",peso(s.riderCash)):"")
         +(s.adjustIn?row("Extra collected",peso(s.adjustIn)):"")+(s.adjustOut?row("Given back","−"+peso(s.adjustOut)):"")
         +(s.payIn?row("Pay in",peso(s.payIn)):"")+(s.payOut?row("Pay out","−"+peso(s.payOut)):"")
-        +row("Expected cash",peso(s.expected),true)+row("Counted",peso(s.counted))
+        +(x.past?row("Cash taken",peso(s.cashSales),true)+(s.deliveryFees?row("Delivery fees (riders)",peso(s.deliveryFees)):"")+`<div class="muted">Recorded from the order timeline: no drawer was counted then.</div>`
+          :row("Expected cash",peso(s.expected),true)+row("Counted",peso(s.counted)))
       :row("Starting cash",peso(x.startCash))+`<div class="muted">Still open: the totals are saved when the seller closes the shift.</div>`}</div>
       ${(x.moves||[]).length?`<b style="display:block;margin-top:8px">Pay in / pay out</b><ul class="lines">${x.moves.map(m=>`<li><span class="q">${m.type==="in"?"In":"Out"}</span><span>${esc(m.note)} · ${esc(m.byName)} · ${new Date(m.at).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"})}</span><span class="amt">${peso(m.amount)}</span></li>`).join("")}</ul>`:""}
       <div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-shdel="${esc(x.id)}">Delete shift</button></div>`; };
   $("#view").innerHTML=`<div class="card" style="margin-top:12px">
     <h2 style="color:var(--brand-deep)">Shifts</h2>
     <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Sellers open a shift with the cash in the drawer and close it by counting the drawer. Tap a shift for its details.</p>
+    ${pastPanel()}
     ${shiftsErr?`<div class="flag">${esc(shiftsErr)}</div>`:""}
     <div class="tablewrap"><table class="orders"><thead><tr><th>Opened</th><th>Closed</th><th>Cashier</th><th class="n">Orders</th><th class="n">Sales</th><th class="n">Expected cash</th><th class="n">Counted</th><th>Cash</th></tr></thead>
     <tbody>${allShifts.map(x=>`<tr class="row" data-shopen="${esc(x.id)}"><td>${t(x.openedAt)}</td><td>${x.closedAt?t(x.closedAt):`<span class="pill go">Open now</span>`}</td>
       <td>${esc(x.openedByName||"")}${x.closedByName&&x.closedByName!==x.openedByName?` → ${esc(x.closedByName)}`:""}</td>
       <td class="n">${x.summary?x.summary.orders:"—"}</td><td class="n">${x.summary?peso(x.summary.sales):"—"}</td>
-      <td class="n">${x.summary?peso(x.summary.expected):"—"}</td><td class="n">${x.summary?peso(x.summary.counted):"—"}</td><td>${diffCell(x)}</td></tr>
+      <td class="n">${x.summary?peso(x.summary.expected):"—"}</td><td class="n">${x.summary&&x.summary.counted!=null?peso(x.summary.counted):"—"}</td><td>${diffCell(x)}</td></tr>
       ${shiftOpen===x.id?`<tr class="detail"><td colspan="8">${detail(x)}</td></tr>`:""}`).join("")||`<tr><td colspan="8" class="muted">No shifts yet. Sellers open one on the seller dashboard.</td></tr>`}</tbody></table></div></div>`;
 }
+// ---------- Recording past shifts ----------
+// Before shifts were used: group the orders of a period into shifts wherever they stop for a few
+// hours (the store is open 24 hours, so not by calendar day). Saved shifts are marked "From
+// orders"; times already covered by a shift are left out, so it can be run again safely.
+let pastOpen=false, pastFrom="", pastTo="", pastGap=3, pastFound=null, pastMsg="", pastBusy=false;
+const realShifts=()=>allShifts.filter(x=>!x.past);
+function pastDefaults(){
+  const first=realShifts().map(x=>x.openedAt?.toDate?.()).filter(Boolean).sort((a,b)=>a-b)[0];
+  pastTo=ymd(first||new Date()); pastFrom=ymd(addDays(first||new Date(),-30));
+}
+function pastPanel(){
+  if(!pastOpen) return `<div class="btnrow" style="margin-bottom:10px"><button class="btn ghost small" data-past="open">Record past shifts</button></div>`;
+  const t=d=>d.toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"});
+  return `<div class="card" style="margin-bottom:12px;background:var(--sunk)">
+    <b>Record past shifts from the order timeline</b>
+    <p class="muted" style="font-size:.85rem;margin:4px 0 8px">For the time before shifts were used. Orders are grouped into a shift wherever they stop for the gap you pick.
+      Times already covered by a shift are left out.</p>
+    <div class="toolbar"><label class="f" for="pastFrom">From<input type="date" id="pastFrom" value="${esc(pastFrom)}"></label>
+      <label class="f" for="pastTo">To<input type="date" id="pastTo" value="${esc(pastTo)}" max="${ymd(new Date())}"></label>
+      <span class="muted" style="font-weight:700">New shift after a gap of</span>${[2,3,4].map(h=>`<button class="chip ${pastGap===h?"on":""}" data-pastgap="${h}">${h} hours</button>`).join("")}
+      <button class="btn small" data-past="find"${pastBusy?" disabled":""}>Find shifts</button></div>
+    ${pastFound?pastFound.length?`<div class="tablewrap"><table class="inv" style="margin-top:8px"><thead><tr><th>Start</th><th>End</th><th class="n">Orders</th><th class="n">Sales</th><th class="n">Cash</th><th class="n">GCash</th></tr></thead><tbody>
+      ${pastFound.map(x=>`<tr><td>${t(x.start)}</td><td>${t(x.end)}</td><td class="n">${x.summary.orders}</td><td class="n">${peso(x.summary.sales)}</td><td class="n">${peso(x.summary.cashSales)}</td><td class="n">${peso(x.summary.gcashSales)}</td></tr>`).join("")}
+      <tr class="sec"><td colspan="2">All</td><td class="n">${pastFound.reduce((n,x)=>n+x.summary.orders,0)}</td><td class="n">${peso(pastFound.reduce((n,x)=>n+x.summary.sales,0))}</td><td></td><td></td></tr></tbody></table></div>`
+      :`<p class="empty" style="margin-top:8px">No orders to group in that period (or they're already in shifts).</p>`:""}
+    ${pastMsg?`<p class="err">${esc(pastMsg)}</p>`:""}
+    <div class="btnrow" style="margin-top:8px">${pastFound?.length?`<button class="btn" data-past="save"${pastBusy?" disabled":""}>Save ${plural(pastFound.length,"past shift")}</button>`:""}
+      <button class="btn ghost small" data-past="close">Close</button></div></div>`;
+}
+$("#view").addEventListener("input",e=>{ if(tab!=="shifts") return; if(e.target.id==="pastFrom") pastFrom=e.target.value; if(e.target.id==="pastTo") pastTo=e.target.value; });
+$("#view").addEventListener("click",async e=>{
+  if(tab!=="shifts") return;
+  const g=e.target.closest("[data-pastgap]"); if(g){ pastGap=+g.dataset.pastgap; pastFound=null; return render(true); }
+  const b=e.target.closest("[data-past]"); if(!b) return;
+  const a=b.dataset.past; pastMsg="";
+  if(a==="open"){ pastOpen=true; pastFound=null; pastDefaults(); return render(true); }
+  if(a==="close"){ pastOpen=false; pastFound=null; return render(true); }
+  if(a==="find"){
+    const from=new Date(pastFrom+"T00:00"), to=addDays(new Date(pastTo+"T00:00"),1);
+    if(!pastFrom||!pastTo||isNaN(from)||isNaN(to)||to<=from){ pastMsg="Pick the From and To dates."; return render(true); }
+    pastBusy=true; render(true);
+    try{
+      const q=await getDocs(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(from)),where("createdAt","<",Timestamp.fromDate(to))));
+      const taken=allShifts.map(x=>[x.openedAt?.toMillis?.()||0, x.closedAt?.toMillis?.()||Date.now()]);
+      pastFound=findShifts(q.docs.map(d=>({id:d.id,...d.data()})),{gapHours:pastGap,taken});
+    }catch(x){ pastMsg="Couldn't read the orders: "+friendlyError(x); }
+    pastBusy=false; return render(true);
+  }
+  if(a==="save"){
+    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent=`Save ${plural(pastFound.length,"past shift")}? Tap again`; return; }
+    pastBusy=true; b.disabled=true;
+    try{
+      const batch=writeBatch(db), uid=auth.currentUser.uid;
+      pastFound.forEach(x=>batch.set(doc(db,"shifts","past-"+x.start.getTime()),{past:true,openedAt:Timestamp.fromDate(x.start),closedAt:Timestamp.fromDate(x.end),
+        openedBy:uid,openedByName:"Recorded from orders",startCash:0,moves:[],summary:x.summary}));
+      await batch.commit();
+      pastMsg=""; pastOpen=false; pastFound=null;
+    }catch(x){ pastMsg="Couldn't save: "+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase."; }
+    pastBusy=false; return render(true);
+  }
+});
 $("#view").addEventListener("click",async e=>{
   if(tab!=="shifts") return;
   const d=e.target.closest("[data-shdel]");

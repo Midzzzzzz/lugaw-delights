@@ -413,7 +413,18 @@ service cloud.firestore {
         && request.resource.data.openedAt == request.time
         && request.resource.data.openedBy == uid() && str(request.resource.data.openedByName, 80)
         && amount(request.resource.data.startCash)
-        && request.resource.data.moves == [] && request.resource.data.closedAt == null;
+        && request.resource.data.moves == [] && request.resource.data.closedAt == null
+        // a past shift the owner records from the order timeline (before shifts were used):
+        // already closed, in the past, with its totals; no cash was counted then
+        || (isAdmin()
+          && request.resource.data.keys().hasOnly(['past','openedAt','closedAt','openedBy','openedByName','startCash','moves','summary'])
+          && request.resource.data.past == true
+          && request.resource.data.openedAt is timestamp && request.resource.data.closedAt is timestamp
+          && request.resource.data.openedAt <= request.resource.data.closedAt
+          && request.resource.data.closedAt <= request.time
+          && request.resource.data.openedBy == uid() && str(request.resource.data.openedByName, 80)
+          && request.resource.data.startCash == 0 && request.resource.data.moves == []
+          && request.resource.data.summary is map);
       allow update: if isStaff() && resource.data.closedAt == null
         && (
           // cash paid in or out: one more entry at the end of the list
