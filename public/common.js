@@ -94,12 +94,14 @@ export function ingredientsLeft(count, orders) {
   });
   return left;
 }
-// How many more servings of an item the counted ingredients allow (null: nothing it uses is counted).
+// How many more servings of an item the ingredients allow (null: the item has no ingredients set,
+// so it isn't limited). While a count is open, an ingredient it needs that wasn't counted is
+// treated as none left, so the item can't be sold until that ingredient's stock is entered.
 // isPacked: count its take-out box too (customer orders are always delivered)
 export function servingsLeft(id, left, isPacked = false) {
   if (!left) return null;
-  const parts = Object.entries(uses(id, isPacked)).filter(([g, per]) => g in left && per > 0);
-  return parts.length ? Math.max(0, Math.min(...parts.map(([g, per]) => Math.floor(left[g] / per + 1e-9)))) : null;
+  const parts = Object.entries(uses(id, isPacked)).filter(([, per]) => per > 0);
+  return parts.length ? Math.max(0, Math.min(...parts.map(([g, per]) => Math.floor((left[g] ?? 0) / per + 1e-9)))) : null;
 }
 // Whether order lines can be made with what's left (ingredients shared between items add up).
 // Returns the id of the first item that runs short, or null when everything fits.
@@ -109,9 +111,9 @@ export function shortItem(lines, left, mode = "Dine-in") {
   const need = {};
   for (const it of lines) {
     for (const [g, per] of Object.entries(uses(it.id, packed(it, mode)))) {
-      if (!(g in left)) continue;
+      if (!(per > 0)) continue;
       need[g] = (need[g] || 0) + per * (Number(it.qty) || 0);
-      if (need[g] > left[g] + 1e-9) return it.id;
+      if (need[g] > (left[g] ?? 0) + 1e-9) return it.id; // not counted = none left
     }
   }
   return null;
@@ -174,6 +176,41 @@ export function calcTotals(items, mode, fee = 0) {
 }
 // What the shop receives for an order: everything except the rider's delivery fee
 export const shopAmount = o => (o.total || 0) - (o.deliveryFee || 0);
+
+// ---------- Cashier shifts ----------
+// What happened in a shift, from its orders: sales, cash and GCash taken, and the cash that should
+// be in the drawer. A sale belongs to the shift it was rung up in; GCash to when it was received;
+// a rider's cash to when the shop got it. Sales the owner added by hand or imported are left out.
+const ms = t => t?.toMillis?.() ?? (t instanceof Date ? t.getTime() : null);
+export function shiftSummary(shift, orders, now = Date.now()) {
+  const from = ms(shift.openedAt) ?? now, to = ms(shift.closedAt) ?? now;
+  const inShift = t => t != null && t >= from && t < to + 1;
+  const s = { orders: 0, sales: 0, cashSales: 0, gcashSales: 0, riderCash: 0, adjustIn: 0, adjustOut: 0, unpaid: 0, unpaidCount: 0, cancelled: 0,
+    payIn: 0, payOut: 0, startCash: shift.startCash || 0 };
+  orders.forEach(o => {
+    if (o.manual) return;
+    const made = ms(o.createdAt) ?? now;
+    if (o.status === "cancelled") { if (inShift(made)) s.cancelled++; return; }
+    if (inShift(made)) { s.orders++; s.sales += shopAmount(o); }
+    if (o.mode === "Delivery") {
+      const got = ms(o.riderPaidAt) ?? ms(o.settledAt);
+      if (o.payment === "Cash" && o.cashReceived && inShift(got)) s.riderCash += shopAmount(o);
+      return;
+    }
+    if (!inShift(made)) return;
+    // pickup orders are paid at the counter when they're collected
+    if (o.mode === "Pickup") { if (o.status === "completed") { if (o.payment === "GCash") s.gcashSales += o.total || 0; else s.cashSales += o.total || 0; } return; }
+    const paid = o.cashGiven != null || o.paid === true, first = o.paidTotal ?? o.total ?? 0;
+    if (!paid) { s.unpaid += o.total || 0; s.unpaidCount++; return; }
+    if (o.cashGiven != null) s.cashSales += first; else s.gcashSales += first;
+    const adj = o.settledTotal != null ? o.settledTotal - first : 0; // extra collected or given back after a change
+    if (o.payment === "Cash") { if (adj > 0) s.adjustIn += adj; else s.adjustOut -= adj; }
+    else if (adj) s.gcashSales += adj;
+  });
+  (shift.moves || []).forEach(m => { if (m.type === "in") s.payIn += m.amount; else s.payOut += m.amount; });
+  s.expected = s.startCash + s.cashSales + s.riderCash + s.adjustIn - s.adjustOut + s.payIn - s.payOut;
+  return s;
+}
 // The "Take-out boxes" line for an order's totals (empty when there are none)
 export function boxRow(o) {
   if (!o.boxFee) return "";

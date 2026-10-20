@@ -37,6 +37,11 @@
 .tile.sold{opacity:.55;border-style:dashed}
 .tile:disabled{cursor:not-allowed}
 .quick{display:flex;flex-wrap:wrap;gap:6px}
+/* Cashier shift */
+.shift-head{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline}
+.shift-head>b{font-family:var(--display);font-size:1.15rem;color:var(--brand-deep)}
+.shift-nums{display:flex;flex-wrap:wrap;gap:4px 16px;margin-left:auto;font-variant-numeric:tabular-nums}
+.shift-form{display:grid;gap:8px;margin-top:10px;max-width:460px}
 .quick button{border:2px solid var(--line);background:transparent;border-radius:10px;padding:8px 12px;font-weight:700;font-size:.9rem;cursor:pointer;touch-action:manipulation;font-variant-numeric:tabular-nums}
 .quick button.on{border-color:var(--brand);background:var(--brand);color:var(--on-brand)}
 .lines.tl li{grid-template-columns:minmax(0,1fr) auto auto;align-items:center}
@@ -93,8 +98,12 @@
       <div class="btnrow">
         <button class="btn small" id="dineBtn">+ Dine-in order</button>
         <button class="btn small" id="soundBtn">Turn on order alerts</button>
+        <button class="btn ghost small" id="printerBtn" hidden>Printer</button>
+        <button class="btn ghost small" id="drawerBtn" hidden>Open drawer</button>
       </div>
     </div>
+    <div class="card" id="printerPanel" hidden style="margin-top:12px"></div>
+    <div class="card" id="shiftCard" style="margin-top:12px"></div>
     <div class="card" id="dinePanel" hidden style="margin-top:12px">
       <div class="dine-head"><h2 style="color:var(--brand)" id="dineTitle">Dine-in order</h2>
         <button class="btn ghost small" type="button" id="dineClose">Cancel</button></div>
@@ -141,6 +150,8 @@
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { receiptBytes, openDrawerBytes, toBase64, shiftBytes } from "./escpos.js";
+import { shiftSummary } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 
 const $=s=>document.querySelector(s);
@@ -150,7 +161,7 @@ let subs=[], lists={}, orders=[], riders=[], contacts={}, asked=new Set(), tab="
 let me=null, myName="", myProfile=null, watchSeller=null, registering=false;
 const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
 $("#setup").innerHTML=setupNotice();
-function stopData(){ subs.forEach(f=>f()); subs=[]; lists={}; orders=[]; contacts={}; asked=new Set(); known=null; }
+function stopData(){ subs.forEach(f=>f()); subs=[]; shift=null; lastClosed=null; lists={}; orders=[]; contacts={}; asked=new Set(); known=null; }
 
 // Only sellers the owner approved can use this page. The owner has their own
 // login on owner.html; to work the counter, the owner registers a seller account.
@@ -249,6 +260,7 @@ $("#soundBtn").onclick=()=>{ if(enableSound()){ chime(); $("#soundBtn").textCont
 // order still in progress, and every delivery not yet settled with its rider. So an
 // older order that still needs action never drops off the dashboard.
 function start(){
+  watchShift();
   subs.push(onSnapshot(doc(db,"settings","store"), s=>{
     const open=!s.exists()||s.data().open!==false;
     $("#storeOpen").checked=open; $("#storeLabel").textContent=open?"Store open: taking orders":"Store closed";
@@ -440,7 +452,9 @@ function openAddItems(o){
   Object.keys(dine).forEach(k=>delete dine[k]); dineErr(); setAdding(o);
   $("#dinePanel").hidden=false; renderDine(); $("#dinePanel").scrollIntoView({behavior:"smooth",block:"start"});
 }
-$("#dineBtn").onclick=()=>{ if(addingTo) closeDine(); $("#dinePanel").hidden=false; renderDine(); $("#dinePanel").scrollIntoView({behavior:"smooth",block:"start"}); };
+$("#dineBtn").onclick=()=>{
+  if(!shift){ shiftMsg="Open a shift first: count the cash in the drawer and tap Open shift."; renderShift(); $("#shiftCard").scrollIntoView({behavior:"smooth",block:"center"}); return; }
+  if(addingTo) closeDine(); $("#dinePanel").hidden=false; renderDine(); $("#dinePanel").scrollIntoView({behavior:"smooth",block:"start"}); };
 $("#dineClose").onclick=closeDine;
 function changeQty(id,d){
   const q=(dine[id]||0)+d;
@@ -496,6 +510,7 @@ $("#dineForm").onsubmit=async e=>{
   if(dinePay()==="GCash" && gcashNow) Object.assign(order,{paid:true,paidAt:serverTimestamp(),paidTotal:t.total});
   try{
     await setDoc(ref,order);
+    afterPayment({id:ref.id,...order,createdAt:null}, given!==null?"cash":order.paid?"gcash":"");
     closeDine(); tab="kitchen"; render();
   }catch(x){ dineErr(friendlyError(x)); $("#dineSave").disabled=false; }
 };
@@ -593,6 +608,7 @@ $("#board").addEventListener("focusout",()=>{
   setTimeout(()=>{ if(renderWaiting && !typingOnBoard()){ renderWaiting=false; render(); } },400);
 });
 function render(force){
+  renderShift();
   if(force!==true && typingOnBoard()){ renderWaiting=true; return; }
   renderProfile();
   const today=orders.filter(o=>isToday(o.createdAt)&&o.status!=="cancelled");
@@ -840,6 +856,203 @@ function printReceipt(o){
 }
 
 
+// ---------- Bluetooth receipt printer and cash drawer (seller app on Android) ----------
+// The tablet talks to the printer (e.g. JK-5801H, 58 mm) over Bluetooth; the cash drawer is
+// plugged into the printer and opens when the printer gets the "open drawer" command.
+// Cash payments open the drawer (and print the receipt); GCash payments print the receipt only.
+// The chosen printer and the auto-print setting are remembered on this tablet.
+const BT=window.Capacitor?.Plugins?.BtPrinter;
+const getPref=(k,d)=>{ try{ const v=localStorage.getItem(k); return v==null?d:JSON.parse(v); }catch(_){ return d; } };
+const setPref=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(_){} };
+const printer=()=>BT?getPref("lugaw-printer",null):null;
+let printerMsg="";
+function receiptOf(o){
+  const c=o.mode==="Dine-in"?null:contacts[o.id], first=o.paidTotal??o.total, adj=(o.settledTotal??first)-first;
+  return receiptBytes(o,SHOP,{ customer:c?.name, mobile:c?.phone, lines:mergedLines(o.items),
+    itemName:it=>ITEMS[it?.id]?.name||it?.name||"Item", cashFirst:first, adjust:adj,
+    balance:hasPayment(o)?balanceOf(o):0, notPaid:o.mode==="Dine-in"&&o.status!=="cancelled"&&!hasPayment(o) });
+}
+async function btPrint(arr){
+  const p=printer(); if(!p) return false;
+  try{ await BT.write({address:p.address,data:toBase64(arr)}); printerMsg=""; renderPrinter(); return true; }
+  catch(x){ printerMsg=x?.message||"Couldn't reach the printer."; renderPrinter(); return false; }
+}
+const openDrawer=()=>btPrint(openDrawerBytes());
+// After a payment is saved: kind "cash" or "gcash" ("" = not paid yet, nothing happens)
+function afterPayment(o,kind){
+  if(!kind || !printer()) return;
+  const auto=getPref("lugaw-autoprint",true);
+  if(kind==="cash") btPrint(auto?[...openDrawerBytes(),...receiptOf(o)]:openDrawerBytes());
+  else if(auto) btPrint(receiptOf(o));
+}
+let printerOpen=false, printerList=null;
+function renderPrinter(){
+  if(!BT) return;
+  const p=printer();
+  $("#printerBtn").hidden=false; $("#drawerBtn").hidden=!p;
+  $("#printerBtn").textContent=p?`Printer: ${p.name}${printerMsg?" ⚠":""}`:"Set up printer";
+  $("#printerPanel").hidden=!printerOpen;
+  if(!printerOpen) return;
+  $("#printerPanel").innerHTML=`<h2 style="color:var(--brand);font-size:1.15rem">Receipt printer and cash drawer</h2>
+    <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Pair the printer first in the tablet's <b>Settings → Connections → Bluetooth</b>, then pick it here.
+      Close Loyverse while using this app: only one app can use the printer at a time.</p>
+    ${printerMsg?`<p class="flag">${esc(printerMsg)}</p>`:""}
+    ${printerList===null?`<button class="btn small" data-pr="scan">Show paired printers</button>`
+      :printerList.length?`<div class="btnrow">${printerList.map(d=>`<button class="btn ${p?.address===d.address?"":"ghost "}small" data-pr="pick" data-addr="${esc(d.address)}" data-name="${esc(d.name)}">${esc(d.name)}${p?.address===d.address?" ✓":""}</button>`).join("")}</div>`
+      :`<p class="empty">No paired Bluetooth devices. Pair the printer in the tablet's Bluetooth settings, then tap again.</p><button class="btn small" data-pr="scan">Show paired printers</button>`}
+    <label class="switch" style="margin-top:10px"><input type="checkbox" data-pr="auto"${getPref("lugaw-autoprint",true)?" checked":""}><span>Print a receipt when a payment is saved</span></label>
+    <div class="btnrow" style="margin-top:10px">${p?`<button class="btn small" data-pr="test">Test print</button><button class="btn ghost small" data-pr="drawer">Open drawer</button>
+      <button class="btn ghost small" data-pr="forget">Forget printer</button>`:""}<button class="btn ghost small" data-pr="close">Close</button></div>`;
+}
+if(BT){
+  $("#printerBtn").onclick=()=>{ printerOpen=!printerOpen; renderPrinter(); };
+  $("#drawerBtn").onclick=async()=>{ const b=$("#drawerBtn"); b.disabled=true; const ok=await openDrawer(); b.disabled=false; b.textContent=ok?"Open drawer":"Printer not reached"; setTimeout(()=>b.textContent="Open drawer",2500); };
+  $("#printerPanel").addEventListener("change",e=>{ if(e.target.dataset.pr==="auto") setPref("lugaw-autoprint",e.target.checked); });
+  $("#printerPanel").addEventListener("click",async e=>{
+    const b=e.target.closest("button[data-pr]"); if(!b) return; const a=b.dataset.pr;
+    if(a==="close"){ printerOpen=false; return renderPrinter(); }
+    if(a==="scan"){ b.disabled=true; try{ printerList=(await BT.list()).devices||[]; printerMsg=""; }catch(x){ printerMsg=x?.message||"Couldn't read the paired devices."; } return renderPrinter(); }
+    if(a==="pick"){ setPref("lugaw-printer",{address:b.dataset.addr,name:b.dataset.name}); printerMsg=""; return renderPrinter(); }
+    if(a==="forget"){ setPref("lugaw-printer",null); return renderPrinter(); }
+    if(a==="drawer"){ b.disabled=true; await openDrawer(); b.disabled=false; return; }
+    if(a==="test"){ b.disabled=true; b.textContent="Printing…";
+      const ok=await btPrint(receiptBytes({code:"TEST",mode:"Dine-in",payment:"Cash",items:[{name:"Plain Lugaw",price:39,qty:1}],subtotal:39,total:39,cashGiven:50},SHOP));
+      b.disabled=false; b.textContent=ok?"Printed ✓":"Test print"; }
+  });
+  renderPrinter();
+}
+
+// ---------- Cashier shift ----------
+// One shift at a time for the counter. Open it with the cash in the drawer; pay in / pay out
+// cash during the shift; close it by counting the drawer. Dine-in orders need an open shift.
+let shift=null, shiftOrders=[], stopShiftOrders=null, shiftForm="", shiftMsg="", shiftDraft={}, lastClosed=null;
+const plural=(n,w)=>`${n} ${w}${n===1?"":"s"}`;
+const SHIFT_REASONS={in:["Change fund","Owner added cash"],out:["Bought supplies","Bought ice","Owner took cash","Paid rider"]};
+function watchShift(){
+  subs.push(onSnapshot(query(collection(db,"shifts"),where("closedAt","==",null)), s=>{
+    const list=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})).sort((a,b)=>(b.openedAt?.toMillis?.()||0)-(a.openedAt?.toMillis?.()||0));
+    const was=shift?.id; shift=list[0]||null;
+    if(shift?.id!==was){
+      stopShiftOrders?.(); stopShiftOrders=null; shiftOrders=[];
+      if(shift?.openedAt) stopShiftOrders=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",shift.openedAt)),
+        q=>{ shiftOrders=q.docs.map(d=>({id:d.id,...d.data()})); renderShift(); }, ()=>{});
+    }
+    renderShift();
+  }, e=>{ shiftMsg="Couldn't load the shift: "+friendlyError(e)+" If the owner just updated the app, the new security rules may not be published yet."; renderShift(); }));
+  subs.push(()=>{ stopShiftOrders?.(); stopShiftOrders=null; });
+}
+// Orders for the summary: this shift's orders, plus deliveries whose cash came in during it
+function shiftNow(sh=shift){
+  const m=new Map(); [...orders,...shiftOrders].forEach(o=>m.set(o.id,o));
+  return shiftSummary(sh,[...m.values()]);
+}
+const typingInShift=()=>{ const a=document.activeElement; return !!a && a.tagName==="INPUT" && !!a.closest("#shiftCard"); };
+function renderShift(){
+  const box=$("#shiftCard"); if(!box || typingInShift()) return;
+  const msg=shiftMsg?`<p class="err" style="margin:6px 0 0">${esc(shiftMsg)}</p>`:"";
+  if(lastClosed && !shift){
+    const s=lastClosed.summary, d=s.counted-s.expected;
+    box.innerHTML=`<div class="shift-head"><b>Shift closed</b> <span class="pill ${d===0?"go":"work"}">${d===0?"Cash exact":d>0?`Over ${peso(d)}`:`Short ${peso(-d)}`}</span></div>
+      ${shiftTable(s)}<div class="btnrow" style="margin-top:8px">${printer()?`<button class="btn ghost small" data-sh="print">Print shift report</button>`:""}
+      <button class="btn small" data-sh="done">Done</button></div>`;
+    return;
+  }
+  if(!shift){
+    const v=shiftDraft.start??"";
+    box.innerHTML=`<div class="shift-head"><b>No shift open</b><span class="muted" style="font-size:.88rem">Count the cash in the drawer, then open a shift to start selling.</span></div>
+      <div class="quick" style="margin-top:8px">${[0,500,1000,2000].map(n=>`<button type="button" class="${String(n)===String(v)?"on":""}" data-sh="startamt" data-amt="${n}">${peso(n)}</button>`).join("")}</div>
+      <div class="btnrow" style="margin-top:8px"><input type="number" inputmode="numeric" min="0" step="1" id="shiftStart" value="${esc(v)}" placeholder="Starting cash" aria-label="Starting cash" style="max-width:170px">
+        <button class="btn" data-sh="open">Open shift</button></div>${msg}`;
+    return;
+  }
+  const s=shiftNow(), since=shift.openedAt?.toDate?.();
+  let form="";
+  if(shiftForm==="in"||shiftForm==="out"){
+    const f=shiftForm, d=shiftDraft;
+    form=`<div class="shift-form"><b>${f==="in"?"Pay in: cash put into the drawer":"Pay out: cash taken from the drawer"}</b>
+      <div class="btnrow"><input type="number" inputmode="numeric" min="1" step="1" id="moveAmt" value="${esc(d.amt??"")}" placeholder="Amount" aria-label="Amount" style="max-width:140px"></div>
+      <div class="quick">${SHIFT_REASONS[f].map(r=>`<button type="button" class="${d.note===r?"on":""}" data-sh="reason" data-r="${esc(r)}">${esc(r)}</button>`).join("")}</div>
+      <input id="moveNote" maxlength="120" value="${esc(d.note??"")}" placeholder="Reason" aria-label="Reason">
+      <div class="btnrow"><button class="btn" data-sh="savemove">Save ${f==="in"?"pay in":"pay out"}</button><button class="btn ghost small" data-sh="cancel">Cancel</button></div></div>`;
+  } else if(shiftForm==="close"){
+    const c=shiftDraft.counted, n=c===""||c==null?null:Math.floor(Number(c)), diff=n==null?null:n-s.expected;
+    form=`<div class="shift-form"><b>Close shift: count the cash in the drawer</b>
+      ${s.unpaidCount?`<p class="flag" style="margin:0">${plural(s.unpaidCount,"dine-in order")} not paid yet (${peso(s.unpaid)}). Collect them before closing, or they stay unpaid.</p>`:""}
+      <div class="btnrow"><input type="number" inputmode="numeric" min="0" step="1" id="countedCash" value="${esc(c??"")}" placeholder="Cash counted" aria-label="Cash counted" style="max-width:170px">
+        <button type="button" class="btn ghost small" data-sh="exact">Exactly ${peso(s.expected)}</button></div>
+      <div id="closeDiff" style="font-weight:800">${diffText(diff)}</div>
+      <div class="btnrow"><button class="btn" data-sh="close"${n==null?" disabled":""}>Close shift</button><button class="btn ghost small" data-sh="cancel">Cancel</button></div></div>`;
+  }
+  box.innerHTML=`<div class="shift-head"><b>Shift open</b><span class="muted" style="font-size:.88rem">since ${since?since.toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}):"just now"} · ${esc(shift.openedByName||"")}</span>
+      <span class="shift-nums"><span>${plural(s.orders,"order")}</span><span>Sales <b>${peso(s.sales)}</b></span><span>Cash in drawer <b>${peso(s.expected)}</b></span></span></div>
+    ${shiftForm==="details"?shiftTable(s):""}
+    ${form||`<div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-sh="details">${shiftForm==="details"?"Hide details":"Details"}</button>
+      <button class="btn ghost small" data-sh="in">Pay in</button><button class="btn ghost small" data-sh="out">Pay out</button>
+      ${printer()?`<button class="btn ghost small" data-sh="print">Print report</button>`:""}<button class="btn small" data-sh="closeform">Close shift</button></div>`}${msg}`;
+}
+const diffText=d=>d==null?"":d===0?`<span style="color:var(--ok)">Cash is exact</span>`:d>0?`<span style="color:var(--warn)">Over by ${peso(d)}</span>`:`<span style="color:var(--brand-deep)">Short by ${peso(-d)}</span>`;
+function shiftTable(s){
+  const row=(l,v,b)=>`<div${b?' class="grand"':""}><span>${l}</span><span>${v}</span></div>`;
+  return `<div class="totals" style="margin-top:8px;max-width:420px">
+    ${row("Orders",s.orders)}${row("Sales",peso(s.sales))}${row("GCash received",peso(s.gcashSales))}${s.unpaidCount?row(`Not paid yet (${s.unpaidCount})`,peso(s.unpaid)):""}${s.cancelled?row("Cancelled orders",s.cancelled):""}
+    <div style="border-top:1px dashed var(--line);margin:4px 0"></div>
+    ${row("Starting cash",peso(s.startCash))}${row("Cash sales",peso(s.cashSales))}${s.riderCash?row("Cash from riders",peso(s.riderCash)):""}
+    ${s.adjustIn?row("Extra collected",peso(s.adjustIn)):""}${s.adjustOut?row("Given back","−"+peso(s.adjustOut)):""}
+    ${s.payIn?row("Pay in",peso(s.payIn)):""}${s.payOut?row("Pay out","−"+peso(s.payOut)):""}
+    ${row("Expected cash in drawer",peso(s.expected),true)}${s.counted!=null?row("Counted",peso(s.counted))+`<div>${diffText(s.counted-s.expected)}</div>`:""}</div>`;
+}
+$("#shiftCard").addEventListener("input",e=>{
+  if(e.target.id==="shiftStart") shiftDraft.start=e.target.value;
+  if(e.target.id==="moveAmt") shiftDraft.amt=e.target.value;
+  if(e.target.id==="moveNote") shiftDraft.note=e.target.value;
+  if(e.target.id==="countedCash"){ shiftDraft.counted=e.target.value; const n=e.target.value===""?null:Math.floor(Number(e.target.value));
+    $("#closeDiff").innerHTML=diffText(n==null?null:n-shiftNow().expected); $('[data-sh="close"]').disabled=n==null; }
+});
+$("#shiftCard").addEventListener("focusout",()=>setTimeout(()=>{ if(!typingInShift()) renderShift(); },300));
+$("#shiftCard").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-sh]"); if(!b) return; const a=b.dataset.sh; shiftMsg="";
+  const done=()=>{ document.activeElement?.blur?.(); renderShift(); };
+  if(a==="startamt"){ shiftDraft.start=b.dataset.amt; return done(); }
+  if(a==="reason"){ shiftDraft.note=b.dataset.r; return done(); }
+  if(a==="exact"){ shiftDraft.counted=String(shiftNow().expected); return done(); }
+  if(a==="details"){ shiftForm=shiftForm==="details"?"":"details"; return done(); }
+  if(a==="in"||a==="out"||a==="closeform"){ shiftForm=a==="closeform"?"close":a; shiftDraft={}; return done(); }
+  if(a==="cancel"){ shiftForm=""; shiftDraft={}; return done(); }
+  if(a==="done"){ lastClosed=null; return done(); }
+  if(a==="print"){ const sh=lastClosed||shift; btPrint(shiftBytes(lastClosed?lastClosed.summary:shiftNow(),sh,SHOP)); return; }
+  if(a==="open"){
+    const n=Math.floor(Number(shiftDraft.start));
+    if(shiftDraft.start===undefined||shiftDraft.start===""||!(n>=0)){ shiftMsg="Type or tap the starting cash in the drawer (₱0 if empty)."; return done(); }
+    if(shift){ return done(); } // someone else just opened one
+    b.disabled=true;
+    try{ await setDoc(doc(collection(db,"shifts")),{openedAt:serverTimestamp(),openedBy:me.uid,openedByName:myName,startCash:n,moves:[],closedAt:null}); shiftDraft={}; lastClosed=null; }
+    catch(x){ shiftMsg=friendlyError(x); b.disabled=false; }
+    return done();
+  }
+  if(a==="savemove"){
+    const n=Math.floor(Number(shiftDraft.amt)), note=String(shiftDraft.note||"").trim();
+    if(!(n>0)){ shiftMsg="Type the amount."; return done(); }
+    if(!note){ shiftMsg="Pick or type the reason."; return done(); }
+    b.disabled=true;
+    try{
+      await updateDoc(doc(db,"shifts",shift.id),{moves:[...(shift.moves||[]),{type:shiftForm,amount:n,note,by:me.uid,byName:myName,at:Date.now()}]});
+      openDrawer(); shiftForm=""; shiftDraft={};
+    }catch(x){ shiftMsg=friendlyError(x); b.disabled=false; }
+    return done();
+  }
+  if(a==="close"){
+    const n=Math.floor(Number(shiftDraft.counted)); if(!(n>=0)) return;
+    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Close the shift now? Tap again"; return; }
+    const s={...shiftNow(),counted:n}; b.disabled=true;
+    try{
+      await updateDoc(doc(db,"shifts",shift.id),{closedAt:serverTimestamp(),closedBy:me.uid,closedByName:myName,countedCash:n,summary:s});
+      lastClosed={...shift,closedAt:new Date(),closedByName:myName,summary:s}; shiftForm=""; shiftDraft={};
+      if(printer()) btPrint(shiftBytes(s,lastClosed,SHOP));
+    }catch(x){ shiftMsg=friendlyError(x); b.disabled=false; }
+    return done();
+  }
+});
+
 const CONFIRM=new Set(["reassign"]);
 $("#board").addEventListener("click", async e=>{
   const b=e.target.closest("button"); if(!b) return;
@@ -847,7 +1060,7 @@ $("#board").addEventListener("click", async e=>{
     const o=orders.find(x=>x.id===b.dataset.settleBal); if(!o) return;
     if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent=`${balanceOf(o)>0?"Got the money":"Gave it back"}? Tap again`; return; }
     b.disabled=true;
-    try{ await updateDoc(doc(db,"orders",o.id),{settledTotal:o.total}); }
+    try{ await updateDoc(doc(db,"orders",o.id),{settledTotal:o.total}); if(o.payment==="Cash") openDrawer(); } // cash in or out
     catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
     return;
   }
@@ -857,7 +1070,8 @@ $("#board").addEventListener("click", async e=>{
     const out=document.querySelector(`[data-change-for="${CSS.escape(id)}"]`);
     if(!o || !Number.isFinite(n) || n<o.total){ if(out) out.innerHTML=`<span style="color:var(--brand-deep)">Type at least ${peso(o?.total)}.</span>`; return; }
     b.disabled=true;
-    try{ await updateDoc(doc(db,"orders",id),{cashGiven:n,...(o.paidTotal==null?{paidTotal:o.total}:{})}); delete givenDraft[id]; }
+    try{ await updateDoc(doc(db,"orders",id),{cashGiven:n,...(o.paidTotal==null?{paidTotal:o.total}:{})}); delete givenDraft[id];
+      afterPayment({...o,cashGiven:n,paidTotal:o.paidTotal??o.total},"cash"); }
     catch(x){ b.disabled=false; if(out) out.textContent=friendlyError(x); }
     return;
   }
@@ -896,13 +1110,15 @@ $("#board").addEventListener("click", async e=>{
     if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Payment is in your GCash? Tap again"; return; }
     b.disabled=true;
     const o=orders.find(x=>x.id===id);
-    try{ await updateDoc(doc(db,"orders",id),{paid:true,paidAt:serverTimestamp(),...(o&&o.paidTotal==null?{paidTotal:o.total}:{})}); }
+    try{ await updateDoc(doc(db,"orders",id),{paid:true,paidAt:serverTimestamp(),...(o&&o.paidTotal==null?{paidTotal:o.total}:{})});
+      if(o) afterPayment({...o,paid:true,paidTotal:o.paidTotal??o.total},"gcash"); }
     catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
     return;
   }
   if(b.dataset.print){
-    const o=orders.find(x=>x.id===b.dataset.print);
-    if(o && !printReceipt(o)) b.textContent="Allow pop-ups for this site to print";
+    const o=orders.find(x=>x.id===b.dataset.print); if(!o) return;
+    if(printer()){ b.disabled=true; const ok=await btPrint(receiptOf(o)); b.disabled=false; if(!ok) b.textContent="Printer not reached. Tap to try again"; return; }
+    if(!printReceipt(o)) b.textContent="Allow pop-ups for this site to print";
     return;
   }
   const noRider=b.dataset.set==="preparing" && b.textContent.startsWith("No rider");

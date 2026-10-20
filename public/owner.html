@@ -183,6 +183,10 @@ function start(){
     }
     deliveryFees=s.data().fees||{}; feesSaved=true; feesErr=""; if(tab==="settings" && !editing()) render();
   }, x=>{ feesErr="Couldn't load the delivery fees: "+friendlyError(x); if(tab==="settings") render(); }));
+  // Cashier shifts, newest first
+  subs.push(onSnapshot(query(collection(db,"shifts"),orderBy("openedAt","desc"),limit(90)), s=>{
+    allShifts=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})); shiftsErr=""; render();
+  }, e=>{ shiftsErr="Couldn't load shifts: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; if(tab==="shifts") render(); }));
   // The owner's menu (settings/menu) and inventory counts
   // Saved menu changes (recipes, prices) count right away, without a refresh
   subs.push(onSnapshot(doc(db,"settings","menu"), s=>{
@@ -270,13 +274,14 @@ function render(force){
   $("#sOpen").textContent=orders.filter(o=>ACTIVE.includes(o.status)).length;
   $("#sCancel").textContent=orders.filter(o=>o.status==="cancelled").length;
   const pending=sellers.filter(s=>s.status==="pending").length+kitchen.filter(k=>k.status==="pending").length+riders.filter(r=>r.status==="pending").length;
-  $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Staff & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["savings","Savings"],["menu","Menu"],["inventory","Inventory"],["settings","Shop settings"]]
+  $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Staff & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["shifts","Shifts",allShifts.filter(x=>!x.closedAt).length],["savings","Savings"],["menu","Menu"],["inventory","Inventory"],["settings","Shop settings"]]
     .map(([id,l,n])=>`<button class="${tab===id?"on":""}" data-tab="${id}">${l}${n?`<span class="count">${n}</span>`:""}</button>`).join("");
   if(tab==="sales") renderSales(done);
   else if(tab==="orders") renderOrders();
   else if(tab==="team") renderTeam();
   else if(tab==="reports") renderReports();
   else if(tab==="savings") renderSavings();
+  else if(tab==="shifts") renderShifts();
   else if(tab==="menu") renderMenu();
   else if(tab==="inventory") renderInventory();
   else renderSettings();
@@ -883,15 +888,21 @@ function publishStock(left){
   setDoc(doc(db,"settings","stock"),{soldOut,left:left||{},updatedAt:serverTimestamp()}).catch(()=>{ lastSoldOut=""; });
 }
 const isLow=r=>r.left>0 && r.left<=r.begin*0.2;
-// Items ordered during the count that took nothing off: no ingredients set in the Menu tab,
-// or their ingredients aren't in this count
+// Ingredients the menu uses that aren't in this count: items needing them can't be sold
+// while the count is open. Plus items ordered that have no ingredients set at all.
 function notCounted(c){
+  const have=c.items||{}, missing={};
+  Object.values(ITEMS).forEach(it=>{ if(it.off) return;
+    [...Object.keys(it.recipe||{}),...Object.keys(it.takeout||{})].forEach(g=>{ if(!(g in have)) (missing[g]=missing[g]||new Set()).add(it.name); }); });
   const n={};
   invOrders.filter(o=>o.status!=="cancelled").forEach(o=>(o.items||[]).forEach(it=>{
-    if(!Object.keys(ITEMS[it.id]?.recipe||{}).some(g=>g in (c.items||{}))) n[it.id]=(n[it.id]||0)+(Number(it.qty)||0); }));
-  const list=Object.entries(n).map(([id,q])=>`${ITEMS[id]?.name||id} ×${q}`);
-  return list.length?`<div class="flag" style="margin-top:8px">Not counted: ${esc(list.join(", "))}. These items have no ingredients in this count.
-    In the <b>Menu</b> tab, open <b>Ingredients</b> on each one (for drinks, tap <b>Count this item itself</b>), then add it to the count with <b>Change beginning stock</b>.</div>`:"";
+    const r=ITEMS[it.id]; if(r && !Object.keys(r.recipe||{}).length && !Object.keys(r.takeout||{}).length) n[it.id]=(n[it.id]||0)+(Number(it.qty)||0); }));
+  const miss=Object.entries(missing).map(([g,names])=>`${ingName(g)} (${[...names].slice(0,4).join(", ")}${names.size>4?"…":""})`);
+  const free=Object.entries(n).map(([id,q])=>`${ITEMS[id]?.name||id} ×${q}`);
+  return (miss.length?`<div class="flag" style="margin-top:8px">Not in this count, so the items that need them are sold out: ${esc(miss.join("; "))}.
+      Tap <b>Change beginning stock</b> to add how much you have.</div>`:"")
+    +(free.length?`<div class="flag" style="margin-top:8px">Sold without counting: ${esc(free.join(", "))}. These items have no ingredients set.
+      In the <b>Menu</b> tab, open <b>Ingredients</b> on each one (for drinks, tap <b>Count this item itself</b>).</div>`:"");
 }
 function invTable(rows){
   if(!rows.length) return `<p class="empty">No ingredients counted.</p>`;
@@ -919,7 +930,7 @@ function invForm(c){
     <button class="btn" data-iact="ingopen">Add ingredients</button></section>`;
   return `<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep)">${c?"Change the beginning stock":"Start a count"}</h2>
     <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Type how much of each ingredient you have at the start of the shift.
-      Leave one blank to not count it. ${c?"If more stock arrived, add it to the number here.":"Orders from the moment you tap <b>Start count</b> are taken off."}</p>
+      Leave one blank if you have none: items that need it show as sold out until you add it. ${c?"If more stock arrived, add it to the number here.":"Orders from the moment you tap <b>Start count</b> are taken off."}</p>
     ${!c&&last?`<button class="btn ghost small" data-iact="copy">Fill in what was left last shift</button>`:""}
     <div class="tablewrap"><table class="inv"><thead><tr><th>Ingredient</th><th class="n">Beginning stock</th></tr></thead><tbody>${rows}</tbody></table></div>
     <p class="err">${esc(invMsg)}</p>
@@ -1169,6 +1180,44 @@ $("#view").addEventListener("click",async e=>{
     lvPlan=null;
   }catch(x){ lvMsg=(saved?`Imported ${saved} before an error: `:"Couldn't import: ")+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase. Importing the file again skips what's already in."; }
   lvBusy=false; render(true);
+});
+
+// ---------- Shifts ----------
+// Every cashier shift: who opened and closed it, its sales, and the cash expected in the drawer
+// against the cash counted. Totals are saved when the shift closes.
+let allShifts=[], shiftsErr="", shiftOpen=null;
+function renderShifts(){
+  const t=v=>v?.toDate?.()?.toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"—";
+  const diffCell=x=>{ const s=x.summary; if(!s||s.counted==null) return `<span class="muted">—</span>`; const d=s.counted-s.expected;
+    return d===0?`<span class="pill go">Exact</span>`:d>0?`<span class="pill work">Over ${peso(d)}</span>`:`<span class="pill new">Short ${peso(-d)}</span>`; };
+  const row=(l,v,b)=>`<div${b?' class="grand"':""}><span>${l}</span><span>${v}</span></div>`;
+  const detail=x=>{ const s=x.summary;
+    return `<div class="totals" style="max-width:420px">${s?row("Orders",s.orders)+row("Sales",peso(s.sales))+row("GCash received",peso(s.gcashSales))
+        +(s.unpaidCount?row(`Not paid at closing (${s.unpaidCount})`,peso(s.unpaid)):"")+(s.cancelled?row("Cancelled orders",s.cancelled):"")
+        +row("Starting cash",peso(s.startCash))+row("Cash sales",peso(s.cashSales))+(s.riderCash?row("Cash from riders",peso(s.riderCash)):"")
+        +(s.adjustIn?row("Extra collected",peso(s.adjustIn)):"")+(s.adjustOut?row("Given back","−"+peso(s.adjustOut)):"")
+        +(s.payIn?row("Pay in",peso(s.payIn)):"")+(s.payOut?row("Pay out","−"+peso(s.payOut)):"")
+        +row("Expected cash",peso(s.expected),true)+row("Counted",peso(s.counted))
+      :row("Starting cash",peso(x.startCash))+`<div class="muted">Still open: the totals are saved when the seller closes the shift.</div>`}</div>
+      ${(x.moves||[]).length?`<b style="display:block;margin-top:8px">Pay in / pay out</b><ul class="lines">${x.moves.map(m=>`<li><span class="q">${m.type==="in"?"In":"Out"}</span><span>${esc(m.note)} · ${esc(m.byName)} · ${new Date(m.at).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"})}</span><span class="amt">${peso(m.amount)}</span></li>`).join("")}</ul>`:""}
+      <div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-shdel="${esc(x.id)}">Delete shift</button></div>`; };
+  $("#view").innerHTML=`<div class="card" style="margin-top:12px">
+    <h2 style="color:var(--brand-deep)">Shifts</h2>
+    <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Sellers open a shift with the cash in the drawer and close it by counting the drawer. Tap a shift for its details.</p>
+    ${shiftsErr?`<div class="flag">${esc(shiftsErr)}</div>`:""}
+    <div class="tablewrap"><table class="orders"><thead><tr><th>Opened</th><th>Closed</th><th>Cashier</th><th class="n">Orders</th><th class="n">Sales</th><th class="n">Expected cash</th><th class="n">Counted</th><th>Cash</th></tr></thead>
+    <tbody>${allShifts.map(x=>`<tr class="row" data-shopen="${esc(x.id)}"><td>${t(x.openedAt)}</td><td>${x.closedAt?t(x.closedAt):`<span class="pill go">Open now</span>`}</td>
+      <td>${esc(x.openedByName||"")}${x.closedByName&&x.closedByName!==x.openedByName?` → ${esc(x.closedByName)}`:""}</td>
+      <td class="n">${x.summary?x.summary.orders:"—"}</td><td class="n">${x.summary?peso(x.summary.sales):"—"}</td>
+      <td class="n">${x.summary?peso(x.summary.expected):"—"}</td><td class="n">${x.summary?peso(x.summary.counted):"—"}</td><td>${diffCell(x)}</td></tr>
+      ${shiftOpen===x.id?`<tr class="detail"><td colspan="8">${detail(x)}</td></tr>`:""}`).join("")||`<tr><td colspan="8" class="muted">No shifts yet. Sellers open one on the seller dashboard.</td></tr>`}</tbody></table></div></div>`;
+}
+$("#view").addEventListener("click",async e=>{
+  if(tab!=="shifts") return;
+  const d=e.target.closest("[data-shdel]");
+  if(d){ if(d.dataset.sure!=="1"){ d.dataset.sure="1"; d.textContent="Delete this shift for good? Tap again"; return; }
+    d.disabled=true; try{ await deleteDoc(doc(db,"shifts",d.dataset.shdel)); shiftOpen=null; }catch(x){ d.disabled=false; d.textContent=friendlyError(x); } return; }
+  const r=e.target.closest("[data-shopen]"); if(r){ shiftOpen=shiftOpen===r.dataset.shopen?null:r.dataset.shopen; render(); }
 });
 </script>
 </body>

@@ -342,6 +342,39 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    // Cashier shifts (seller.html): opened with the starting cash, cash paid in or out during the
+    // shift is added to its list (never edited or removed), and closed once with the counted cash
+    // and the shift's totals. A closed shift can't change. The owner sees all and can delete.
+    match /shifts/{shiftId} {
+      function moveOk(m) {
+        return m.keys().hasOnly(['type','amount','note','by','byName','at'])
+          && m.type in ['in', 'out'] && amount(m.amount) && m.amount > 0
+          && str(m.note, 120) && m.by == uid() && str(m.byName, 80) && m.at is int;
+      }
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly(['openedAt','openedBy','openedByName','startCash','moves','closedAt'])
+        && request.resource.data.openedAt == request.time
+        && request.resource.data.openedBy == uid() && str(request.resource.data.openedByName, 80)
+        && amount(request.resource.data.startCash)
+        && request.resource.data.moves == [] && request.resource.data.closedAt == null;
+      allow update: if isStaff() && resource.data.closedAt == null
+        && (
+          // cash paid in or out: one more entry at the end of the list
+          (changed().hasOnly(['moves'])
+            && request.resource.data.moves.size() == resource.data.moves.size() + 1
+            && request.resource.data.moves.size() <= 200
+            && moveOk(request.resource.data.moves[request.resource.data.moves.size() - 1]))
+          // closing the shift
+          || (changed().hasOnly(['closedAt','closedBy','closedByName','countedCash','summary'])
+            && request.resource.data.closedAt == request.time
+            && request.resource.data.closedBy == uid() && str(request.resource.data.closedByName, 80)
+            && amount(request.resource.data.countedCash)
+            && request.resource.data.summary is map)
+        );
+      allow delete: if isAdmin();
+    }
+
     match /orders/{orderId} {
       function newOrder(d) {
         return d.keys().hasOnly(
