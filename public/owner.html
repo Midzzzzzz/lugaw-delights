@@ -690,7 +690,7 @@ const ingUnit=id=>ingList().find(g=>g.id===id)?.unit||"";
 const clone=x=>JSON.parse(JSON.stringify(x));
 const savedMenu=()=>menuDoc?.sections||MENU_SECTIONS;
 function draftMenu(){
-  if(!menuDraft){ menuDraft=clone(savedMenu()).map(c=>({...c,items:(c.items||[]).map(it=>({...it,recipe:it.recipe||{}}))})); menuRetired=[...(menuDoc?.retired||[])]; menuDirty=false; }
+  if(!menuDraft){ menuDraft=clone(savedMenu()).map(c=>({...c,items:(c.items||[]).map(it=>({...it,recipe:it.recipe||{},takeout:it.takeout||{}}))})); menuRetired=[...(menuDoc?.retired||[])]; menuDirty=false; }
   if(menuCat>=menuDraft.length) menuCat=Math.max(0,menuDraft.length-1);
   return menuDraft;
 }
@@ -703,18 +703,27 @@ function newItemId(c){
   return id;
 }
 const recipeText=r=>Object.entries(r||{}).map(([g,q])=>`${q} ${ingUnit(g)} ${ingName(g)}`.replace(/\s+/g," ")).join(", ");
-function recipePanel(si,ii,it){
-  const r=it.recipe||{}, have=ingList();
-  return `<div class="recipe"><b style="font-size:.85rem">Ingredients for one ${esc(it.name||"serving")}</b>
-    ${Object.entries(r).map(([g,q])=>`<div class="rrow2">
-      <select data-s="${si}" data-i="${ii}" data-rg="${esc(g)}" aria-label="Ingredient">${have.some(x=>x.id===g)?"":`<option value="${esc(g)}" selected>Removed ingredient</option>`}
+// Two lists per item: "recipe" (every order) and "takeout" (only when it's packed to go:
+// deliveries, and dine-in with Box picked), e.g. its take-out box
+function recipeRows(si,ii,it,kind){
+  const r=it[kind]||{}, have=ingList(), at=`data-s="${si}" data-i="${ii}" data-rk="${kind}"`;
+  return Object.entries(r).map(([g,q])=>`<div class="rrow2">
+      <select ${at} data-rg="${esc(g)}" aria-label="Ingredient">${have.some(x=>x.id===g)?"":`<option value="${esc(g)}" selected>Removed ingredient</option>`}
         ${have.map(x=>`<option value="${esc(x.id)}"${x.id===g?" selected":""}>${esc(x.name)}</option>`).join("")}</select>
-      <input type="number" inputmode="decimal" min="0" step="any" data-s="${si}" data-i="${ii}" data-rq="${esc(g)}" value="${esc(q)}" aria-label="Amount per serving">
+      <input type="number" inputmode="decimal" min="0" step="any" ${at} data-rq="${esc(g)}" value="${esc(q)}" aria-label="Amount">
       <span class="muted">${esc(ingUnit(g))}</span>
-      <button data-mact="rdel" data-s="${si}" data-i="${ii}" data-g="${esc(g)}" aria-label="Remove ingredient">✕</button></div>`).join("")||`<p class="muted" style="margin:0;font-size:.85rem">No ingredients yet.</p>`}
-    <div class="btnrow">${have.length?`<button class="btn ghost small" data-mact="radd" data-s="${si}" data-i="${ii}"${have.every(x=>x.id in r)?" disabled":""}>+ Add ingredient</button>`:""}
+      <button data-mact="rdel" ${at} data-g="${esc(g)}" aria-label="Remove ingredient">✕</button></div>`).join("");
+}
+function recipePanel(si,ii,it){
+  const r=it.recipe||{}, t=it.takeout||{}, have=ingList();
+  return `<div class="recipe"><b style="font-size:.85rem">Ingredients for one ${esc(it.name||"serving")}</b>
+    ${recipeRows(si,ii,it,"recipe")||`<p class="muted" style="margin:0;font-size:.85rem">No ingredients yet.</p>`}
+    <div class="btnrow">${have.length?`<button class="btn ghost small" data-mact="radd" data-rk="recipe" data-s="${si}" data-i="${ii}"${have.every(x=>x.id in r)?" disabled":""}>+ Add ingredient</button>`:""}
       ${"i_"+it.id in r?"":`<button class="btn ghost small" data-mact="rself" data-s="${si}" data-i="${ii}" title="For drinks and ready-made items: one order uses one of this item">Count this item itself</button>`}</div>
-    ${have.length?"":`<p class="muted" style="margin:0;font-size:.85rem">For items made from ingredients, add the ingredients first in the <b>Inventory</b> tab.</p>`}</div>`;
+    ${have.length?`<b style="font-size:.85rem;margin-top:6px">Only when taken out <span class="muted" style="font-weight:600">(deliveries, and dine-in with Box picked), e.g. its take-out box</span></b>
+    ${recipeRows(si,ii,it,"takeout")}
+    <div class="btnrow"><button class="btn ghost small" data-mact="radd" data-rk="takeout" data-s="${si}" data-i="${ii}"${have.every(x=>x.id in t)?" disabled":""}>+ Add take-out item</button></div>`
+      :`<p class="muted" style="margin:0;font-size:.85rem">For items made from ingredients, add the ingredients first in the <b>Inventory</b> tab.</p>`}</div>`;
 }
 function renderMenu(){
   const m=draftMenu(), c=m[menuCat];
@@ -731,7 +740,7 @@ function renderMenu(){
         <button class="mini" data-mact="sup" data-s="${menuCat}" aria-label="Move category left"${menuCat?"":" disabled"}>←</button>
         <button class="mini" data-mact="sdown" data-s="${menuCat}" aria-label="Move category right"${menuCat<m.length-1?"":" disabled"}>→</button>
         ${c.items.length?"":`<button class="mini" data-mact="sdel" data-s="${menuCat}">Delete category</button>`}</div>
-      ${c.items.map((it,ii)=>{ const si=menuCat, key=it.id, n=Object.keys(it.recipe||{}).length; return `<div class="mitem"><div class="mrow">
+      ${c.items.map((it,ii)=>{ const si=menuCat, key=it.id, n=Object.keys(it.recipe||{}).length+Object.keys(it.takeout||{}).length; return `<div class="mitem"><div class="mrow">
         <span class="mph">${photos[key]?`<img src="${photos[key]}" alt="Photo of ${esc(it.name)}"><button data-photo="${esc(key)}">Change</button><button data-photodel="${esc(key)}">Remove</button>`
           :`<button class="addph" data-photo="${esc(key)}" aria-label="Add a photo of ${esc(it.name||"this item")}">+ Photo</button>`}</span>
         <input data-s="${si}" data-i="${ii}" data-f="name" value="${esc(it.name)}" maxlength="80" aria-label="Item name" placeholder="Item name">
@@ -742,7 +751,7 @@ function renderMenu(){
         <span class="mbtns"><button data-mact="iup" data-s="${si}" data-i="${ii}" aria-label="Move up"${ii?"":" disabled"}>↑</button>
           <button data-mact="idown" data-s="${si}" data-i="${ii}" aria-label="Move down"${ii<c.items.length-1?"":" disabled"}>↓</button>
           <button data-mact="idel" data-s="${si}" data-i="${ii}">Delete</button></span></div>
-        ${openRecipe===key?recipePanel(si,ii,it):n?`<div class="muted rsum">${esc(recipeText(it.recipe))}</div>`:""}</div>`; }).join("")}
+        ${openRecipe===key?recipePanel(si,ii,it):n?`<div class="muted rsum">${esc(recipeText(it.recipe))}${Object.keys(it.takeout||{}).length?` · to go: ${esc(recipeText(it.takeout))}`:""}</div>`:""}</div>`; }).join("")}
       <div><button class="btn ghost small" data-mact="iadd" data-s="${menuCat}">+ Add item</button></div></div>`:`<p class="empty">No categories yet.</p>`}
     ${photoMsg?`<p class="flag" style="margin-top:10px">${esc(photoMsg)}</p>`:""}
     <div class="msave"><button class="btn" data-mact="save"${menuDirty?"":" disabled"}>Save menu</button>
@@ -755,7 +764,7 @@ const menuChanged=()=>{ menuDirty=true; menuMsg="";
   const m=$("#menuMsg"); if(m) m.textContent="You have unsaved changes."; };
 $("#view").addEventListener("input",e=>{
   const el=e.target; if(tab!=="menu") return;
-  if(el.dataset.rq!=null){ const it=menuDraft[+el.dataset.s].items[+el.dataset.i]; it.recipe[el.dataset.rq]=el.value===""?0:Math.max(0,Number(el.value)); return menuChanged(); }
+  if(el.dataset.rq!=null){ const it=menuDraft[+el.dataset.s].items[+el.dataset.i], k=el.dataset.rk||"recipe"; (it[k]||(it[k]={}))[el.dataset.rq]=el.value===""?0:Math.max(0,Number(el.value)); return menuChanged(); }
   if(!el.dataset.f || el.type==="checkbox") return;
   const c=menuDraft[+el.dataset.s], it=el.dataset.i!=null?c.items[+el.dataset.i]:null;
   if(it) it[el.dataset.f]=el.dataset.f==="price"?(el.value===""?"":Math.floor(Number(el.value))):el.value; else c[el.dataset.f]=el.value;
@@ -765,7 +774,8 @@ $("#view").addEventListener("change",e=>{
   const el=e.target; if(tab!=="menu") return;
   if(el.dataset.rg!=null){ // swap an ingredient in a recipe, keeping its amount and place
     const it=menuDraft[+el.dataset.s].items[+el.dataset.i], from=el.dataset.rg, to=el.value;
-    if(to!==from && !(to in it.recipe)){ const r={}; Object.entries(it.recipe).forEach(([g,q])=>r[g===from?to:g]=q); it.recipe=r; }
+    const k=el.dataset.rk||"recipe", cur=it[k]||{};
+    if(to!==from && !(to in cur)){ const r={}; Object.entries(cur).forEach(([g,q])=>r[g===from?to:g]=q); it[k]=r; }
     menuChanged(); return render(true);
   }
   if(el.type!=="checkbox" || !el.dataset.f) return;
@@ -785,9 +795,9 @@ $("#view").addEventListener("click",async e=>{
     if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Delete? Tap again"; return; }
     menuRetired.push(c.items[ii].id); c.items.splice(ii,1);
   }
-  else if(a==="iadd"){ const it={id:newItemId(c),name:"",price:"",inc:"",best:false,recipe:{}}; c.items.push(it); openRecipe=null; }
-  else if(a==="radd"){ const it=c.items[ii], g=ingList().find(x=>!(x.id in it.recipe)); if(g) it.recipe[g.id]=1; }
-  else if(a==="rdel"){ delete c.items[ii].recipe[b.dataset.g]; }
+  else if(a==="iadd"){ const it={id:newItemId(c),name:"",price:"",inc:"",best:false,recipe:{},takeout:{}}; c.items.push(it); openRecipe=null; }
+  else if(a==="radd"){ const it=c.items[ii], k=b.dataset.rk||"recipe", cur=it[k]||(it[k]={}), g=ingList().find(x=>!(x.id in cur)); if(g) cur[g.id]=1; }
+  else if(a==="rdel"){ delete (c.items[ii][b.dataset.rk||"recipe"]||{})[b.dataset.g]; }
   else if(a==="rself"){
     // The item counts as its own ingredient (e.g. Coke: 1 bottle per order); added to the ingredient list now
     const it=c.items[ii], gid="i_"+it.id;
@@ -814,7 +824,7 @@ async function saveMenu(b){
   m.forEach(c=>{ if(!String(c.name).trim()) bad.push("a category has no name");
     c.items.forEach(it=>{ if(!String(it.name).trim()) bad.push(`an item in ${c.name||"a category"} has no name`);
       if(!Number.isInteger(it.price) || it.price<0 || it.price>99999) bad.push(`${it.name||"an item"} needs a price in whole pesos`);
-      if(Object.values(it.recipe||{}).some(q=>!(q>0))) bad.push(`an ingredient of ${it.name||"an item"} needs an amount`); }); });
+      if([...Object.values(it.recipe||{}),...Object.values(it.takeout||{})].some(q=>!(q>0))) bad.push(`an ingredient of ${it.name||"an item"} needs an amount`); }); });
   if(bad.length){ menuMsg="Can't save yet: "+[...new Set(bad)].slice(0,3).join("; ")+"."; return render(true); }
   // Remember earlier prices so orders placed before the change still pass the price check
   const old=new Map(); savedMenu().forEach(c=>(c.items||[]).forEach(it=>old.set(it.id,it)));
@@ -823,8 +833,8 @@ async function saveMenu(b){
       const o=old.get(it.id); let was=[...(it.was||[])];
       if(o && o.price!==it.price && !was.includes(o.price)) was=[o.price,...was].slice(0,5);
       was=was.filter(p=>p!==it.price);
-      const recipe=Object.keys(it.recipe||{}).length?{recipe:it.recipe}:{};
-      return { id:it.id, name:String(it.name).trim(), price:it.price, inc:String(it.inc||"").trim(), best:!!it.best, ...recipe, ...(was.length?{was}:{}) };
+      const recipe=Object.keys(it.recipe||{}).length?{recipe:it.recipe}:{}, takeout=Object.keys(it.takeout||{}).length?{takeout:it.takeout}:{};
+      return { id:it.id, name:String(it.name).trim(), price:it.price, inc:String(it.inc||"").trim(), best:!!it.best, ...recipe, ...takeout, ...(was.length?{was}:{}) };
     }) }));
   b.disabled=true; menuMsg="Saving…"; $("#menuMsg").textContent=menuMsg;
   try{
@@ -933,7 +943,8 @@ function renderInventory(){
       ${live?`<p style="margin:10px 0 0;font-size:.9rem"><b>Sold out now:</b> ${out.length?esc(out.join(", ")):"nothing"}</p>${notCounted(view)}`:""}
       <div class="btnrow" style="margin-top:10px">${live?`<button class="btn ghost small" data-iact="edit">Change beginning stock</button>
         <button class="btn" data-iact="end">End shift</button>`:(open?"":`<button class="btn" data-iact="new">Start next count</button>`)}
-        ${invView?`<button class="btn ghost small" data-iact="back">Back to ${open?"current shift":"inventory"}</button>`:""}</div></section>`;
+        ${invView?`<button class="btn ghost small" data-iact="back">Back to ${open?"current shift":"inventory"}</button>`:""}
+        <button class="btn ghost small" data-iact="del" data-id="${esc(view.id)}">Delete this count</button></div></section>`;
   }
   const past=counts.filter(c=>c.closedAt);
   $("#view").innerHTML=main+(ingOpen?ingEditor():`<div style="margin-top:12px"><button class="btn ghost small" data-iact="ingopen">Ingredients list (${ingList().length})</button></div>`)
@@ -962,6 +973,14 @@ $("#view").addEventListener("click",async e=>{
     return render(true);
   }
   if(a==="view"){ invView=b.dataset.id; invEdit=false; return render(true); }
+  if(a==="del"){
+    // Removes the count (and its saved breakdown). Orders aren't touched.
+    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Delete this count for good? Tap again"; return; }
+    const id=b.dataset.id, wasOpen=open?.id===id; b.disabled=true;
+    try{ await deleteDoc(doc(db,"inventory",id)); if(wasOpen) publishStock(null); invView=null; invEdit=false; invDraft={}; invMsg=""; }
+    catch(x){ b.disabled=false; b.textContent=friendlyError(x); return; }
+    return render(true);
+  }
   if(a==="back"){ invView=null; return render(true); }
   if(a==="new"){ invView="_none"; invEdit=false; invDraft={}; return render(true); }
   if(a==="edit"){ invEdit=true; invDraft={...open.items}; return render(true); }

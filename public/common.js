@@ -55,7 +55,8 @@ export const MENU = MENU_SECTIONS.map(c => ({ ...c, items: (c.items || []).filte
 export const ITEMS = Object.create(null);
 MENU_SECTIONS.forEach(c => (c.items || []).forEach(it => {
   ITEMS[it.id] = { id: it.id, name: it.name, price: it.price, inc: it.inc || "", best: !!it.best, cat: c.id, box: !!c.box, off: !!it.off, was: it.was || [],
-    recipe: it.recipe || {} }; // ingredient id -> amount one serving uses
+    recipe: it.recipe || {}, // ingredient id -> amount one serving uses
+    takeout: it.takeout || {} }; // ingredient id -> amount used only when it's packed to go (e.g. its take-out box)
 }));
 
 // Bring ITEMS up to date with a newer saved menu (recipes, prices, names) without reloading,
@@ -65,11 +66,20 @@ export function applyMenu(sections) {
   (sections || []).forEach(c => (c.items || []).forEach(it => {
     const t = ITEMS[it.id] || (ITEMS[it.id] = { id: it.id });
     Object.assign(t, { name: it.name, price: it.price, inc: it.inc || "", best: !!it.best, cat: c.id, box: !!c.box,
-      off: !!it.off, was: it.was || [], recipe: it.recipe || {} });
+      off: !!it.off, was: it.was || [], recipe: it.recipe || {}, takeout: it.takeout || {} });
   }));
 }
 
 // ---------- Ingredient stock ----------
+// An order line is packed to go when it's a delivery or pickup, or a dine-in line the seller
+// marked "Box". Packed lines also use the item's take-out ingredients (its box).
+export const packed = (line, mode) => mode === "Delivery" || mode === "Pickup" || line?.pack === "box";
+// What one of an item uses: its recipe, plus its take-out ingredients when packed
+export function uses(id, isPacked) {
+  const r = { ...(ITEMS[id]?.recipe || {}) };
+  if (isPacked) Object.entries(ITEMS[id]?.takeout || {}).forEach(([g, q]) => { r[g] = (r[g] || 0) + q; });
+  return r;
+}
 // The owner's open inventory count holds the beginning amount of each ingredient. Every order
 // placed since the count started (not cancelled) uses each item's recipe × quantity.
 // Returns what's left of each counted ingredient.
@@ -78,25 +88,27 @@ export function ingredientsLeft(count, orders) {
   const left = { ...(count.items || {}) }, since = count.since?.toMillis?.() || 0;
   orders.forEach(o => {
     if (o.status === "cancelled" || (o.createdAt?.toMillis?.() ?? Date.now()) < since) return;
-    (o.items || []).forEach(it => Object.entries(ITEMS[it.id]?.recipe || {}).forEach(([g, per]) => {
+    (o.items || []).forEach(it => Object.entries(uses(it.id, packed(it, o.mode))).forEach(([g, per]) => {
       if (g in left) left[g] = Math.round((left[g] - per * (Number(it.qty) || 0)) * 1000) / 1000;
     }));
   });
   return left;
 }
-// How many more servings of an item the counted ingredients allow (null: nothing it uses is counted)
-export function servingsLeft(id, left) {
+// How many more servings of an item the counted ingredients allow (null: nothing it uses is counted).
+// isPacked: count its take-out box too (customer orders are always delivered)
+export function servingsLeft(id, left, isPacked = false) {
   if (!left) return null;
-  const parts = Object.entries(ITEMS[id]?.recipe || {}).filter(([g, per]) => g in left && per > 0);
+  const parts = Object.entries(uses(id, isPacked)).filter(([g, per]) => g in left && per > 0);
   return parts.length ? Math.max(0, Math.min(...parts.map(([g, per]) => Math.floor(left[g] / per + 1e-9)))) : null;
 }
 // Whether order lines can be made with what's left (ingredients shared between items add up).
 // Returns the id of the first item that runs short, or null when everything fits.
-export function shortItem(lines, left) {
+// mode: the order type, so packed lines count their take-out box
+export function shortItem(lines, left, mode = "Dine-in") {
   if (!left) return null;
   const need = {};
   for (const it of lines) {
-    for (const [g, per] of Object.entries(ITEMS[it.id]?.recipe || {})) {
+    for (const [g, per] of Object.entries(uses(it.id, packed(it, mode)))) {
       if (!(g in left)) continue;
       need[g] = (need[g] || 0) + per * (Number(it.qty) || 0);
       if (need[g] > left[g] + 1e-9) return it.id;
@@ -104,9 +116,10 @@ export function shortItem(lines, left) {
   }
   return null;
 }
-// Items that can't be made with what's left: shown as sold out
-export function soldOutFrom(left) {
-  return Object.keys(ITEMS).filter(id => servingsLeft(id, left) === 0).sort();
+// Items that can't be made with what's left: shown as sold out. Published for the customer
+// page, where every order is delivered, so an item whose take-out box ran out counts too.
+export function soldOutFrom(left, isPacked = true) {
+  return Object.keys(ITEMS).filter(id => servingsLeft(id, left, isPacked) === 0).sort();
 }
 export const MAX_LINES = 20, MAX_QTY = 99; // also enforced in firestore.rules
 

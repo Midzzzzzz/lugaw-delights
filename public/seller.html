@@ -313,7 +313,8 @@ let dineCat="all", gcashNow=false;
 // since then uses its items' recipes. stockLeft(id): servings of an item still possible
 // (null when nothing it uses is counted). 0 = sold out.
 let stockCount=null, leftNow=null;
-const stockLeft=id=>servingsLeft(id,leftNow);
+// counted with its take-out box when the seller has "Box" picked for this round
+const stockLeft=id=>servingsLeft(id,leftNow,dinePack()==="box");
 // Work out what's left and publish it for the customer page: the sold-out items, and how much
 // of each ingredient is left (so customers can't order more than that). Only written on a change.
 let publishedSoldOut=null;
@@ -328,10 +329,11 @@ function updateStock(){
 // Everything this order would use on top of what's already been ordered: new items, plus any
 // quantity raised on an order being changed. Returns an error message, or "" when it fits.
 function stockProblem(extra){
-  const lines=[...Object.entries(dine).map(([id,qty])=>({id,qty}))];
-  if(addingTo) editLines.forEach((it,i)=>{ const more=it.qty-(addingTo.items[i]?.qty||0); if(more>0) lines.push({id:it.id,qty:more}); });
-  if(extra) lines.push(extra);
-  const id=shortItem(lines,leftNow); if(!id) return "";
+  const pack=dinePack()?{pack:dinePack()}:{};
+  const lines=[...Object.entries(dine).map(([id,qty])=>({id,qty,...pack}))];
+  if(addingTo) editLines.forEach((it,i)=>{ const more=it.qty-(addingTo.items[i]?.qty||0); if(more>0) lines.push({id:it.id,qty:more,pack:it.pack}); });
+  if(extra) lines.push({...extra,...pack});
+  const id=shortItem(lines,leftNow,"Dine-in"); if(!id) return "";
   const n=stockLeft(id);
   const shared=lines.some(l=>l.id!==id && Object.keys(ITEMS[l.id]?.recipe||{}).some(g=>g in (ITEMS[id]?.recipe||{})));
   return n===0?`${ITEMS[id].name} is sold out.`:`Not enough left for that: ${ITEMS[id].name} has ${n} left${shared?" (other items in this order use the same ingredients)":""}.`;
@@ -423,7 +425,7 @@ function renderDineTotals(){
   dineBar(items, t.total, items.length>0);
 }
 $("#d-given").addEventListener("input",renderDineTotals);
-document.querySelectorAll('input[name="dpack"]').forEach(r=>r.addEventListener("change",renderDineTotals));
+document.querySelectorAll('input[name="dpack"]').forEach(r=>r.addEventListener("change",renderDine)); // "N left" changes with boxes
 $("#d-pack-box-label").textContent=`Box (+${peso(SHOP.boxFee)} each)`;
 document.querySelectorAll('input[name="dpay"]').forEach(r=>r.addEventListener("change",renderDineTotals));
 function closeDine(){ Object.keys(dine).forEach(k=>delete dine[k]); dineCat="all"; gcashNow=false; $("#d-given").value=""; $("#d-cash").checked=true; $("#d-pack-no").checked=true; dineErr(); $("#dinePanel").hidden=true; $("#dineBar").hidden=true; setAdding(null); }

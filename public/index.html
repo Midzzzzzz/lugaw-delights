@@ -134,8 +134,8 @@ let soldOut=new Set(), stockLeftNow=null; // stockLeftNow: what's left of each c
 // Whether the cart (plus one more of an item) can still be made; returns a message or ""
 function stockProblem(extra){
   const lines=Object.entries(cart).map(([id,qty])=>({id,qty})); if(extra) lines.push(extra);
-  const id=shortItem(lines,stockLeftNow); if(!id) return "";
-  const n=servingsLeft(id,stockLeftNow);
+  const id=shortItem(lines,stockLeftNow,"Delivery"); if(!id) return ""; // delivered: counts the take-out box too
+  const n=servingsLeft(id,stockLeftNow,true);
   return n?`Sorry, we only have ${n} ${ITEMS[id].name} left.`:`Sorry, ${ITEMS[id].name} is sold out right now.`;
 }
 function renderCtl(id){
