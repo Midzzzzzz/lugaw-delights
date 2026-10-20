@@ -113,6 +113,7 @@ table.inv input{width:90px;text-align:right;padding:5px 8px}
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
+import { readLoyverse } from "./loyverse.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
 const $=s=>document.querySelector(s);
@@ -328,8 +329,8 @@ function renderOrders(){
   const list=orders.filter(o=>filter==="all"||(filter==="active"&&ACTIVE.includes(o.status))||(filter==="done"&&isDone(o))||(filter==="cancelled"&&o.status==="cancelled"))
     .filter(o=>!q||[o.code,o.table,o.sellerName,o.riderName,o.mode].some(v=>String(v||"").toLowerCase().includes(q)));
   const shown=list.slice(0,300);
-  $("#view").innerHTML=(saleOpen?saleForm():"")+`<div class="card" style="margin-top:12px">
-    <div class="toolbar">${saleOpen?"":`<button class="btn small" data-sadd>+ Add a sale</button>`}${FILTERS.map(([k,l])=>`<button class="chip ${filter===k?"on":""}" data-filter="${k}">${l}</button>`).join("")}
+  $("#view").innerHTML=(saleOpen?saleForm():"")+lvPreview()+`<div class="card" style="margin-top:12px">
+    <div class="toolbar">${saleOpen?"":`<button class="btn small" data-sadd>+ Add a sale</button>`}${lvPlan?"":`<button class="btn ghost small" data-lvpick>Import from Loyverse</button>`}${FILTERS.map(([k,l])=>`<button class="chip ${filter===k?"on":""}" data-filter="${k}">${l}</button>`).join("")}
       <input class="search" type="search" id="search" placeholder="Search code, table, seller…" value="${esc(search)}" aria-label="Search orders"></div>
     ${delBar(shown)}
     <div class="tablewrap"><table class="orders"><thead><tr><th><input type="checkbox" data-pickall aria-label="Select all shown orders"${shown.length&&shown.every(o=>picked.has(o.id))?" checked":""}></th><th>Time</th><th>Code</th><th>Type</th><th>Seller</th><th>Rider</th><th>Status</th><th class="n">Total</th></tr></thead>
@@ -338,7 +339,7 @@ function renderOrders(){
       <td><b>${esc(o.code)}</b></td><td>${esc(o.mode)}${o.table?` · ${esc(o.table)}`:""}</td>
       <td>${o.sellerUid||o.sellerName?esc(sellerName(o)):`<span class="muted">—</span>`}</td>
       <td>${o.riderUid?esc(riderName(o)):`<span class="muted">—</span>`}</td>
-      <td><span class="pill ${esc(STATUS[o.status]?.tone||"off")}">${esc(statusLabel(o))}</span>${o.manual?` <span class="pill">Added by owner</span>`:""}</td>
+      <td><span class="pill ${esc(STATUS[o.status]?.tone||"off")}">${esc(statusLabel(o))}</span>${o.manual?` <span class="pill">${o.source==="loyverse"?"From Loyverse":"Added by owner"}</span>`:""}</td>
       <td class="n">${peso(o.total)}</td></tr>
       ${open===o.id?`<tr class="detail"><td colspan="8">${detail(o)}
         <div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-delone="${esc(o.id)}">Delete order</button></div></td></tr>`:""}`).join("")
@@ -1066,6 +1067,72 @@ $("#view").addEventListener("click",async e=>{
   if(b.dataset.photo){ photoFor=b.dataset.photo; photoInput.click(); return; }
   if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Remove?"; return; }
   try{ await deleteDoc(doc(db,"menuPhotos",b.dataset.photodel)); }catch(x){ photoMsg=friendlyError(x); render(true); }
+});
+// ---------- Importing sales from Loyverse ----------
+// The owner picks a Loyverse "Receipts by item" export (CSV). Each receipt becomes a finished,
+// paid order on its own date (see loyverse.js). Receipts imported before are skipped, so the
+// same file can be imported again safely.
+let lvPlan=null, lvMsg="", lvBusy=false;
+const lvInput=document.createElement("input");
+lvInput.type="file"; lvInput.accept=".csv,text/csv"; lvInput.hidden=true; document.body.append(lvInput);
+lvInput.onchange=async()=>{
+  const f=lvInput.files[0]; lvInput.value=""; if(!f) return;
+  lvMsg="Reading the file…"; lvPlan=null; render(true);
+  try{
+    const r=readLoyverse(await f.text(),ITEMS);
+    if(!r.orders.length){ lvMsg=r.problems[0]||"No sales found in that file."; return render(true); }
+    // which receipts are already here
+    const done=new Set();
+    for(let i=0;i<r.orders.length;i+=25)
+      await Promise.all(r.orders.slice(i,i+25).map(o=>getDoc(doc(db,"orders","loyverse-"+o.receipt)).then(s=>{ if(s.exists()) done.add(o.receipt); }).catch(()=>{})));
+    lvPlan={...r,file:f.name,already:done,todo:r.orders.filter(o=>!done.has(o.receipt)&&o.items.length<=MAX_LINES)};
+    lvMsg="";
+  }catch(x){ lvMsg="Couldn't read that file: "+(x.message||friendlyError(x)); }
+  render(true);
+};
+function lvPreview(){
+  if(!lvPlan) return lvMsg?`<section class="card" style="margin-top:12px"><p style="margin:0">${esc(lvMsg)}</p></section>`:"";
+  const p=lvPlan, days={}, money=o=>o.total;
+  p.todo.forEach(o=>{ const d=o.when.toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric",year:"numeric"}); const x=days[d]||(days[d]={n:0,sum:0}); x.n++; x.sum+=money(o); });
+  const total=p.todo.reduce((s,o)=>s+o.total,0), fees=p.todo.reduce((s,o)=>s+o.deliveryFee,0);
+  const un=Object.entries(p.unmatched);
+  return `<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep)">Import from Loyverse</h2>
+    <p class="muted" style="font-size:.88rem;margin:4px 0 8px">${esc(p.file)} · ${plural(p.orders.length,"receipt")} after refunds${p.refunds?` (${plural(p.refunds,"refund")} taken off the sales they refunded)`:""}.
+      Each receipt is saved as a paid order on its own date and time, marked <b>Imported from Loyverse</b>. Payment is recorded as cash.</p>
+    ${p.already.size?`<p style="margin:0 0 8px">${plural(p.already.size,"receipt")} were imported before and will be skipped.</p>`:""}
+    ${p.todo.length?`<div class="tablewrap"><table class="inv"><thead><tr><th>Day</th><th class="n">Receipts</th><th class="n">Total</th></tr></thead><tbody>
+      ${Object.entries(days).map(([d,x])=>`<tr><td>${esc(d)}</td><td class="n">${x.n}</td><td class="n">${peso(x.sum)}</td></tr>`).join("")}
+      <tr class="sec"><td>All</td><td class="n">${p.todo.length}</td><td class="n">${peso(total)}</td></tr></tbody></table></div>
+      ${fees?`<p class="muted" style="font-size:.85rem;margin:6px 0 0">Includes ${peso(fees)} in delivery fees, which go to riders and aren't counted in shop sales.</p>`:""}`
+      :`<p class="empty">Everything in this file is already imported.</p>`}
+    ${un.length?`<div class="flag" style="margin-top:8px">Not on your menu, imported with their Loyverse name and price: ${esc(un.map(([n,q])=>`${n} ×${q}`).join(", "))}.</div>`:""}
+    ${p.problems.length?`<div class="flag" style="margin-top:8px">${p.problems.slice(0,5).map(esc).join("<br>")}</div>`:""}
+    ${lvMsg?`<p class="err">${esc(lvMsg)}</p>`:""}
+    <div class="btnrow" style="margin-top:10px">${p.todo.length?`<button class="btn" data-lvgo${lvBusy?" disabled":""}>Import ${plural(p.todo.length,"receipt")} · ${peso(total)}</button>`:""}
+      <button class="btn ghost small" data-lvclose>${p.todo.length?"Cancel":"Close"}</button></div></section>`;
+}
+$("#view").addEventListener("click",async e=>{
+  if(tab!=="orders") return;
+  const b=e.target.closest("[data-lvpick],[data-lvgo],[data-lvclose]"); if(!b) return;
+  if(b.dataset.lvpick!==undefined){ lvMsg=""; return lvInput.click(); }
+  if(b.dataset.lvclose!==undefined){ lvPlan=null; lvMsg=""; return render(true); }
+  const p=lvPlan, uid=auth.currentUser.uid; lvBusy=true; b.disabled=true; b.textContent="Importing…";
+  let saved=0;
+  try{
+    for(let i=0;i<p.todo.length;i+=400){
+      const batch=writeBatch(db);
+      p.todo.slice(i,i+400).forEach(o=>batch.set(doc(db,"orders","loyverse-"+o.receipt),{
+        code:("LV-"+o.receipt).slice(0,20), customerUid:uid, sellerUid:uid, sellerName:"Owner", mode:o.mode, table:"", notes:"Imported from Loyverse",
+        payment:"Cash", items:o.items, subtotal:o.subtotal, deliveryFee:o.deliveryFee, boxFee:o.boxFee, total:o.total, status:"completed", riderUid:null,
+        createdAt:Timestamp.fromDate(o.when), manual:true, addedBy:uid, addedAt:serverTimestamp(), cashGiven:o.total, paidTotal:o.total,
+        source:"loyverse", receipt:o.receipt }));
+      await batch.commit(); saved+=Math.min(400,p.todo.length-i);
+    }
+    const first=p.todo[0].when, last=p.todo[p.todo.length-1].when;
+    delMsg=`Imported ${plural(saved,"receipt")} from Loyverse (${first.toLocaleDateString("en-PH",{month:"short",day:"numeric"})} to ${last.toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"})}). Pick those dates above to see them.`;
+    lvPlan=null;
+  }catch(x){ lvMsg=(saved?`Imported ${saved} before an error: `:"Couldn't import: ")+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase. Importing the file again skips what's already in."; }
+  lvBusy=false; render(true);
 });
 </script>
 </body>

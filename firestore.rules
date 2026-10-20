@@ -395,19 +395,21 @@ service cloud.firestore {
         || (isApprovedRider() && (resource.data.riderUid == uid() || needsRider(resource.data)))
         || isKitchen();
 
-      // A sale the owner adds by hand, for any date up to now (owner.html → Orders → Add a sale):
-      // already finished and paid, marked manual with who added it and when.
+      // A sale the owner adds by hand or imports from Loyverse, for any date up to now
+      // (owner.html → Orders): already finished and paid, marked manual with who added it and when.
       function manualSale(d) {
         return d.keys().hasOnly(['code','customerUid','mode','table','notes','payment','items','subtotal','deliveryFee','boxFee','total',
-              'status','riderUid','createdAt','manual','addedBy','addedAt','sellerUid','sellerName','cashGiven','paid','paidTotal'])
+              'status','riderUid','createdAt','manual','addedBy','addedAt','sellerUid','sellerName','cashGiven','paid','paidTotal','source','receipt'])
+          && (!('source' in d) || d.source == 'loyverse') && (!('receipt' in d) || str(d.receipt, 30))
           && d.manual == true && d.addedBy == uid() && d.addedAt == request.time
           && d.customerUid == uid() && d.sellerUid == uid() && str(d.sellerName, 80)
-          && d.mode == 'Dine-in' && d.status == 'completed' && d.riderUid == null
+          && d.mode in ['Dine-in', 'Pickup', 'Delivery'] && d.status == 'completed' && d.riderUid == null
           && d.createdAt is timestamp && d.createdAt <= request.time
           && d.payment in ['Cash', 'GCash']
           && okItems(d.items)
           && amount(d.subtotal) && d.subtotal > 0
-          && d.deliveryFee == 0 && boxOk(d) && d.total == d.subtotal + d.get('boxFee', 0)
+          && amount(d.deliveryFee) && (d.mode == 'Delivery' || d.deliveryFee == 0)
+          && boxOk(d) && d.total == d.subtotal + d.get('boxFee', 0) + d.deliveryFee
           && (!('cashGiven' in d) || (amount(d.cashGiven) && d.cashGiven >= d.total))
           && (!('paid' in d) || (d.paid == true && d.payment == 'GCash'))
           && (!('paidTotal' in d) || d.paidTotal == d.total)

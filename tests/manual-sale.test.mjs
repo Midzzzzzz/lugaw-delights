@@ -29,6 +29,12 @@ await t("a sale whose total doesn't add up refused", () => assertFails(setDoc(do
 await t("a sale not marked as added by hand refused", () => assertFails(setDoc(doc(owner, "orders/m5"), sale({ manual: false }))));
 await t("a sale credited to someone else refused", () => assertFails(setDoc(doc(owner, "orders/m6"), sale({ sellerUid: "s1" }))));
 await t("a past sale that's still being cooked refused", () => assertFails(setDoc(doc(owner, "orders/m7"), sale({ status: "preparing" }))));
+await t("imported Loyverse delivery receipt with its delivery fee", () => assertSucceeds(setDoc(doc(owner, "orders/loyverse-5-0061"),
+  sale({ mode: "Delivery", deliveryFee: 45, boxFee: 10, total: 133, cashGiven: 133, paidTotal: 133, source: "loyverse", receipt: "5-0061" }))));
+await t("imported takeout receipt as pickup", () => assertSucceeds(setDoc(doc(owner, "orders/loyverse-4-0001"), sale({ mode: "Pickup", source: "loyverse", receipt: "4-0001" }))));
+await t("a delivery fee on a dine-in sale refused", () => assertFails(setDoc(doc(owner, "orders/m10"), sale({ deliveryFee: 45, total: 123, cashGiven: 123, paidTotal: 123 }))));
+await t("a delivery fee left out of the total refused", () => assertFails(setDoc(doc(owner, "orders/m11"), sale({ mode: "Delivery", deliveryFee: 45 }))));
+await t("an unknown source refused", () => assertFails(setDoc(doc(owner, "orders/m12"), sale({ source: "other" }))));
 await t("a seller can't add a past sale", () => assertFails(setDoc(doc(s1, "orders/m8"), sale({ customerUid: "s1", sellerUid: "s1", addedBy: "s1" }))));
 await t("a customer can't add a past sale", () => assertFails(setDoc(doc(cust, "orders/m9"), sale({ customerUid: "cust", sellerUid: "cust", addedBy: "cust" }))));
 
