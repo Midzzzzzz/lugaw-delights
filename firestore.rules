@@ -121,19 +121,46 @@ service cloud.firestore {
     // Inventory counts (owner.html): the owner records the beginning stock per menu item at the
     // start of a shift; what's used is worked out from the orders placed since then. Ending the
     // shift saves the breakdown. Sellers read the open count to see what's left.
+    // When a count ends, its refill list (what was used) goes to the kitchen; the kitchen marks
+    // it refilled and starts the next count with the stock it now has.
     match /inventory/{countId} {
-      allow read: if isStaff();
-      allow create: if isAdmin()
-        && request.resource.data.keys().hasOnly(['since','closedAt','items','by','createdAt'])
+      function refillPending(r) {
+        return r is map && r.keys().hasOnly(['status','items']) && r.status == 'pending'
+          && r.items is map && r.items.size() <= 300;
+      }
+      allow read: if isStaff() || isKitchen();
+      allow create: if (isAdmin() || isKitchen())
+        && request.resource.data.keys().hasOnly(['since','closedAt','items','by','createdAt','refillOf'])
+        && (!('refillOf' in request.resource.data) || request.resource.data.refillOf is string)
         && request.resource.data.since == request.time && request.resource.data.createdAt == request.time
         && request.resource.data.closedAt == null
         && request.resource.data.items is map && request.resource.data.items.size() <= 300
         && request.resource.data.by == uid();
-      allow update: if isAdmin() && resource.data.closedAt == null
-        && changed().hasOnly(['items','closedAt','result'])
+      allow update: if (isAdmin() && resource.data.closedAt == null
+        && changed().hasOnly(['items','closedAt','result','refill'])
+        && (!changed().hasAny(['refill']) || (refillPending(request.resource.data.refill) && changed().hasAny(['closedAt'])))
         && request.resource.data.items is map && request.resource.data.items.size() <= 300
         && (!changed().hasAny(['closedAt']) || request.resource.data.closedAt == request.time)
-        && (!changed().hasAny(['result']) || (request.resource.data.result is map && changed().hasAny(['closedAt'])));
+        && (!changed().hasAny(['result']) || (request.resource.data.result is map && changed().hasAny(['closedAt']))))
+        // a seller ends the count when they close their shift: only the end time, who ended it
+        // and the breakdown; the stock numbers can't be changed
+        || (isSeller() && resource.data.closedAt == null
+          && changed().hasOnly(['closedAt','result','closedBy','refill'])
+          && request.resource.data.closedAt == request.time
+          && request.resource.data.closedBy == uid()
+          && request.resource.data.result is map && request.resource.data.result.size() <= 300
+          && (!changed().hasAny(['refill']) || refillPending(request.resource.data.refill)))
+        // the kitchen (or the owner) marks an ended count's refill list as done, once; the list
+        // itself can't be changed, only what was actually bought is added
+        || ((isKitchen() || isAdmin()) && resource.data.closedAt != null
+          && resource.data.get('refill', {}).get('status', '') == 'pending'
+          && changed().hasOnly(['refill'])
+          && request.resource.data.refill.keys().hasOnly(['status','items','bought','doneBy','doneByName','doneAt'])
+          && request.resource.data.refill.status == 'done'
+          && request.resource.data.refill.items == resource.data.refill.items
+          && request.resource.data.refill.bought is map && request.resource.data.refill.bought.size() <= 300
+          && request.resource.data.refill.doneBy == uid() && str(request.resource.data.refill.doneByName, 80)
+          && request.resource.data.refill.doneAt == request.time);
       allow delete: if isAdmin();
     }
 

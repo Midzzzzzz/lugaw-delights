@@ -23,6 +23,15 @@
 .kt.late .kwait{color:var(--warn)}
 .kt .lines li{font-size:1.15rem;font-weight:700}
 .kt .knotes{background:var(--warn-bg);color:var(--warn);font-weight:800;border-radius:8px;padding:6px 10px}
+/* Refill list: what the last shift used */
+#refill{margin-top:12px;border:3px solid var(--yolk)}
+.rf{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0;border-bottom:1px dashed var(--line)}
+.rf input[type=checkbox]{width:26px;height:26px}
+.rf .rname{font-weight:800;font-size:1.05rem}
+.rf .rneed{color:var(--muted);font-size:.85rem}
+.rf .rbuy{display:flex;gap:6px;align-items:center}
+.rf .rbuy input{width:90px;text-align:right}
+.rf.got .rname{text-decoration:line-through;opacity:.6}
 </style>
 </head>
 <body>
@@ -54,6 +63,7 @@
       <div><b id="meName"></b> <span class="pill go">Kitchen</span></div>
       <button class="btn small" id="soundBtn">Turn on order alerts</button>
     </div>
+    <div class="card" id="refill" hidden></div>
     <h2 style="color:var(--brand);margin:14px 0 0">To cook <span class="pill brand" id="kCount">0</span></h2>
     <div class="kds" id="kBoard"></div>
   </div>
@@ -61,7 +71,7 @@
 
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { auth, db, isConfigured, esc, itemsHTML, phoneKey, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 
 const $=s=>document.querySelector(s);
@@ -150,13 +160,83 @@ $("#soundBtn").onclick=()=>{ if(enableSound()){ chime(); $("#soundBtn").textCont
 const sentAt=o=>o.addedAt?.toDate?.()||o.createdAt?.toDate?.()||null;
 const key=o=>o.id+":"+(o.addedAt?.toMillis?.()||0);
 function start(){
-  stopOrders=onSnapshot(query(collection(db,"orders"),where("status","==","preparing")), s=>{
+  const stopRefill=watchRefill();
+  const stopTickets=onSnapshot(query(collection(db,"orders"),where("status","==","preparing")), s=>{
     orders=s.docs.map(d=>({id:d.id,...d.data()}));
     const keys=new Set(orders.map(key));
     if(known && [...keys].some(k=>!known.has(k))) chime(); // a new ticket, or items added
     known=keys; render();
   }, e=>{ $("#kBoard").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; });
+  stopOrders=()=>{ stopTickets(); stopRefill(); };
 }
+
+// ---------- Refill list ----------
+// When a seller closes their shift, the inventory count ends and the kitchen gets the list of
+// what was used. The kitchen buys or prepares it, ticks each one, types the amount actually
+// bought if it's different, and taps "All refilled": the next count starts with the stock now on hand.
+let counts=[], ingredients=[], refillDraft={}, refillMsg="", refillKnown=null;
+const ingName=g=>ingredients.find(x=>x.id===g)?.name||g, ingUnit=g=>ingredients.find(x=>x.id===g)?.unit||"";
+const qty=n=>String(Math.round(n*100)/100);
+function watchRefill(){
+  const a=onSnapshot(doc(db,"settings","ingredients"), s=>{ ingredients=s.exists()?s.data().list||[]:[]; renderRefill(); }, ()=>{});
+  const b=onSnapshot(query(collection(db,"inventory"),orderBy("since","desc"),limit(10)), s=>{
+    counts=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})}));
+    const p=pendingRefill();
+    if(p && refillKnown!==null && refillKnown!==p.id) chime(); // a new list just came in
+    refillKnown=p?.id||"";
+    renderRefill();
+  }, e=>{ refillMsg="Couldn't load the refill list: "+friendlyError(e); renderRefill(); });
+  return ()=>{ a(); b(); };
+}
+const pendingRefill=()=>counts.find(c=>c.closedAt && c.refill?.status==="pending");
+function renderRefill(){
+  const box=$("#refill"), c=pendingRefill();
+  box.hidden=!c && !refillMsg; if(box.hidden) return;
+  if(document.activeElement?.closest?.("#refill") && document.activeElement.tagName==="INPUT" && document.activeElement.type!=="checkbox") return;
+  if(!c){ box.innerHTML=`<p class="err" style="margin:0">${esc(refillMsg)}</p>`; return; }
+  const items=Object.entries(c.refill.items||{}), d=refillDraft[c.id]||(refillDraft[c.id]={got:{},buy:{}});
+  const ended=c.closedAt?.toDate?.(), all=items.every(([g])=>d.got[g]);
+  box.innerHTML=`<h2 style="color:var(--brand-deep)">To refill <span class="pill work">${items.length}</span></h2>
+    <p class="muted" style="margin:4px 0 6px;font-size:.88rem">Used in the shift that ended ${ended?ended.toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}):""}.
+      Buy or prepare each one, tick it, and change the amount if you got a different amount.</p>
+    ${items.length?items.map(([g,need])=>{ const v=d.buy[g]??need; return `<div class="rf${d.got[g]?" got":""}">
+      <input type="checkbox" data-got="${esc(g)}"${d.got[g]?" checked":""} aria-label="Got ${esc(ingName(g))}">
+      <div><div class="rname">${esc(ingName(g))}</div><div class="rneed">Used ${qty(need)} ${esc(ingUnit(g))}</div></div>
+      <label class="rbuy">Got <input type="number" inputmode="decimal" min="0" step="any" data-buy="${esc(g)}" value="${esc(v)}" aria-label="Amount of ${esc(ingName(g))} bought"> ${esc(ingUnit(g))}</label></div>`; }).join("")
+      :`<p class="empty">Nothing was used, so there's nothing to buy.</p>`}
+    ${refillMsg?`<p class="err">${esc(refillMsg)}</p>`:""}
+    <div class="btnrow" style="margin-top:10px"><button class="btn big ok" data-refilled="${esc(c.id)}"${all?"":" disabled"}>${all?"All refilled: start the next count":`Tick everything first (${items.filter(([g])=>d.got[g]).length} of ${items.length})`}</button></div>`;
+}
+$("#refill").addEventListener("change",e=>{
+  const c=pendingRefill(); if(!c) return; const d=refillDraft[c.id];
+  const g=e.target.closest("[data-got]"); if(g){ d.got[g.dataset.got]=g.checked; renderRefill(); }
+});
+$("#refill").addEventListener("input",e=>{
+  const c=pendingRefill(); if(!c) return;
+  const i=e.target.closest("[data-buy]"); if(i) refillDraft[c.id].buy[i.dataset.buy]=i.value===""?0:Math.max(0,Number(i.value));
+});
+$("#refill").addEventListener("focusout",()=>setTimeout(renderRefill,200));
+$("#refill").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-refilled]"); if(!b) return;
+  const c=counts.find(x=>x.id===b.dataset.refilled); if(!c) return;
+  if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Everything is in? Tap again"; return; }
+  const d=refillDraft[c.id]||{buy:{}}, bought={};
+  Object.entries(c.refill.items||{}).forEach(([g,need])=>{ bought[g]=Math.round((d.buy[g]??need)*100)/100; });
+  // the next count: what was left, plus what was bought
+  const next={}; Object.entries(c.result||{}).forEach(([g,r])=>{ next[g]=Math.max(0,Math.round(((r.remaining??0)+(bought[g]||0))*100)/100); });
+  Object.entries(bought).forEach(([g,n])=>{ if(!(g in next)) next[g]=n; });
+  const open=counts.find(x=>!x.closedAt);
+  b.disabled=true; refillMsg="";
+  try{
+    const batch=writeBatch(db);
+    batch.update(doc(db,"inventory",c.id),{refill:{status:"done",items:c.refill.items,bought,doneBy:me.uid,doneByName:$("#meName").textContent||"Kitchen",doneAt:serverTimestamp()}});
+    if(!open) batch.set(doc(collection(db,"inventory")),{since:serverTimestamp(),createdAt:serverTimestamp(),closedAt:null,items:next,by:me.uid,refillOf:c.id});
+    await batch.commit();
+    delete refillDraft[c.id];
+    if(open) refillMsg="Marked refilled. A count was already open, so ask the owner to add the new stock to it.";
+  }catch(x){ refillMsg="Couldn't save: "+friendlyError(x)+" If the owner just updated the app, the new security rules may not be published yet."; b.disabled=false; }
+  renderRefill();
+});
 function render(){
   const list=[...orders].sort((a,b)=>(sentAt(a)?.getTime()??Infinity)-(sentAt(b)?.getTime()??Infinity));
   $("#kCount").textContent=list.length;

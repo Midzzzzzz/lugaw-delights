@@ -54,5 +54,30 @@ await t("kitchen can't publish the sold-out list", () => assertFails(setDoc(doc(
 await t("customer can't publish the sold-out list", () => assertFails(setDoc(doc(cust, "settings/stock"), stock)));
 await t("owner can clear it", () => assertSucceeds(setDoc(doc(owner, "settings/stock"), { soldOut: [], updatedAt: serverTimestamp() })));
 
+console.log("Seller ends the count with their shift");
+await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), "inventory/e1"), { ...count(), since: new Date(), createdAt: new Date() }));
+const end = (over = {}) => ({ closedAt: serverTimestamp(), closedBy: "s1", result: { L01: { used: 5, remaining: 45 } }, ...over });
+await t("seller can't change the stock while ending", () => assertFails(updateDoc(doc(s1, "inventory/e1"), { ...end(), items: { L01: 999 } })));
+await t("seller can't end it in someone else's name", () => assertFails(updateDoc(doc(s1, "inventory/e1"), end({ closedBy: "owner" }))));
+await t("kitchen staff can't end the count", () => assertFails(updateDoc(doc(k1, "inventory/e1"), end({ closedBy: "k1" }))));
+await t("seller ends the count with its breakdown", () => assertSucceeds(updateDoc(doc(s1, "inventory/e1"), end())));
+await t("an ended count can't be ended again", () => assertFails(updateDoc(doc(s1, "inventory/e1"), end())));
+
+console.log("Refill list for the kitchen");
+await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), "inventory/r1"), { ...count(), since: new Date(), createdAt: new Date() }));
+const refill = { status: "pending", items: { egg: 12, rice: 8 } };
+await t("seller ends the count and sends the refill list", () => assertSucceeds(updateDoc(doc(s1, "inventory/r1"), end({ refill }))));
+await t("kitchen reads the refill list", () => assertSucceeds(getDoc(doc(k1, "inventory/r1"))));
+await t("a customer can't read inventory", () => assertFails(getDoc(doc(cust, "inventory/r1"))));
+const done = (over = {}) => ({ refill: { status: "done", items: refill.items, bought: { egg: 12, rice: 10 }, doneBy: "k1", doneByName: "K", doneAt: serverTimestamp(), ...over } });
+await t("kitchen can't change what the list asked for", () => assertFails(updateDoc(doc(k1, "inventory/r1"), done({ items: { egg: 1 } }))));
+await t("kitchen can't mark it in someone else's name", () => assertFails(updateDoc(doc(k1, "inventory/r1"), done({ doneBy: "s1" }))));
+await t("a seller can't mark it refilled", () => assertFails(updateDoc(doc(s1, "inventory/r1"), done({ doneBy: "s1" }))));
+await t("kitchen marks everything refilled", () => assertSucceeds(updateDoc(doc(k1, "inventory/r1"), done())));
+await t("it can't be marked refilled twice", () => assertFails(updateDoc(doc(k1, "inventory/r1"), done())));
+await t("kitchen starts the next count with the refilled stock", () => assertSucceeds(setDoc(doc(k1, "inventory/r2"), count({ by: "k1", items: { egg: 30, rice: 20 }, refillOf: "r1" }))));
+await t("a seller can't start a count", () => assertFails(setDoc(doc(s1, "inventory/r3"), count({ by: "s1" }))));
+await t("a refill list that's already marked done can't be sent", () => assertFails(updateDoc(doc(owner, "inventory/r2"), { closedAt: serverTimestamp(), result: {}, refill: { status: "done", items: {} } })));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);

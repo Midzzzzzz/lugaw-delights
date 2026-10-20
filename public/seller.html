@@ -280,7 +280,7 @@ function start(){
   // The owner's open inventory count, to show what's left on the dine-in menu
   let stopCountOrders=null, countSince=null;
   subs.push(onSnapshot(query(collection(db,"inventory"),orderBy("since","desc"),limit(1)), s=>{
-    const c=s.docs[0]?.data({serverTimestamps:"estimate"}); stockCount=c&&!c.closedAt?c:null;
+    const c=s.docs[0]?.data({serverTimestamps:"estimate"}); stockCount=c&&!c.closedAt?{...c,id:s.docs[0].id}:null;
     // every order since the count started (the board only keeps the latest 300)
     const since=stockCount?.since?.toMillis?.()??null;
     if(since!==countSince){ countSince=since; stopCountOrders?.(); stopCountOrders=null; countOrders=[];
@@ -968,7 +968,8 @@ function renderShift(){
   if(lastClosed && !shift){
     const s=lastClosed.summary, d=s.counted-s.expected;
     box.innerHTML=`<div class="shift-head"><b>Shift closed</b> <span class="pill ${d===0?"go":"work"}">${d===0?"Cash exact":d>0?`Over ${peso(d)}`:`Short ${peso(-d)}`}</span></div>
-      ${shiftTable(s)}<div class="btnrow" style="margin-top:8px">${printer()?`<button class="btn ghost small" data-sh="print">Print shift report</button>`:""}
+      ${shiftTable(s)}${lastClosed.refillCount!=null?`<p class="muted" style="margin:8px 0 0;font-size:.88rem">Inventory count ended. ${lastClosed.refillCount?`The kitchen got the refill list (${plural(lastClosed.refillCount,"ingredient")}).`:"Nothing was used, so there's nothing to refill."}</p>`:""}
+      <div class="btnrow" style="margin-top:8px">${printer()?`<button class="btn ghost small" data-sh="print">Print shift report</button>`:""}
       <button class="btn small" data-sh="done">Done</button></div>`;
     return;
   }
@@ -1004,6 +1005,20 @@ function renderShift(){
     ${form||`<div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-sh="details">${shiftForm==="details"?"Hide details":"Details"}</button>
       <button class="btn ghost small" data-sh="in">Pay in</button><button class="btn ghost small" data-sh="out">Pay out</button>
       ${printer()?`<button class="btn ghost small" data-sh="print">Print report</button>`:""}<button class="btn small" data-sh="closeform">Close shift</button></div>`}${msg}`;
+}
+// Ends the open inventory count in the same save as closing the shift: saves what was used and
+// what's left of each ingredient, and sends the kitchen the refill list (everything used).
+// Returns how many ingredients are on the list (null when no count was open).
+function endCount(batch){
+  if(!stockCount?.id) return null;
+  const left=leftNow||ingredientsLeft(stockCount,orders)||{}, result={}, items={};
+  Object.entries(stockCount.items||{}).forEach(([g,begin])=>{
+    const remaining=Math.round((left[g]??begin)*100)/100, used=Math.round((begin-remaining)*100)/100;
+    result[g]={used,remaining};
+    if(used>0) items[g]=used;
+  });
+  batch.update(doc(db,"inventory",stockCount.id),{closedAt:serverTimestamp(),closedBy:me.uid,result,refill:{status:"pending",items}});
+  return Object.keys(items).length;
 }
 const diffText=d=>d==null?"":d===0?`<span style="color:var(--ok)">Cash is exact</span>`:d>0?`<span style="color:var(--warn)">Over by ${peso(d)}</span>`:`<span style="color:var(--brand-deep)">Short by ${peso(-d)}</span>`;
 function shiftTable(s){
@@ -1065,11 +1080,12 @@ $("#shiftCard").addEventListener("click",async e=>{
     if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Close the shift now? Tap again"; return; }
     const s={...shiftNow(),counted:n}; b.disabled=true;
     try{
-      const batch=writeBatch(db); // the shift and the store close together
+      const batch=writeBatch(db); // the shift, the store and the inventory count close together
       batch.update(doc(db,"shifts",shift.id),{closedAt:serverTimestamp(),closedBy:me.uid,closedByName:myName,countedCash:n,summary:s});
       batch.set(doc(db,"settings","store"),{open:false},{merge:true});
+      const refill=endCount(batch);
       await batch.commit();
-      lastClosed={...shift,closedAt:new Date(),closedByName:myName,summary:s}; shiftForm=""; shiftDraft={};
+      lastClosed={...shift,closedAt:new Date(),closedByName:myName,summary:s,refillCount:refill}; shiftForm=""; shiftDraft={};
       if(printer()) btPrint(shiftBytes(s,lastClosed,SHOP));
     }catch(x){ shiftMsg=friendlyError(x); b.disabled=false; }
     return done();

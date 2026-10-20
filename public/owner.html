@@ -888,6 +888,13 @@ function publishStock(left){
   setDoc(doc(db,"settings","stock"),{soldOut,left:left||{},updatedAt:serverTimestamp()}).catch(()=>{ lastSoldOut=""; });
 }
 const isLow=r=>r.left>0 && r.left<=r.begin*0.2;
+// Whether the kitchen has refilled what an ended count used
+function refillStatus(c){
+  const r=c.refill; if(!r) return "";
+  if(r.status==="pending") return `<p class="flag" style="margin-top:10px">Waiting for the kitchen to refill ${plural(Object.keys(r.items||{}).length,"ingredient")}. The kitchen sees the list on its page.</p>`;
+  const diff=Object.entries(r.bought||{}).filter(([g,n])=>n!==(r.items||{})[g]).map(([g,n])=>`${ingName(g)} ${fmtQ(n)} (used ${fmtQ(r.items?.[g]||0)})`);
+  return `<p style="margin:10px 0 0;font-size:.9rem"><span class="pill go">Refilled</span> by ${esc(r.doneByName||"the kitchen")} · ${esc(when(r.doneAt))}${diff.length?`<br><span class="muted">Bought a different amount: ${esc(diff.join(", "))}</span>`:""}</p>`;
+}
 // Ingredients the menu uses that aren't in this count: items needing them can't be sold
 // while the count is open. Plus items ordered that have no ingredients set at all.
 function notCounted(c){
@@ -951,6 +958,7 @@ function renderInventory(){
       <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Started ${esc(when(view.since))}${view.closedAt?` · ended ${esc(when(view.closedAt))}`:" · counting orders as they come in"}.
         ${live?"Yellow rows are running low, red rows are out.":""} <b>To restock</b> is how much was used: what you need to fill back up to the beginning stock.</p>
       ${invTable(rows)}
+      ${!live?refillStatus(view):""}
       ${live?`<p style="margin:10px 0 0;font-size:.9rem"><b>Sold out now:</b> ${out.length?esc(out.join(", ")):"nothing"}</p>${notCounted(view)}`:""}
       <div class="btnrow" style="margin-top:10px">${live?`<button class="btn ghost small" data-iact="edit">Change beginning stock</button>
         <button class="btn" data-iact="end">End shift</button>`:(open?"":`<button class="btn" data-iact="new">Start next count</button>`)}
@@ -960,7 +968,7 @@ function renderInventory(){
   const past=counts.filter(c=>c.closedAt);
   $("#view").innerHTML=main+(ingOpen?ingEditor():`<div style="margin-top:12px"><button class="btn ghost small" data-iact="ingopen">Ingredients list (${ingList().length})</button></div>`)
     +(past.length?`<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep);font-size:1.1rem">Past shifts</h2>
-    <div class="btnrow" style="margin-top:8px">${past.map(c=>`<button class="chip ${invView===c.id?"on":""}" data-iact="view" data-id="${esc(c.id)}">${esc(when(c.since))}</button>`).join("")}</div></section>`:"");
+    <div class="btnrow" style="margin-top:8px">${past.map(c=>`<button class="chip ${invView===c.id?"on":""}" data-iact="view" data-id="${esc(c.id)}">${esc(when(c.since))}${c.refill?.status==="pending"?" · to refill":""}</button>`).join("")}</div></section>`:"");
 }
 $("#view").addEventListener("input",e=>{ if(tab!=="inventory") return;
   const i=e.target.closest("[data-inv]"); if(i){ invDraft[i.dataset.inv]=i.value===""?null:Math.max(0,Number(i.value)); return; }
@@ -1014,9 +1022,10 @@ $("#view").addEventListener("click",async e=>{
   }
   if(a==="end"){
     if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="End the shift now? Tap again"; return; }
-    const result={}; breakdown(open).forEach(r=>result[r.id]={used:r.used,remaining:r.left});
+    const result={}, items={}; breakdown(open).forEach(r=>{ result[r.id]={used:r.used,remaining:r.left}; if(r.used>0) items[r.id]=r.used; });
     b.disabled=true;
-    try{ await updateDoc(doc(db,"inventory",open.id),{closedAt:serverTimestamp(),result}); publishStock(null); invView=open.id; }
+    // the kitchen gets the refill list, the same as when a seller closes their shift
+    try{ await updateDoc(doc(db,"inventory",open.id),{closedAt:serverTimestamp(),result,refill:{status:"pending",items}}); publishStock(null); invView=open.id; }
     catch(x){ b.disabled=false; b.textContent=friendlyError(x); return; }
     render(true);
   }
