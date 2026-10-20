@@ -9,9 +9,10 @@ A real-time web app for a 24-hour lugaw restaurant in Los Baños, Laguna. Custom
 | Page | User | What it does |
 |---|---|---|
 | `index.html` | Customer | Menu, delivery or pickup ordering (cash on delivery or pickup), live order tracking, delivery code, problem reports |
-| `seller.html` | Seller | New orders with sound alerts, kitchen flow, dine-in point of sale with change calculation, receipts, rider settlement |
+| `seller.html` | Seller (cashier) | New orders with sound alerts, dine-in point of sale with change calculation, receipts, rider settlement |
+| `kitchen.html` | Kitchen staff | Own login; orders being cooked as big tickets, oldest first, with sound alerts; mark food served or ready |
 | `rider.html` | Rider | Registration, digital rider agreement, available/offline switch, accept deliveries, proof photos, complete delivery with the customer's code |
-| `owner.html` | Owner | Sales by date range, seller leaderboard, rider earnings, best-selling items, order search, approving sellers and riders, customer reports, delivery fees |
+| `owner.html` | Owner | Sales by date range, seller leaderboard, rider earnings, best-selling items, order search, approving staff and riders, customer reports, delivery fees, menu editor, inventory per shift |
 
 ## Features
 
@@ -36,10 +37,11 @@ A real-time web app for a 24-hour lugaw restaurant in Los Baños, Laguna. Custom
 ```
 public/            the website (this folder is what gets deployed)
   index.html       customer ordering
-  seller.html      seller dashboard
+  seller.html      seller (cashier) dashboard
+  kitchen.html     kitchen staff page
   rider.html       rider app
   owner.html       owner dashboard
-  admin.html       links to the seller and owner dashboards
+  admin.html       links to the seller, kitchen and owner pages
   config.js        Firebase settings, shop details, menu and delivery barangays
   common.js        shared code
   contract.js      rider agreement wording

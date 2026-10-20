@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Lugaw Delights – Kitchen</title>
+<meta name="robots" content="noindex">
+<meta name="app-role" content="kitchen">
+<link rel="icon" href="icon.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&display=swap">
+<link rel="stylesheet" href="style.css">
+<style>
+.narrow{max-width:460px}
+.toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between}
+/* Big tickets for the cooks: no prices or payments */
+.kds{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px;padding-top:12px}
+.kt{background:var(--surface);border:3px solid var(--line);border-radius:16px;padding:14px;display:grid;gap:8px;align-content:start}
+.kt.late{border-color:var(--yolk)}
+.kt.added{border-color:var(--brand)}
+.kt .khead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap}
+.kt .kcode{font-family:var(--display);font-weight:800;font-size:1.6rem;line-height:1}
+.kt .kwait{font-weight:800;font-variant-numeric:tabular-nums}
+.kt.late .kwait{color:var(--warn)}
+.kt .lines li{font-size:1.15rem;font-weight:700}
+.kt .knotes{background:var(--warn-bg);color:var(--warn);font-weight:800;border-radius:8px;padding:6px 10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <img src="logo.jpg" alt="Lugaw Delights logo">
+    <div class="who"><h1>Kitchen</h1><p class="tag">Orders to cook, oldest first.</p></div>
+    <button class="btn ghost small" id="signOut" hidden>Sign out</button>
+  </header>
+  <div id="setup"></div>
+
+  <form class="stack card narrow" id="loginForm" novalidate hidden>
+    <h2 style="color:var(--brand)" id="loginTitle">Kitchen staff sign in</h2>
+    <label class="f" for="r-name" data-reg hidden>Full name<input id="r-name" autocomplete="name" maxlength="80"></label>
+    <label class="f" for="r-phone" data-reg hidden>Mobile number<input id="r-phone" type="tel" inputmode="tel" maxlength="20" placeholder="09XX XXX XXXX"></label>
+    <label class="f" for="l-email">Email<input id="l-email" type="email" autocomplete="email"></label>
+    <label class="f" for="l-pass">Password<input id="l-pass" type="password" autocomplete="current-password"></label>
+    <p class="err" id="l-err" hidden></p>
+    <div class="btnrow"><button class="btn" type="submit" id="loginBtn">Sign in</button>
+      <button class="btn ghost small" type="button" id="regToggle">New kitchen staff? Register</button></div>
+    <p class="muted" style="font-size:.85rem;margin:0" id="loginHint">For kitchen staff only.</p>
+    <p style="font-size:.88rem;margin:0"><a href="seller.html" id="toCashier">Cashier? Sign in on the seller dashboard</a></p>
+  </form>
+
+  <div class="card narrow" id="notStaff" hidden></div>
+
+  <div id="dash" hidden>
+    <div class="card toolbar">
+      <div><b id="meName"></b> <span class="pill go">Kitchen</span></div>
+      <button class="btn small" id="soundBtn">Turn on order alerts</button>
+    </div>
+    <h2 style="color:var(--brand);margin:14px 0 0">To cook <span class="pill brand" id="kCount">0</span></h2>
+    <div class="kds" id="kBoard"></div>
+  </div>
+</div>
+
+<script type="module">
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { auth, db, isConfigured, esc, itemsHTML, phoneKey, friendlyError, setupNotice, enableSound, chime } from "./common.js";
+
+const $=s=>document.querySelector(s);
+// This device is used in the kitchen: the seller app opens this page by itself next time
+try{ localStorage.setItem("lugaw-device","kitchen"); }catch(_){}
+$("#toCashier").onclick=()=>{ try{ localStorage.removeItem("lugaw-device"); }catch(_){} };
+
+let me=null, watchMe=null, stopOrders=null, orders=[], known=null, registering=false, typed={name:"",phone:""};
+const show=v=>["loginForm","notStaff","dash"].forEach(id=>$("#"+id).hidden=id!==v);
+$("#setup").innerHTML=setupNotice();
+const box=(title,body)=>{ show("notStaff"); $("#notStaff").innerHTML=`<h2 style="color:var(--brand)">${title}</h2>${body}`; };
+
+// Only kitchen staff the owner approved can use this page. Sellers (cashiers) and the
+// owner have their own pages.
+if(isConfigured) onAuthStateChanged(auth, async u=>{
+  stopOrders?.(); stopOrders=null; watchMe?.(); watchMe=null; orders=[]; known=null;
+  me=u && !u.isAnonymous ? u : null;
+  $("#signOut").hidden=!me;
+  if(!me) return show("loginForm");
+  watchMe=onSnapshot(doc(db,"kitchen",me.uid), async s=>{
+    const k=s.exists()?s.data():null;
+    if(k?.status==="approved"){ $("#meName").textContent=k.name; if($("#dash").hidden){ show("dash"); start(); } return; }
+    stopOrders?.(); stopOrders=null;
+    if(!k){
+      if(registering) return box("Sending your application…","");
+      // A cashier or owner account signed in here by mistake
+      let other="";
+      try{ if((await getDoc(doc(db,"admins",me.uid))).exists()) other="owner"; }catch(_){}
+      try{ if(!other && (await getDoc(doc(db,"sellers",me.uid))).exists()) other="seller"; }catch(_){}
+      if(other) return box("This isn't a kitchen account",`<p>This is a${other==="owner"?"n owner":" cashier (seller)"} account. Sign out, then sign in with a kitchen staff account,
+        or use the <a href="${other==="owner"?"owner.html":"seller.html"}">${other==="owner"?"owner":"seller"} dashboard</a>.</p>`);
+      return finishForm();
+    }
+    box(k.status==="pending"?"Application sent":"Account paused", k.status==="pending"
+      ? `<p>Thanks, ${esc(k.name)}! Ask the owner to approve you on the owner dashboard. This page opens by itself once you're approved.</p>`
+      : `<p>Your kitchen account is paused. Please talk to the owner.</p>`);
+  }, e=>box("Couldn't load your kitchen account",`<p>${esc(friendlyError(e))}</p><p class="muted" style="font-size:.88rem">If the owner just updated the app, the new security rules may not be published yet.</p>`));
+});
+// An account that exists but has no application yet (e.g. sending it failed) can send it here
+function finishForm(err){
+  box("Finish your kitchen staff application",`<p>Signed in as <b>${esc(me.email)}</b>. Add your name and number and send your application to the owner.</p>
+    <form class="stack" id="finishForm" novalidate>
+      <label class="f" for="fin-name">Full name<input id="fin-name" autocomplete="name" maxlength="80" value="${esc(typed.name)}"></label>
+      <label class="f" for="fin-phone">Mobile number<input id="fin-phone" type="tel" inputmode="tel" maxlength="20" value="${esc(typed.phone)}" placeholder="09XX XXX XXXX"></label>
+      <p class="err"${err?"":" hidden"}>${esc(err||"")}</p>
+      <button class="btn" type="submit">Send application</button></form>`);
+  $("#finishForm").onsubmit=async e=>{
+    e.preventDefault();
+    const name=$("#fin-name").value.trim(), phone=$("#fin-phone").value.trim();
+    typed={name,phone};
+    if(!name || !phoneKey(phone)) return finishForm("Please add your full name and a valid mobile number (09XX XXX XXXX).");
+    try{ await apply(name,phone); }catch(x){ finishForm(friendlyError(x)); }
+  };
+}
+const apply=(name,phone)=>{ const u=auth.currentUser;
+  return setDoc(doc(db,"kitchen",u.uid),{name,phone,email:u.email||"",status:"pending",createdAt:serverTimestamp()}); };
+$("#signOut").onclick=()=>signOut(auth);
+const lerr=m=>{ $("#l-err").textContent=m||""; $("#l-err").hidden=!m; };
+$("#regToggle").onclick=()=>{
+  registering=!registering; lerr();
+  document.querySelectorAll("[data-reg]").forEach(el=>el.hidden=!registering);
+  $("#loginTitle").textContent=registering?"Register as kitchen staff":"Kitchen staff sign in";
+  $("#loginBtn").textContent=registering?"Submit application":"Sign in";
+  $("#regToggle").textContent=registering?"I already have an account":"New kitchen staff? Register";
+  $("#loginHint").textContent=registering?"The owner approves new kitchen staff before they can see orders.":"For kitchen staff only.";
+};
+$("#loginForm").onsubmit=async e=>{
+  e.preventDefault(); lerr();
+  const email=$("#l-email").value.trim(), pass=$("#l-pass").value;
+  if(!registering){ try{ await signInWithEmailAndPassword(auth,email,pass); }catch(x){ lerr(friendlyError(x)); } return; }
+  const name=$("#r-name").value.trim(), phone=$("#r-phone").value.trim(), miss=[];
+  if(!name) miss.push("full name"); if(!phoneKey(phone)) miss.push("valid mobile number (09XX XXX XXXX)");
+  if(!email) miss.push("email"); if(pass.length<6) miss.push("password of 6+ characters");
+  if(miss.length) return lerr("Please add your "+miss.join(", ")+".");
+  typed={name,phone};
+  try{ await createUserWithEmailAndPassword(auth,email,pass); }catch(x){ return lerr(friendlyError(x)); }
+  $("#regToggle").click(); registering=true;
+  try{ await apply(name,phone); }
+  catch(x){ finishForm("Your account was created, but the application didn't send: "+friendlyError(x)+" Try again below."); }
+  finally{ registering=false; }
+};
+$("#soundBtn").onclick=()=>{ if(enableSound()){ chime(); $("#soundBtn").textContent="Alerts on"; $("#soundBtn").disabled=true; } };
+
+// ---------- Kitchen board ----------
+// Orders being cooked, oldest first. Items added to a dine-in order bring it back with "Items added".
+const sentAt=o=>o.addedAt?.toDate?.()||o.createdAt?.toDate?.()||null;
+const key=o=>o.id+":"+(o.addedAt?.toMillis?.()||0);
+function start(){
+  stopOrders=onSnapshot(query(collection(db,"orders"),where("status","==","preparing")), s=>{
+    orders=s.docs.map(d=>({id:d.id,...d.data()}));
+    const keys=new Set(orders.map(key));
+    if(known && [...keys].some(k=>!known.has(k))) chime(); // a new ticket, or items added
+    known=keys; render();
+  }, e=>{ $("#kBoard").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; });
+}
+function render(){
+  const list=[...orders].sort((a,b)=>(sentAt(a)?.getTime()??Infinity)-(sentAt(b)?.getTime()??Infinity));
+  $("#kCount").textContent=list.length;
+  $("#kBoard").innerHTML=list.length?list.map(o=>{
+    const d=sentAt(o), min=d?Math.max(0,Math.floor((Date.now()-d.getTime())/60000)):0;
+    const dineIn=o.mode==="Dine-in", del=o.mode==="Delivery";
+    const [set,label]=dineIn?["completed","Served"]:del?["ready","Food ready"]:["ready_pickup","Ready for pickup"];
+    return `<div class="kt${o.addedAt?" added":""}${min>=15?" late":""}">
+      <div class="khead"><span class="kcode">${esc(o.code)}</span><span class="kwait">${min} min</span></div>
+      <div class="chips"><span class="pill ${del?"work":dineIn?"go":"brand"}">${esc(o.mode)}</span>${o.addedAt?`<span class="pill new">Items added</span>`:""}${o.table?`<span class="pill">${esc(o.table)}</span>`:""}</div>
+      ${itemsHTML(o,false)}
+      ${o.notes?`<div class="knotes">${esc(o.notes)}</div>`:""}
+      <button class="btn big ok" data-set="${set}" data-id="${esc(o.id)}">${label}</button></div>`;
+  }).join(""):`<p class="empty">Nothing to cook right now.</p>`;
+}
+setInterval(()=>{ if(!$("#dash").hidden) render(); },30000); // keeps the minutes current
+$("#kBoard").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-set]"); if(!b) return;
+  b.disabled=true;
+  try{ await updateDoc(doc(db,"orders",b.dataset.id),{status:b.dataset.set,[b.dataset.set+"At"]:serverTimestamp()}); }
+  catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
+});
+</script>
+</body>
+</html>

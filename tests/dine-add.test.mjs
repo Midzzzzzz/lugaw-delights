@@ -31,7 +31,7 @@ await t("adding can't lower the total", () => assertFails(add(s1, "a1", { items:
 await t("total must cover the subtotal (no free money)", () => assertFails(add(s1, "a1", { items: [...two, coke], subtotal: 200, total: 150 })));
 await t("total must equal the new subtotal", () => assertFails(add(s1, "a1", { items: [...two, coke, { ...coke, round: 3 }], subtotal: 128, total: 999 })));
 await t("order must go back to the kitchen", () => assertFails(add(s1, "a1", { items: [...two, coke, { ...coke, round: 3 }], subtotal: 128, total: 128, status: "completed" })));
-await t("can't add to an order that's already paid", () => assertFails(add(s1, "a2")));
+await t("can add to an order that's already paid (the extra shows as a balance)", () => assertSucceeds(add(s1, "a2")));
 await t("can't add to a cancelled order", () => assertFails(add(s1, "a3")));
 await t("can't add items to a delivery order", () => assertFails(add(s1, "a4")));
 await t("customer can't add items", () => assertFails(add(as("cust", "anonymous"), "a1", { items: [...two, coke, { ...coke, round: 3 }], subtotal: 128, total: 128 })));
@@ -50,7 +50,7 @@ await t("the removal log can't be erased", () => assertFails(updateDoc(doc(s1, "
 await t("can't remove everything (cancel the order instead)", () => assertFails(updateDoc(doc(s1, "orders/c1"),
   { items: [], subtotal: 0, total: 0, removed: [...log().removed, { id: "R01", name: "R", price: 69, qty: 1, by: "S", at: 2 }], editedAt: serverTimestamp(), editedBy: "s1", editedByName: "S" })));
 await seed(db => updateDoc(doc(db, "orders/c1"), { cashGiven: 100 }));
-await t("can't change an order after it's paid", () => assertFails(updateDoc(doc(s1, "orders/c1"),
-  { items: [{ ...swap, qty: 2 }], subtotal: 138, total: 138, status: "preparing", addedAt: serverTimestamp() })));
+await t("can change an order after it's paid (older order: paidTotal filled in)", () => assertSucceeds(updateDoc(doc(s1, "orders/c1"),
+  { items: [{ ...swap, qty: 2 }], subtotal: 138, total: 138, status: "preparing", addedAt: serverTimestamp(), paidTotal: 69 })));
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);

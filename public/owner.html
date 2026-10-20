@@ -36,6 +36,41 @@ table.orders tr.row:hover td{background:var(--sunk)}
 table.orders td.n,table.orders th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .detail td{background:var(--sunk)}
 .search{max-width:220px}
+/* Menu editor */
+.msec{border:2px solid var(--line);border-radius:14px;padding:12px;margin-top:12px;display:grid;gap:8px}
+.mhead{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.mhead input[data-f="name"]{font-family:var(--display);font-weight:800;font-size:1.05rem;flex:1;min-width:180px}
+.cats2{display:flex;flex-wrap:wrap;gap:6px}
+.mitem{border-top:1px dashed var(--line);padding:6px 0}
+.mrow{display:grid;grid-template-columns:64px minmax(150px,2fr) 90px minmax(140px,2fr) auto auto auto;gap:6px;align-items:center}
+@media (max-width:760px){.mrow{grid-template-columns:64px 1fr 90px}.mrow input[data-f="inc"]{grid-column:2/-1}.mrow>.chk,.mrow>[data-mact="recipe"],.mrow>.mbtns{grid-column:2/-1;justify-self:start}}
+.mph{display:grid;gap:2px;justify-items:center}
+.mph img{width:60px;height:60px;object-fit:cover;border-radius:10px;display:block}
+.mph button{border:0;background:transparent;color:var(--brand-deep);font-size:.72rem;font-weight:700;cursor:pointer;padding:0}
+.mph .addph{width:60px;height:60px;border:2px dashed var(--line);border-radius:10px;color:var(--muted);font-size:.78rem}
+.srows{display:grid;gap:4px;margin-top:8px;max-height:320px;overflow-y:auto}
+.srow{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px dashed var(--line);padding:4px 0}
+.sstep{display:inline-flex;align-items:center;gap:8px}
+.sstep button{width:34px;height:30px;border:2px solid var(--brand);border-radius:99px;background:transparent;color:var(--brand);font-weight:800;cursor:pointer}
+.sstep button:disabled{opacity:.35}
+.rsum{font-size:.8rem;margin-top:3px}
+.recipe{background:var(--sunk);border-radius:10px;padding:10px;margin-top:6px;display:grid;gap:6px}
+.rrow2{display:grid;grid-template-columns:minmax(120px,1fr) 100px auto auto;gap:6px;align-items:center;max-width:520px}
+.rrow2 button{border:2px solid var(--line);background:transparent;border-radius:8px;padding:4px 9px;cursor:pointer;font-weight:700}
+.chk{display:inline-flex;gap:5px;align-items:center;font-size:.85rem;font-weight:700;white-space:nowrap;cursor:pointer}
+.chk input{width:auto}
+.mbtns{display:flex;gap:4px}
+.mbtns button,.mhead button.mini{border:2px solid var(--line);background:transparent;border-radius:8px;padding:4px 9px;cursor:pointer;font-weight:700}
+.msave{position:sticky;bottom:0;background:var(--bg);padding:10px 0;display:flex;flex-wrap:wrap;gap:8px;align-items:center;border-top:2px solid var(--line);margin-top:12px;z-index:3}
+/* Inventory */
+table.inv{width:100%;border-collapse:collapse;font-size:.9rem}
+table.inv th{text-align:left;color:var(--muted);font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;border-bottom:2px solid var(--line)}
+table.inv td{padding:6px 8px;border-bottom:1px solid var(--line)}
+table.inv td.n,table.inv th.n{text-align:right;font-variant-numeric:tabular-nums}
+table.inv tr.low td{background:var(--warn-bg)}
+table.inv tr.out td{background:var(--sunk);color:var(--brand-deep);font-weight:700}
+table.inv tr.sec td{font-weight:800;color:var(--brand-deep);padding-top:12px}
+table.inv input{width:90px;text-align:right;padding:5px 8px}
 </style>
 </head>
 <body>
@@ -76,12 +111,12 @@ table.orders td.n,table.orders th.n{text-align:right;font-variant-numeric:tabula
 
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
-import { auth, db, isConfigured, ITEMS, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
+import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
 const $=s=>document.querySelector(s);
-let ledger=[], ledgerErr="", agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], riders=[], contacts={}, open=null, teamErr="";
+let ledger=[], ledgerErr="", agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], kitchen=[], riders=[], contacts={}, open=null, teamErr="";
 let range="today", tab="sales", filter="all", search="";
 const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
 $("#setup").innerHTML=setupNotice();
@@ -97,7 +132,7 @@ if(isConfigured) onAuthStateChanged(auth, async u=>{
     show("notAdmin");
     // Seller and rider accounts get a plain refusal; only a brand-new account sees the owner setup steps
     let staffAccount=false;
-    try{ staffAccount=(await getDoc(doc(db,"sellers",me.uid))).exists() || (await getDoc(doc(db,"riders",me.uid))).exists(); }catch(_){}
+    try{ staffAccount=(await getDoc(doc(db,"sellers",me.uid))).exists() || (await getDoc(doc(db,"kitchen",me.uid))).exists() || (await getDoc(doc(db,"riders",me.uid))).exists(); }catch(_){}
     if(staffAccount){
       $("#notAdmin").innerHTML=`<h2 style="color:var(--brand)">Owner only</h2>
         <p>This page is for the shop owner. Please sign out.</p>`;
@@ -128,6 +163,7 @@ function start(){
     ledger=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.date===b.date?t(b)-t(a):(a.date<b.date?1:-1)); ledgerErr=""; if(tab==="savings") render();
   }, e=>{ ledgerErr="Couldn't load savings: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; if(tab==="savings") render(); }));
   subs.push(onSnapshot(collection(db,"sellers"), s=>{ sellers=s.docs.map(d=>({id:d.id,...d.data()})); teamErr=""; render(); }, e=>{ teamErr="Couldn't load sellers: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; render(); }));
+  subs.push(onSnapshot(collection(db,"kitchen"), s=>{ kitchen=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   subs.push(onSnapshot(collection(db,"riders"), s=>{ riders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   // Signed rider agreements, by rider id
   subs.push(onSnapshot(collection(db,"agreements"), s=>{ agreements={}; s.docs.forEach(d=>agreements[d.id]=d.data()); render(); }, ()=>{}));
@@ -146,6 +182,18 @@ function start(){
     }
     deliveryFees=s.data().fees||{}; feesSaved=true; feesErr=""; if(tab==="settings" && !editing()) render();
   }, x=>{ feesErr="Couldn't load the delivery fees: "+friendlyError(x); if(tab==="settings") render(); }));
+  // The owner's menu (settings/menu) and inventory counts
+  // Saved menu changes (recipes, prices) count right away, without a refresh
+  subs.push(onSnapshot(doc(db,"settings","menu"), s=>{
+    menuDoc=s.exists()?s.data():null; if(menuDoc) applyMenu(menuDoc.sections);
+    const open=openCount(); if(open && invKey.startsWith(open.id+":")) publishStock(ingredientsLeft(open,invOrders));
+    if(tab==="menu"||tab==="inventory") render();
+  }, ()=>{}));
+  subs.push(onSnapshot(collection(db,"menuPhotos"), s=>{ photos={}; s.docs.forEach(d=>photos[d.id]=d.data().photo); if(tab==="menu") render(); }, ()=>{}));
+  subs.push(onSnapshot(doc(db,"settings","ingredients"), s=>{ ingDoc=s.exists()?s.data():null; if(tab==="menu"||tab==="inventory") render(); }, ()=>{}));
+  subs.push(onSnapshot(query(collection(db,"inventory"),orderBy("since","desc"),limit(30)), s=>{
+    counts=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})); countsErr=""; if(tab==="inventory") render();
+  }, e=>{ countsErr="Couldn't load inventory: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; if(tab==="inventory") render(); }));
   renderRanges(); watchOrders();
 }
 
@@ -220,14 +268,16 @@ function render(force){
   $("#sFees").textContent=peso(done.reduce((s,o)=>s+(o.deliveryFee||0),0));
   $("#sOpen").textContent=orders.filter(o=>ACTIVE.includes(o.status)).length;
   $("#sCancel").textContent=orders.filter(o=>o.status==="cancelled").length;
-  const pending=sellers.filter(s=>s.status==="pending").length+riders.filter(r=>r.status==="pending").length;
-  $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Sellers & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["savings","Savings"],["settings","Shop settings"]]
+  const pending=sellers.filter(s=>s.status==="pending").length+kitchen.filter(k=>k.status==="pending").length+riders.filter(r=>r.status==="pending").length;
+  $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Staff & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["savings","Savings"],["menu","Menu"],["inventory","Inventory"],["settings","Shop settings"]]
     .map(([id,l,n])=>`<button class="${tab===id?"on":""}" data-tab="${id}">${l}${n?`<span class="count">${n}</span>`:""}</button>`).join("");
   if(tab==="sales") renderSales(done);
   else if(tab==="orders") renderOrders();
   else if(tab==="team") renderTeam();
   else if(tab==="reports") renderReports();
   else if(tab==="savings") renderSavings();
+  else if(tab==="menu") renderMenu();
+  else if(tab==="inventory") renderInventory();
   else renderSettings();
 }
 $("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]"); if(b){ tab=b.dataset.tab; render(); } });
@@ -278,19 +328,21 @@ function renderOrders(){
   const list=orders.filter(o=>filter==="all"||(filter==="active"&&ACTIVE.includes(o.status))||(filter==="done"&&isDone(o))||(filter==="cancelled"&&o.status==="cancelled"))
     .filter(o=>!q||[o.code,o.table,o.sellerName,o.riderName,o.mode].some(v=>String(v||"").toLowerCase().includes(q)));
   const shown=list.slice(0,300);
-  $("#view").innerHTML=`<div class="card" style="margin-top:12px">
-    <div class="toolbar">${FILTERS.map(([k,l])=>`<button class="chip ${filter===k?"on":""}" data-filter="${k}">${l}</button>`).join("")}
+  $("#view").innerHTML=(saleOpen?saleForm():"")+`<div class="card" style="margin-top:12px">
+    <div class="toolbar">${saleOpen?"":`<button class="btn small" data-sadd>+ Add a sale</button>`}${FILTERS.map(([k,l])=>`<button class="chip ${filter===k?"on":""}" data-filter="${k}">${l}</button>`).join("")}
       <input class="search" type="search" id="search" placeholder="Search code, table, seller…" value="${esc(search)}" aria-label="Search orders"></div>
-    <div class="tablewrap"><table class="orders"><thead><tr><th>Time</th><th>Code</th><th>Type</th><th>Seller</th><th>Rider</th><th>Status</th><th class="n">Total</th></tr></thead>
+    ${delBar(shown)}
+    <div class="tablewrap"><table class="orders"><thead><tr><th><input type="checkbox" data-pickall aria-label="Select all shown orders"${shown.length&&shown.every(o=>picked.has(o.id))?" checked":""}></th><th>Time</th><th>Code</th><th>Type</th><th>Seller</th><th>Rider</th><th>Status</th><th class="n">Total</th></tr></thead>
     <tbody>${shown.map(o=>`<tr class="row" data-open="${esc(o.id)}">
-      <td>${o.createdAt?.toDate?.().toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"just now"}</td>
+      <td><input type="checkbox" data-pick="${esc(o.id)}" aria-label="Select ${esc(o.code)}"${picked.has(o.id)?" checked":""}></td><td>${o.createdAt?.toDate?.().toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"just now"}</td>
       <td><b>${esc(o.code)}</b></td><td>${esc(o.mode)}${o.table?` · ${esc(o.table)}`:""}</td>
       <td>${o.sellerUid||o.sellerName?esc(sellerName(o)):`<span class="muted">—</span>`}</td>
       <td>${o.riderUid?esc(riderName(o)):`<span class="muted">—</span>`}</td>
-      <td><span class="pill ${esc(STATUS[o.status]?.tone||"off")}">${esc(statusLabel(o))}</span></td>
+      <td><span class="pill ${esc(STATUS[o.status]?.tone||"off")}">${esc(statusLabel(o))}</span>${o.manual?` <span class="pill">Added by owner</span>`:""}</td>
       <td class="n">${peso(o.total)}</td></tr>
-      ${open===o.id?`<tr class="detail"><td colspan="7">${detail(o)}</td></tr>`:""}`).join("")
-      || `<tr><td colspan="7" class="muted">No orders match.</td></tr>`}</tbody></table></div>
+      ${open===o.id?`<tr class="detail"><td colspan="8">${detail(o)}
+        <div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-delone="${esc(o.id)}">Delete order</button></div></td></tr>`:""}`).join("")
+      || `<tr><td colspan="8" class="muted">No orders match.</td></tr>`}</tbody></table></div>
     ${list.length>shown.length?`<p class="muted" style="font-size:.85rem">Showing the latest ${shown.length} of ${list.length}. Pick a shorter date range to see the rest.</p>`:""}
   </div>`;
 }
@@ -318,7 +370,49 @@ function detail(o){
     ${o.mode==="Delivery"&&o.riderUid?`<b style="display:block;margin-top:6px">Rider photos</b>${proofsFor(o.id)}`:""}
     <div class="muted" style="font-size:.85rem">Subtotal ${peso(o.subtotal)}${o.deliveryFee?` · delivery ${peso(o.deliveryFee)}`:""}${o.boxFee?` · boxes ${peso(o.boxFee)}`:""} · total ${peso(o.total)}</div>`;
 }
+// ---------- Deleting orders ----------
+// The owner can delete orders, e.g. test orders. Each order goes with its customer contact details
+// and delivery code. Deleted orders leave the sales totals and inventory counts; it can't be undone.
+const picked=new Set();
+let delMsg="";
+function delBar(shown){
+  const ids=[...picked].filter(id=>orders.some(o=>o.id===id));
+  if(!ids.length) return delMsg?`<p class="muted" style="font-size:.88rem;margin:8px 0 0">${esc(delMsg)}</p>`:"";
+  const total=ids.reduce((s,id)=>s+(orders.find(o=>o.id===id)?.total||0),0);
+  return `<div class="flag" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+    <span>${plural(ids.length,"order")} selected (${peso(total)}). Deleted orders disappear from sales and inventory and can't be brought back.</span>
+    <button class="btn small" data-delpicked>Delete ${plural(ids.length,"order")}</button>
+    <button class="btn ghost small" data-unpick>Clear selection</button></div>`;
+}
+async function deleteOrders(ids){
+  for(let i=0;i<ids.length;i+=150){ // 3 writes per order, 500 per batch
+    const b=writeBatch(db);
+    ids.slice(i,i+150).forEach(id=>{ b.delete(doc(db,"orders",id)); b.delete(doc(db,"contacts",id)); b.delete(doc(db,"pins",id)); });
+    await b.commit();
+  }
+}
+$("#view").addEventListener("change",e=>{
+  if(tab!=="orders") return;
+  if(e.target.type==="checkbox") e.target.blur(); // a focused box would hold back live updates
+  const p=e.target.closest("[data-pick]"); if(p){ if(p.checked) picked.add(p.dataset.pick); else picked.delete(p.dataset.pick); delMsg=""; return render(true); }
+  if(e.target.closest("[data-pickall]")){
+    const boxes=[...document.querySelectorAll("[data-pick]")];
+    boxes.forEach(b=>{ if(e.target.checked) picked.add(b.dataset.pick); else picked.delete(b.dataset.pick); }); delMsg=""; render(true);
+  }
+});
+$("#view").addEventListener("click",async e=>{
+  if(tab!=="orders") return;
+  const b=e.target.closest("[data-delpicked],[data-delone],[data-unpick]"); if(!b) return;
+  if(b.dataset.unpick!==undefined){ picked.clear(); return render(true); }
+  const ids=b.dataset.delone?[b.dataset.delone]:[...picked].filter(id=>orders.some(o=>o.id===id));
+  if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent=`Delete ${ids.length===1?"this order":plural(ids.length,"order")} for good? Tap again`; return; }
+  b.disabled=true; b.textContent="Deleting…";
+  try{ await deleteOrders(ids); ids.forEach(id=>picked.delete(id)); if(ids.includes(open)) open=null; delMsg=`Deleted ${plural(ids.length,"order")}.`; }
+  catch(x){ delMsg="Couldn't delete: "+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase."; }
+  render(true);
+});
 $("#view").addEventListener("click",e=>{
+  if(e.target.closest("[data-pick],[data-pickall],[data-delone],[data-delpicked],[data-unpick]")) return;
   const f=e.target.closest("[data-filter]"); if(f){ filter=f.dataset.filter; render(); return; }
   const r=e.target.closest("[data-open]"); if(r){ open=open===r.dataset.open?null:r.dataset.open; render(); }
 });
@@ -548,7 +642,7 @@ function payoutCell(r){
   return `${esc(payoutText(r))}${when?`<br><span class="muted" style="font-size:.85rem">Changed by the rider ${when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})}</span>`:""}`;
 }
 
-// ---------- Sellers & riders ----------
+// ---------- Staff & riders ----------
 const TONE={pending:"new",approved:"go",suspended:"work",rejected:"off"};
 const ORDER={pending:0,approved:1,suspended:2,rejected:3};
 const ACTS={pending:[["approved","Approve","btn ok"],["rejected","Reject","btn ghost small"]],
@@ -563,6 +657,9 @@ function renderTeam(){
   $("#view").innerHTML=`<h2 style="color:var(--brand-deep);margin:16px 0 4px">Sellers</h2>
     <p class="muted" style="margin:0 0 8px;font-size:.88rem">Sellers register at <b>seller.html</b>. Approve them here so they can take orders.</p>
     ${teamErr?`<div class="flag">${esc(teamErr)}</div>`:""}<div class="grid-cards">${sort(sellers).map(s=>card(s,"sellers","")).join("")||`<p class="empty">No seller applications yet.</p>`}</div>
+    <h2 style="color:var(--brand-deep);margin:20px 0 4px">Kitchen staff</h2>
+    <p class="muted" style="margin:0 0 8px;font-size:.88rem">Kitchen staff register at <b>kitchen.html</b>. They only see orders being cooked and mark food ready: no payments, customer details or sales.</p>
+    <div class="grid-cards">${sort(kitchen).map(k=>card(k,"kitchen","")).join("")||`<p class="empty">No kitchen staff applications yet.</p>`}</div>
     <h2 style="color:var(--brand-deep);margin:20px 0 4px">Riders</h2>
     <p class="muted" style="margin:0 0 8px;font-size:.88rem">Check their license, OR/CR and clearance in person before approving.</p>
     <div class="grid-cards">${sort(riders).map(r=>card(r,"riders",`<b>Area</b><span>${esc(r.area)}</span>
@@ -577,6 +674,398 @@ $("#view").addEventListener("click",async e=>{
   b.disabled=true;
   try{ await updateDoc(doc(db,b.dataset.kind,b.dataset.who),{status:b.dataset.st,...(b.dataset.kind==="riders"?{online:false}:{})}); }
   catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
+});
+// ---------- Menu ----------
+// The owner edits the menu here; it's saved in settings/menu and every page loads it when it
+// opens (customers and sellers see changes after a refresh). One category is shown at a time.
+// Each item can list the ingredients one serving uses (its recipe): inventory takes those off
+// for every order, and the item shows as sold out by itself when an ingredient runs short.
+// Item ids are never reused, so older orders keep pointing at the right item.
+let menuDoc=null, menuDraft=null, menuRetired=[], menuDirty=false, menuMsg="", menuCat=0, openRecipe=null;
+let ingDoc=null; // settings/ingredients: { list: [{ id, name, unit }] }
+const ingList=()=>ingDoc?.list||[];
+const ingName=id=>ingList().find(g=>g.id===id)?.name||"Removed ingredient";
+const ingUnit=id=>ingList().find(g=>g.id===id)?.unit||"";
+const clone=x=>JSON.parse(JSON.stringify(x));
+const savedMenu=()=>menuDoc?.sections||MENU_SECTIONS;
+function draftMenu(){
+  if(!menuDraft){ menuDraft=clone(savedMenu()).map(c=>({...c,items:(c.items||[]).map(it=>({...it,recipe:it.recipe||{}}))})); menuRetired=[...(menuDoc?.retired||[])]; menuDirty=false; }
+  if(menuCat>=menuDraft.length) menuCat=Math.max(0,menuDraft.length-1);
+  return menuDraft;
+}
+// A new id like "L12": the letters the category's items already use, and the next free number
+function newItemId(c){
+  const used=new Set(menuRetired); [savedMenu(),menuDraft].forEach(m=>m.forEach(s=>(s.items||[]).forEach(it=>used.add(it.id))));
+  const pre=(c.items.find(it=>/^[A-Z]+/.test(it.id))?.id.match(/^[A-Z]+/)[0])||(c.name.replace(/[^A-Za-z]/g,"")[0]||"X").toUpperCase();
+  let n=1; used.forEach(id=>{ const m=id.match(new RegExp("^"+pre+"(\\d+)$")); if(m) n=Math.max(n,+m[1]+1); });
+  let id; do{ id=pre+String(n++).padStart(2,"0"); }while(used.has(id));
+  return id;
+}
+const recipeText=r=>Object.entries(r||{}).map(([g,q])=>`${q} ${ingUnit(g)} ${ingName(g)}`.replace(/\s+/g," ")).join(", ");
+function recipePanel(si,ii,it){
+  const r=it.recipe||{}, have=ingList();
+  return `<div class="recipe"><b style="font-size:.85rem">Ingredients for one ${esc(it.name||"serving")}</b>
+    ${Object.entries(r).map(([g,q])=>`<div class="rrow2">
+      <select data-s="${si}" data-i="${ii}" data-rg="${esc(g)}" aria-label="Ingredient">${have.some(x=>x.id===g)?"":`<option value="${esc(g)}" selected>Removed ingredient</option>`}
+        ${have.map(x=>`<option value="${esc(x.id)}"${x.id===g?" selected":""}>${esc(x.name)}</option>`).join("")}</select>
+      <input type="number" inputmode="decimal" min="0" step="any" data-s="${si}" data-i="${ii}" data-rq="${esc(g)}" value="${esc(q)}" aria-label="Amount per serving">
+      <span class="muted">${esc(ingUnit(g))}</span>
+      <button data-mact="rdel" data-s="${si}" data-i="${ii}" data-g="${esc(g)}" aria-label="Remove ingredient">✕</button></div>`).join("")||`<p class="muted" style="margin:0;font-size:.85rem">No ingredients yet.</p>`}
+    <div class="btnrow">${have.length?`<button class="btn ghost small" data-mact="radd" data-s="${si}" data-i="${ii}"${have.every(x=>x.id in r)?" disabled":""}>+ Add ingredient</button>`:""}
+      ${"i_"+it.id in r?"":`<button class="btn ghost small" data-mact="rself" data-s="${si}" data-i="${ii}" title="For drinks and ready-made items: one order uses one of this item">Count this item itself</button>`}</div>
+    ${have.length?"":`<p class="muted" style="margin:0;font-size:.85rem">For items made from ingredients, add the ingredients first in the <b>Inventory</b> tab.</p>`}</div>`;
+}
+function renderMenu(){
+  const m=draftMenu(), c=m[menuCat];
+  $("#view").innerHTML=`<section class="card" style="margin-top:12px">
+    <h2 style="color:var(--brand-deep)">Menu</h2>
+    <p class="muted" style="margin:4px 0 8px;font-size:.88rem">Pick a category, then change names and prices, add or remove items, and set the ingredients each item uses.
+      An item shows as <b>sold out</b> by itself when the inventory runs short of an ingredient it needs. Tap <b>+ Photo</b> to show a picture of the food on the customer menu (photos are saved right away). Tap <b>Save menu</b> when you're done.
+      Customers and sellers see the new menu the next time they open or refresh the page or app.</p>
+    <div class="cats2">${m.map((s,i)=>`<button class="chip ${i===menuCat?"on":""}" data-mact="cat" data-s="${i}">${esc(s.name||"Untitled")} <span class="muted">${s.items.length}</span></button>`).join("")}
+      <button class="chip" data-mact="sadd">+ Category</button></div>
+    ${c?`<div class="msec">
+      <div class="mhead"><input data-s="${menuCat}" data-f="name" value="${esc(c.name)}" maxlength="60" aria-label="Category name">
+        <label class="chk"><input type="checkbox" data-s="${menuCat}" data-f="box"${c.box?" checked":""}> Take-out box fee</label>
+        <button class="mini" data-mact="sup" data-s="${menuCat}" aria-label="Move category left"${menuCat?"":" disabled"}>←</button>
+        <button class="mini" data-mact="sdown" data-s="${menuCat}" aria-label="Move category right"${menuCat<m.length-1?"":" disabled"}>→</button>
+        ${c.items.length?"":`<button class="mini" data-mact="sdel" data-s="${menuCat}">Delete category</button>`}</div>
+      ${c.items.map((it,ii)=>{ const si=menuCat, key=it.id, n=Object.keys(it.recipe||{}).length; return `<div class="mitem"><div class="mrow">
+        <span class="mph">${photos[key]?`<img src="${photos[key]}" alt="Photo of ${esc(it.name)}"><button data-photo="${esc(key)}">Change</button><button data-photodel="${esc(key)}">Remove</button>`
+          :`<button class="addph" data-photo="${esc(key)}" aria-label="Add a photo of ${esc(it.name||"this item")}">+ Photo</button>`}</span>
+        <input data-s="${si}" data-i="${ii}" data-f="name" value="${esc(it.name)}" maxlength="80" aria-label="Item name" placeholder="Item name">
+        <input data-s="${si}" data-i="${ii}" data-f="price" type="number" inputmode="numeric" min="0" step="1" value="${esc(it.price)}" aria-label="Price in pesos" placeholder="₱">
+        <input data-s="${si}" data-i="${ii}" data-f="inc" value="${esc(it.inc||"")}" maxlength="200" placeholder="Inclusions (optional)" aria-label="Inclusions">
+        <label class="chk"><input type="checkbox" data-s="${si}" data-i="${ii}" data-f="best"${it.best?" checked":""}> Best seller</label>
+        <button class="btn ghost small" data-mact="recipe" data-id="${esc(key)}" aria-expanded="${openRecipe===key}">Ingredients${n?` (${n})`:""}</button>
+        <span class="mbtns"><button data-mact="iup" data-s="${si}" data-i="${ii}" aria-label="Move up"${ii?"":" disabled"}>↑</button>
+          <button data-mact="idown" data-s="${si}" data-i="${ii}" aria-label="Move down"${ii<c.items.length-1?"":" disabled"}>↓</button>
+          <button data-mact="idel" data-s="${si}" data-i="${ii}">Delete</button></span></div>
+        ${openRecipe===key?recipePanel(si,ii,it):n?`<div class="muted rsum">${esc(recipeText(it.recipe))}</div>`:""}</div>`; }).join("")}
+      <div><button class="btn ghost small" data-mact="iadd" data-s="${menuCat}">+ Add item</button></div></div>`:`<p class="empty">No categories yet.</p>`}
+    ${photoMsg?`<p class="flag" style="margin-top:10px">${esc(photoMsg)}</p>`:""}
+    <div class="msave"><button class="btn" data-mact="save"${menuDirty?"":" disabled"}>Save menu</button>
+      <button class="btn ghost small" data-mact="discard"${menuDirty?"":" disabled"}>Discard changes</button>
+      <span id="menuMsg" class="muted" style="font-size:.88rem">${esc(menuMsg||(menuDirty?"You have unsaved changes.":menuDoc?"":"This is the starting menu from config.js. Saving it lets you edit it here from now on."))}</span></div>
+  </section>`;
+}
+const menuChanged=()=>{ menuDirty=true; menuMsg="";
+  document.querySelectorAll('[data-mact="save"],[data-mact="discard"]').forEach(b=>b.disabled=false);
+  const m=$("#menuMsg"); if(m) m.textContent="You have unsaved changes."; };
+$("#view").addEventListener("input",e=>{
+  const el=e.target; if(tab!=="menu") return;
+  if(el.dataset.rq!=null){ const it=menuDraft[+el.dataset.s].items[+el.dataset.i]; it.recipe[el.dataset.rq]=el.value===""?0:Math.max(0,Number(el.value)); return menuChanged(); }
+  if(!el.dataset.f || el.type==="checkbox") return;
+  const c=menuDraft[+el.dataset.s], it=el.dataset.i!=null?c.items[+el.dataset.i]:null;
+  if(it) it[el.dataset.f]=el.dataset.f==="price"?(el.value===""?"":Math.floor(Number(el.value))):el.value; else c[el.dataset.f]=el.value;
+  menuChanged();
+});
+$("#view").addEventListener("change",e=>{
+  const el=e.target; if(tab!=="menu") return;
+  if(el.dataset.rg!=null){ // swap an ingredient in a recipe, keeping its amount and place
+    const it=menuDraft[+el.dataset.s].items[+el.dataset.i], from=el.dataset.rg, to=el.value;
+    if(to!==from && !(to in it.recipe)){ const r={}; Object.entries(it.recipe).forEach(([g,q])=>r[g===from?to:g]=q); it.recipe=r; }
+    menuChanged(); return render(true);
+  }
+  if(el.type!=="checkbox" || !el.dataset.f) return;
+  const c=menuDraft[+el.dataset.s], it=el.dataset.i!=null?c.items[+el.dataset.i]:null;
+  if(it) it[el.dataset.f]=el.checked; else c[el.dataset.f]=el.checked;
+  menuChanged();
+});
+$("#view").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-mact]"); if(!b || tab!=="menu") return;
+  const a=b.dataset.mact, m=menuDraft, si=+b.dataset.s, ii=+b.dataset.i, c=m[si];
+  const swap=(arr,i,j)=>{ [arr[i],arr[j]]=[arr[j],arr[i]]; };
+  if(a==="save") return saveMenu(b);
+  if(a==="discard"){ menuDraft=null; menuMsg=""; openRecipe=null; return render(true); }
+  if(a==="cat"){ menuCat=si; openRecipe=null; return render(true); }
+  if(a==="recipe"){ openRecipe=openRecipe===b.dataset.id?null:b.dataset.id; return render(true); }
+  if(a==="idel"){
+    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Delete? Tap again"; return; }
+    menuRetired.push(c.items[ii].id); c.items.splice(ii,1);
+  }
+  else if(a==="iadd"){ const it={id:newItemId(c),name:"",price:"",inc:"",best:false,recipe:{}}; c.items.push(it); openRecipe=null; }
+  else if(a==="radd"){ const it=c.items[ii], g=ingList().find(x=>!(x.id in it.recipe)); if(g) it.recipe[g.id]=1; }
+  else if(a==="rdel"){ delete c.items[ii].recipe[b.dataset.g]; }
+  else if(a==="rself"){
+    // The item counts as its own ingredient (e.g. Coke: 1 bottle per order); added to the ingredient list now
+    const it=c.items[ii], gid="i_"+it.id;
+    if(!String(it.name).trim()){ menuMsg="Give the item a name first."; return render(true); }
+    if(!ingList().some(g=>g.id===gid)){
+      b.disabled=true;
+      try{ await setDoc(doc(db,"settings","ingredients"),{list:[...ingList(),{id:gid,name:String(it.name).trim(),unit:"pcs"}],updatedAt:serverTimestamp()}); }
+      catch(x){ menuMsg="Couldn't add it: "+friendlyError(x); return render(true); }
+    }
+    it.recipe={...it.recipe,[gid]:1};
+  }
+  else if(a==="iup") swap(c.items,ii,ii-1);
+  else if(a==="idown") swap(c.items,ii,ii+1);
+  else if(a==="sup"){ swap(m,si,si-1); menuCat=si-1; }
+  else if(a==="sdown"){ swap(m,si,si+1); menuCat=si+1; }
+  else if(a==="sdel"){ m.splice(si,1); menuCat=Math.max(0,si-1); }
+  else if(a==="sadd"){ m.push({id:"s"+Date.now().toString(36),name:"New category",box:false,note:"",items:[]}); menuCat=m.length-1; }
+  menuDirty=true; menuMsg=""; render(true);
+  if(a==="iadd"){ const rows=document.querySelectorAll(".mitem"); rows[rows.length-1]?.querySelector('input[data-f="name"]')?.focus(); }
+  if(a==="sadd") document.querySelector('.mhead input[data-f="name"]')?.select();
+});
+async function saveMenu(b){
+  const m=menuDraft, bad=[];
+  m.forEach(c=>{ if(!String(c.name).trim()) bad.push("a category has no name");
+    c.items.forEach(it=>{ if(!String(it.name).trim()) bad.push(`an item in ${c.name||"a category"} has no name`);
+      if(!Number.isInteger(it.price) || it.price<0 || it.price>99999) bad.push(`${it.name||"an item"} needs a price in whole pesos`);
+      if(Object.values(it.recipe||{}).some(q=>!(q>0))) bad.push(`an ingredient of ${it.name||"an item"} needs an amount`); }); });
+  if(bad.length){ menuMsg="Can't save yet: "+[...new Set(bad)].slice(0,3).join("; ")+"."; return render(true); }
+  // Remember earlier prices so orders placed before the change still pass the price check
+  const old=new Map(); savedMenu().forEach(c=>(c.items||[]).forEach(it=>old.set(it.id,it)));
+  const sections=m.map(c=>({ id:c.id, name:String(c.name).trim(), box:!!c.box, note:c.note||"",
+    items:c.items.map(it=>{
+      const o=old.get(it.id); let was=[...(it.was||[])];
+      if(o && o.price!==it.price && !was.includes(o.price)) was=[o.price,...was].slice(0,5);
+      was=was.filter(p=>p!==it.price);
+      const recipe=Object.keys(it.recipe||{}).length?{recipe:it.recipe}:{};
+      return { id:it.id, name:String(it.name).trim(), price:it.price, inc:String(it.inc||"").trim(), best:!!it.best, ...recipe, ...(was.length?{was}:{}) };
+    }) }));
+  b.disabled=true; menuMsg="Saving…"; $("#menuMsg").textContent=menuMsg;
+  try{
+    await setDoc(doc(db,"settings","menu"),{sections,retired:[...new Set(menuRetired)],updatedAt:serverTimestamp()});
+    menuDraft=null; openRecipe=null; menuMsg="Saved. Refresh the customer page and seller app to see the new menu.";
+  }catch(x){ menuMsg="Couldn't save: "+friendlyError(x); }
+  render(true);
+}
+
+// ---------- Inventory (by ingredient) ----------
+// The owner keeps a list of ingredients (egg, rice, chicken…). At the start of a shift they
+// record how much of each they have. Every order placed since then (not cancelled) takes off
+// what its items use (recipe × quantity), so the table shows what's left, and items whose
+// ingredients run short show as sold out. Ending the shift saves the breakdown.
+let counts=[], countsErr="", invView=null, invEdit=false, invDraft={}, invOrders=[], invSub=null, invKey="", invMsg="";
+let ingDraft=null, ingMsg="", ingOpen=false;
+const UNITS=["pcs","g","kg","ml","L","cups","packs","servings"];
+const openCount=()=>counts.find(c=>!c.closedAt);
+const tsDate=t=>t?.toDate?.()||null;
+const when=t=>tsDate(t)?.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})||"—";
+const fmtQ=n=>String(Math.round(n*100)/100);
+// Orders placed during a count (a finished count keeps its own saved breakdown)
+function watchInv(c){
+  const key=c?c.id+":"+(tsDate(c.since)?.getTime()||0)+":"+(tsDate(c.closedAt)?.getTime()||0):"";
+  if(key===invKey) return; invSub?.(); invSub=null; invKey=key; invOrders=[];
+  if(!c || !tsDate(c.since) || c.result) return;
+  const w=[where("createdAt",">=",c.since)]; if(c.closedAt) w.push(where("createdAt","<",c.closedAt));
+  invSub=onSnapshot(query(collection(db,"orders"),...w,orderBy("createdAt","desc")),
+    s=>{ invOrders=s.docs.map(d=>d.data()); if(tab==="inventory") render();
+      if(!c.closedAt && c.id===openCount()?.id) publishStock(ingredientsLeft(c,invOrders)); }, ()=>{});
+}
+// One row per counted ingredient: beginning, used, left
+function breakdown(c){
+  const left=c.result?null:ingredientsLeft({...c,closedAt:null},invOrders);
+  return Object.keys(c.items||{}).map(id=>{
+    const begin=c.items[id], l=c.result?(c.result[id]?.remaining??begin):left[id];
+    return { id, name:ingName(id), unit:ingUnit(id), begin, used:Math.round((begin-l)*100)/100, left:l };
+  });
+}
+// Publish the items that are sold out right now for the customer page (the seller dashboard
+// does the same as orders come in). Only written when the list changes.
+// left: what's left of each counted ingredient (null when no count is open)
+let lastSoldOut="";
+function publishStock(left){
+  const soldOut=soldOutFrom(left), k=JSON.stringify([soldOut,left||{}]); if(k===lastSoldOut) return; lastSoldOut=k;
+  setDoc(doc(db,"settings","stock"),{soldOut,left:left||{},updatedAt:serverTimestamp()}).catch(()=>{ lastSoldOut=""; });
+}
+const isLow=r=>r.left>0 && r.left<=r.begin*0.2;
+// Items ordered during the count that took nothing off: no ingredients set in the Menu tab,
+// or their ingredients aren't in this count
+function notCounted(c){
+  const n={};
+  invOrders.filter(o=>o.status!=="cancelled").forEach(o=>(o.items||[]).forEach(it=>{
+    if(!Object.keys(ITEMS[it.id]?.recipe||{}).some(g=>g in (c.items||{}))) n[it.id]=(n[it.id]||0)+(Number(it.qty)||0); }));
+  const list=Object.entries(n).map(([id,q])=>`${ITEMS[id]?.name||id} ×${q}`);
+  return list.length?`<div class="flag" style="margin-top:8px">Not counted: ${esc(list.join(", "))}. These items have no ingredients in this count.
+    In the <b>Menu</b> tab, open <b>Ingredients</b> on each one (for drinks, tap <b>Count this item itself</b>), then add it to the count with <b>Change beginning stock</b>.</div>`:"";
+}
+function invTable(rows){
+  if(!rows.length) return `<p class="empty">No ingredients counted.</p>`;
+  return `<div class="tablewrap"><table class="inv"><thead><tr><th>Ingredient</th><th class="n">Beginning</th><th class="n">Used</th><th class="n">Left</th><th class="n">To restock</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr class="${r.left<=0?"out":isLow(r)?"low":""}"><td>${esc(r.name)}${r.left<=0?" · out":isLow(r)?" · low":""}</td>
+      <td class="n">${fmtQ(r.begin)} ${esc(r.unit)}</td><td class="n">${fmtQ(r.used)}</td><td class="n">${fmtQ(r.left)}</td><td class="n"><b>${fmtQ(Math.max(0,r.used))} ${esc(r.unit)}</b></td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+function ingEditor(){
+  const l=ingDraft||(ingDraft=clone(ingList()));
+  return `<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep);font-size:1.1rem">Ingredients</h2>
+    <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Everything you want to keep count of. Then, in the <b>Menu</b> tab, open <b>Ingredients</b> on each item to say how much one serving uses.</p>
+    ${l.map((g,i)=>`<div class="rrow2"><input data-ing="${i}" data-f="name" value="${esc(g.name)}" maxlength="60" placeholder="e.g. Egg" aria-label="Ingredient name">
+      <select data-ing="${i}" data-f="unit" aria-label="Unit">${[...new Set([...UNITS,g.unit])].map(u=>`<option${u===g.unit?" selected":""}>${esc(u)}</option>`).join("")}</select>
+      <button data-iact="ingdel" data-i="${i}" aria-label="Remove ingredient">✕</button></div>`).join("")||`<p class="empty">No ingredients yet.</p>`}
+    <div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-iact="ingadd">+ Add ingredient</button>
+      <button class="btn small" data-iact="ingsave">Save ingredients</button><button class="btn ghost small" data-iact="ingclose">Close</button>
+      <span class="muted" style="font-size:.88rem">${esc(ingMsg)}</span></div></section>`;
+}
+function invForm(c){
+  const rows=ingList().map(g=>`<tr><td>${esc(g.name)}</td><td class="n"><input type="number" inputmode="decimal" min="0" step="any" data-inv="${esc(g.id)}" value="${invDraft[g.id]??""}" aria-label="Beginning amount of ${esc(g.name)}"> ${esc(g.unit)}</td></tr>`).join("");
+  const last=counts.find(x=>x.closedAt);
+  if(!ingList().length) return `<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep)">Start a count</h2>
+    <p>First add your ingredients (egg, rice, chicken…), then set what each menu item uses in the <b>Menu</b> tab.</p>
+    <button class="btn" data-iact="ingopen">Add ingredients</button></section>`;
+  return `<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep)">${c?"Change the beginning stock":"Start a count"}</h2>
+    <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Type how much of each ingredient you have at the start of the shift.
+      Leave one blank to not count it. ${c?"If more stock arrived, add it to the number here.":"Orders from the moment you tap <b>Start count</b> are taken off."}</p>
+    ${!c&&last?`<button class="btn ghost small" data-iact="copy">Fill in what was left last shift</button>`:""}
+    <div class="tablewrap"><table class="inv"><thead><tr><th>Ingredient</th><th class="n">Beginning stock</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="err">${esc(invMsg)}</p>
+    <div class="btnrow" style="margin-top:8px"><button class="btn" data-iact="${c?"saveEdit":"start"}">${c?"Save stock":"Start count"}</button>
+      ${c?`<button class="btn ghost small" data-iact="cancelEdit">Cancel</button>`:""}</div></section>`;
+}
+function renderInventory(){
+  const open=openCount(), view=invView?counts.find(c=>c.id===invView):open;
+  watchInv(invEdit?null:view);
+  let main;
+  if(countsErr) main=`<div class="flag" style="margin-top:12px">${esc(countsErr)}</div>`;
+  else if(invEdit || !view) main=invForm(invEdit?open:null);
+  else {
+    const rows=breakdown(view), live=!view.closedAt;
+    const out=live?soldOutFrom(ingredientsLeft(view,invOrders)).map(id=>ITEMS[id]?.name).filter(Boolean):[];
+    main=`<section class="card" style="margin-top:12px">
+      <h2 style="color:var(--brand-deep)">${live?"Current shift":"Shift ended"}</h2>
+      <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Started ${esc(when(view.since))}${view.closedAt?` · ended ${esc(when(view.closedAt))}`:" · counting orders as they come in"}.
+        ${live?"Yellow rows are running low, red rows are out.":""} <b>To restock</b> is how much was used: what you need to fill back up to the beginning stock.</p>
+      ${invTable(rows)}
+      ${live?`<p style="margin:10px 0 0;font-size:.9rem"><b>Sold out now:</b> ${out.length?esc(out.join(", ")):"nothing"}</p>${notCounted(view)}`:""}
+      <div class="btnrow" style="margin-top:10px">${live?`<button class="btn ghost small" data-iact="edit">Change beginning stock</button>
+        <button class="btn" data-iact="end">End shift</button>`:(open?"":`<button class="btn" data-iact="new">Start next count</button>`)}
+        ${invView?`<button class="btn ghost small" data-iact="back">Back to ${open?"current shift":"inventory"}</button>`:""}</div></section>`;
+  }
+  const past=counts.filter(c=>c.closedAt);
+  $("#view").innerHTML=main+(ingOpen?ingEditor():`<div style="margin-top:12px"><button class="btn ghost small" data-iact="ingopen">Ingredients list (${ingList().length})</button></div>`)
+    +(past.length?`<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep);font-size:1.1rem">Past shifts</h2>
+    <div class="btnrow" style="margin-top:8px">${past.map(c=>`<button class="chip ${invView===c.id?"on":""}" data-iact="view" data-id="${esc(c.id)}">${esc(when(c.since))}</button>`).join("")}</div></section>`:"");
+}
+$("#view").addEventListener("input",e=>{ if(tab!=="inventory") return;
+  const i=e.target.closest("[data-inv]"); if(i){ invDraft[i.dataset.inv]=i.value===""?null:Math.max(0,Number(i.value)); return; }
+  const g=e.target.closest("[data-ing]"); if(g){ ingDraft[+g.dataset.ing][g.dataset.f]=g.value; ingMsg="Not saved yet."; } });
+$("#view").addEventListener("change",e=>{ const g=e.target.closest("select[data-ing]"); if(g && tab==="inventory"){ ingDraft[+g.dataset.ing].unit=g.value; ingMsg="Not saved yet."; } });
+$("#view").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-iact]"); if(!b || tab!=="inventory") return;
+  const a=b.dataset.iact, open=openCount();
+  const items=()=>{ const o={}; Object.entries(invDraft).forEach(([k,v])=>{ if(typeof v==="number" && v>=0 && ingList().some(g=>g.id===k)) o[k]=v; }); return o; };
+  invMsg="";
+  if(a==="ingopen"){ ingOpen=true; ingDraft=null; ingMsg=""; return render(true); }
+  if(a==="ingclose"){ ingOpen=false; ingDraft=null; return render(true); }
+  if(a==="ingadd"){ ingDraft.push({id:"g"+Date.now().toString(36),name:"",unit:"pcs"}); render(true); const r=document.querySelectorAll('[data-ing][data-f="name"]'); r[r.length-1]?.focus(); return; }
+  if(a==="ingdel"){ if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Remove?"; return; } ingDraft.splice(+b.dataset.i,1); ingMsg="Not saved yet."; return render(true); }
+  if(a==="ingsave"){
+    const list=ingDraft.map(g=>({id:g.id,name:String(g.name).trim(),unit:g.unit||"pcs"}));
+    if(list.some(g=>!g.name)){ ingMsg="Every ingredient needs a name."; return render(true); }
+    b.disabled=true;
+    try{ await setDoc(doc(db,"settings","ingredients"),{list,updatedAt:serverTimestamp()}); ingMsg="Saved."; ingDraft=null; }
+    catch(x){ ingMsg=friendlyError(x); }
+    return render(true);
+  }
+  if(a==="view"){ invView=b.dataset.id; invEdit=false; return render(true); }
+  if(a==="back"){ invView=null; return render(true); }
+  if(a==="new"){ invView="_none"; invEdit=false; invDraft={}; return render(true); }
+  if(a==="edit"){ invEdit=true; invDraft={...open.items}; return render(true); }
+  if(a==="cancelEdit"){ invEdit=false; return render(true); }
+  if(a==="copy"){ const last=counts.find(x=>x.closedAt); invDraft={}; Object.entries(last.result||{}).forEach(([k,r])=>invDraft[k]=Math.max(0,r.remaining)); return render(true); }
+  if(a==="start" || a==="saveEdit"){
+    const it=items(); if(!Object.keys(it).length){ invMsg="Type the beginning stock of at least one ingredient."; return render(true); }
+    b.disabled=true;
+    try{
+      if(a==="start"){
+        await addDoc(collection(db,"inventory"),{since:serverTimestamp(),createdAt:serverTimestamp(),closedAt:null,items:it,by:auth.currentUser.uid});
+        publishStock(ingredientsLeft({items:it,since:{toMillis:()=>Date.now()}},[]));
+      } else {
+        await updateDoc(doc(db,"inventory",open.id),{items:it});
+        publishStock(ingredientsLeft({...open,items:it},invOrders));
+      }
+      invEdit=false; invDraft={}; invView=null;
+    }catch(x){ invMsg=friendlyError(x); b.disabled=false; }
+    return render(true);
+  }
+  if(a==="end"){
+    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="End the shift now? Tap again"; return; }
+    const result={}; breakdown(open).forEach(r=>result[r.id]={used:r.used,remaining:r.left});
+    b.disabled=true;
+    try{ await updateDoc(doc(db,"inventory",open.id),{closedAt:serverTimestamp(),result}); publishStock(null); invView=open.id; }
+    catch(x){ b.disabled=false; b.textContent=friendlyError(x); return; }
+    render(true);
+  }
+});
+// ---------- Adding a sale by hand ----------
+// For sales that weren't recorded in the app (for example on an earlier day). The sale is saved
+// as a finished, paid dine-in order on the date and time picked, so it counts in that day's sales.
+const pad2=n=>String(n).padStart(2,"0");
+const hm=d=>pad2(d.getHours())+":"+pad2(d.getMinutes());
+let saleOpen=false, saleLines={}, saleCat=0, salePay="Cash", saleDate="", saleTime="", saleNotes="", saleMsg="";
+const saleMenu=()=>savedMenu().filter(c=>(c.items||[]).length);
+function saleForm(){
+  const cats=saleMenu(); if(saleCat>=cats.length) saleCat=0;
+  const c=cats[saleCat], items=Object.entries(saleLines).filter(([,q])=>q>0).map(([id,qty])=>({id,name:ITEMS[id]?.name||id,price:ITEMS[id]?.price||0,qty}));
+  const t=calcTotals(items,"Dine-in");
+  return `<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep)">Add a sale</h2>
+    <p class="muted" style="font-size:.88rem;margin:4px 0 8px">For a sale that wasn't recorded in the app, for example from an earlier day. It's saved as paid and counts in that day's sales.</p>
+    <div class="toolbar"><label class="f" for="saleDate">Date<input type="date" id="saleDate" max="${ymd(new Date())}" value="${esc(saleDate)}"></label>
+      <label class="f" for="saleTime">Time<input type="time" id="saleTime" value="${esc(saleTime)}"></label></div>
+    <div class="cats2" style="margin-top:10px">${cats.map((s,i)=>`<button class="chip ${i===saleCat?"on":""}" data-scat="${i}">${esc(s.name)}</button>`).join("")}</div>
+    <div class="srows">${(c?.items||[]).map(it=>{ const q=saleLines[it.id]||0; return `<div class="srow"><span>${esc(it.name)} <span class="muted">${peso(it.price)}</span></span>
+      <span class="sstep"><button data-sq="${esc(it.id)}" data-d="-1" aria-label="One less"${q?"":" disabled"}>−</button><b>${q}</b><button data-sq="${esc(it.id)}" data-d="1" aria-label="One more">+</button></span></div>`; }).join("")}</div>
+    ${items.length?`<ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${esc(it.name)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
+      <div class="totals"><div class="grand"><span>Total</span><span>${peso(t.total)}</span></div></div>`:`<p class="muted" style="font-size:.88rem">Tap + on what was sold.</p>`}
+    <div class="toolbar" style="margin-top:8px"><span class="muted" style="font-weight:700">Paid by</span>
+      ${["Cash","GCash"].map(p=>`<button class="chip ${salePay===p?"on":""}" data-spay="${p}">${p}</button>`).join("")}</div>
+    <label class="f" for="saleNotes" style="margin-top:8px">Notes (optional)<input id="saleNotes" maxlength="300" value="${esc(saleNotes)}" placeholder="e.g. Recorded on paper"></label>
+    <p class="err">${esc(saleMsg)}</p>
+    <div class="btnrow"><button class="btn" data-ssave${items.length?"":" disabled"}>Save sale${items.length?` · ${peso(t.total)}`:""}</button>
+      <button class="btn ghost small" data-scancel>Cancel</button></div></section>`;
+}
+$("#view").addEventListener("input",e=>{ if(tab!=="orders") return;
+  if(e.target.id==="saleDate") saleDate=e.target.value; else if(e.target.id==="saleTime") saleTime=e.target.value; else if(e.target.id==="saleNotes") saleNotes=e.target.value; });
+$("#view").addEventListener("click",async e=>{
+  if(tab!=="orders") return;
+  const b=e.target.closest("[data-sadd],[data-scat],[data-sq],[data-spay],[data-ssave],[data-scancel]"); if(!b) return;
+  saleMsg="";
+  if(b.dataset.sadd!==undefined){ const now=new Date(); saleOpen=true; saleLines={}; saleDate=ymd(now); saleTime=hm(now); saleNotes=""; salePay="Cash"; return render(true); }
+  if(b.dataset.scancel!==undefined){ saleOpen=false; return render(true); }
+  if(b.dataset.scat){ saleCat=+b.dataset.scat; return render(true); }
+  if(b.dataset.spay){ salePay=b.dataset.spay; return render(true); }
+  if(b.dataset.sq){ const id=b.dataset.sq; saleLines[id]=Math.max(0,Math.min(MAX_QTY,(saleLines[id]||0)+ +b.dataset.d)); return render(true); }
+  if(b.dataset.ssave!==undefined){
+    const when=new Date(`${saleDate}T${saleTime||"12:00"}`);
+    if(!saleDate || isNaN(when)) { saleMsg="Pick the date of the sale."; return render(true); }
+    if(when>new Date()){ saleMsg="The date and time can't be in the future."; return render(true); }
+    const items=Object.entries(saleLines).filter(([,q])=>q>0).map(([id,qty])=>({id,name:ITEMS[id].name,price:ITEMS[id].price,qty}));
+    if(!items.length) return;
+    if(items.length>MAX_LINES){ saleMsg=`Up to ${MAX_LINES} different items per sale. Save the rest as another sale.`; return render(true); }
+    const t=calcTotals(items,"Dine-in"), ref=doc(collection(db,"orders")), uid=auth.currentUser.uid;
+    b.disabled=true;
+    try{
+      await setDoc(ref,{code:orderCode(ref.id),customerUid:uid,sellerUid:uid,sellerName:"Owner",mode:"Dine-in",table:"",notes:saleNotes.trim(),payment:salePay,items,
+        subtotal:t.subtotal,deliveryFee:0,boxFee:t.boxFee,total:t.total,status:"completed",riderUid:null,createdAt:Timestamp.fromDate(when),
+        manual:true,addedBy:uid,addedAt:serverTimestamp(),...(salePay==="Cash"?{cashGiven:t.total}:{paid:true}),paidTotal:t.total});
+      const [a,z]=rangeDates();
+      saleOpen=false; delMsg=`Sale of ${peso(t.total)} saved for ${when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})}.`+(when<a||when>=z?" Pick that date above to see it.":"");
+    }catch(x){ saleMsg="Couldn't save: "+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase."; b.disabled=false; }
+    render(true);
+  }
+});
+
+// ---------- Menu photos ----------
+// One photo per item (menuPhotos/{itemId}), shown on the customer menu. Saved as soon as it's picked.
+let photos={}, photoFor=null, photoMsg="";
+const photoInput=document.createElement("input");
+photoInput.type="file"; photoInput.accept="image/*"; photoInput.hidden=true; document.body.append(photoInput);
+photoInput.onchange=async()=>{
+  const f=photoInput.files[0], id=photoFor; photoInput.value=""; if(!f||!id) return;
+  photoMsg="Adding the photo…"; render(true);
+  try{ const photo=await compressPhoto(f,640,0.7); await setDoc(doc(db,"menuPhotos",id),{photo,updatedAt:serverTimestamp()}); photoMsg=""; }
+  catch(x){ photoMsg="Couldn't add the photo: "+(x.message||friendlyError(x)); }
+  render(true);
+};
+$("#view").addEventListener("click",async e=>{
+  if(tab!=="menu") return;
+  const b=e.target.closest("[data-photo],[data-photodel]"); if(!b) return;
+  if(b.dataset.photo){ photoFor=b.dataset.photo; photoInput.click(); return; }
+  if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Remove?"; return; }
+  try{ await deleteDoc(doc(db,"menuPhotos",b.dataset.photodel)); }catch(x){ photoMsg=friendlyError(x); render(true); }
 });
 </script>
 </body>

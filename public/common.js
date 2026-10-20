@@ -2,9 +2,9 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, connectFirestoreEmulator, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig, SHOP, MENU, DELIVERY_ZONES } from "./config.js";
+import { firebaseConfig, SHOP, MENU as START_MENU, DELIVERY_ZONES } from "./config.js";
 
-export { SHOP, MENU, DELIVERY_ZONES };
+export { SHOP, DELIVERY_ZONES };
 
 // Test mode: on localhost with no Firebase config pasted in, talk to the local
 // Firebase emulators instead (see "Testing on your computer" in the setup guide).
@@ -27,10 +27,87 @@ if (testMode) {
   connectFirestoreEmulator(db, "127.0.0.1", 8080);
 }
 
+// ---------- Menu ----------
+// The owner edits the menu on owner.html; it's saved in settings/menu. Until the owner first
+// saves, the menu in config.js is used. Each item: { id, name, price, inc, best, off, was }
+// (off = sold out / hidden; was = earlier prices, so orders placed before a price change
+// still pass the price check). The last menu loaded is kept on the device in case it's offline.
+export function startMenu() {
+  return START_MENU.map(c => ({ id: c.id, name: c.name, box: !!c.box, note: c.note || "",
+    items: c.items.map(([id, name, price, inc, best]) => ({ id, name, price, inc: inc || "", best: !!best })) }));
+}
+async function loadMenu() {
+  if (db) try {
+    const s = await Promise.race([getDoc(doc(db, "settings", "menu")),
+      new Promise((_, no) => setTimeout(() => no(new Error("timeout")), 6000))]);
+    if (!s.exists() || !Array.isArray(s.data().sections)) return startMenu();
+    try { localStorage.setItem("lugaw-menu", JSON.stringify(s.data().sections)); } catch (_) {}
+    return s.data().sections;
+  } catch (_) {}
+  try { const m = JSON.parse(localStorage.getItem("lugaw-menu")); if (Array.isArray(m)) return m; } catch (_) {}
+  return startMenu();
+}
+export const MENU_SECTIONS = await loadMenu();
+// What the menus show: [id, name, price, inc, best] per item, sold-out items left off
+export const MENU = MENU_SECTIONS.map(c => ({ ...c, items: (c.items || []).filter(it => !it.off).map(it => [it.id, it.name, it.price, it.inc, it.best]) }))
+  .filter(c => c.items.length);
+// Every item, sold out or not (names and prices for older orders)
 export const ITEMS = Object.create(null);
-MENU.forEach(c => c.items.forEach(([id, name, price, inc, best]) => {
-  ITEMS[id] = { id, name, price, inc: inc || "", best: !!best, cat: c.id, box: !!c.box };
+MENU_SECTIONS.forEach(c => (c.items || []).forEach(it => {
+  ITEMS[it.id] = { id: it.id, name: it.name, price: it.price, inc: it.inc || "", best: !!it.best, cat: c.id, box: !!c.box, off: !!it.off, was: it.was || [],
+    recipe: it.recipe || {} }; // ingredient id -> amount one serving uses
 }));
+
+// Bring ITEMS up to date with a newer saved menu (recipes, prices, names) without reloading,
+// so a change the owner just saved counts right away. New items still need a page refresh
+// to appear on the menus.
+export function applyMenu(sections) {
+  (sections || []).forEach(c => (c.items || []).forEach(it => {
+    const t = ITEMS[it.id] || (ITEMS[it.id] = { id: it.id });
+    Object.assign(t, { name: it.name, price: it.price, inc: it.inc || "", best: !!it.best, cat: c.id, box: !!c.box,
+      off: !!it.off, was: it.was || [], recipe: it.recipe || {} });
+  }));
+}
+
+// ---------- Ingredient stock ----------
+// The owner's open inventory count holds the beginning amount of each ingredient. Every order
+// placed since the count started (not cancelled) uses each item's recipe × quantity.
+// Returns what's left of each counted ingredient.
+export function ingredientsLeft(count, orders) {
+  if (!count || count.closedAt) return null;
+  const left = { ...(count.items || {}) }, since = count.since?.toMillis?.() || 0;
+  orders.forEach(o => {
+    if (o.status === "cancelled" || (o.createdAt?.toMillis?.() ?? Date.now()) < since) return;
+    (o.items || []).forEach(it => Object.entries(ITEMS[it.id]?.recipe || {}).forEach(([g, per]) => {
+      if (g in left) left[g] = Math.round((left[g] - per * (Number(it.qty) || 0)) * 1000) / 1000;
+    }));
+  });
+  return left;
+}
+// How many more servings of an item the counted ingredients allow (null: nothing it uses is counted)
+export function servingsLeft(id, left) {
+  if (!left) return null;
+  const parts = Object.entries(ITEMS[id]?.recipe || {}).filter(([g, per]) => g in left && per > 0);
+  return parts.length ? Math.max(0, Math.min(...parts.map(([g, per]) => Math.floor(left[g] / per + 1e-9)))) : null;
+}
+// Whether order lines can be made with what's left (ingredients shared between items add up).
+// Returns the id of the first item that runs short, or null when everything fits.
+export function shortItem(lines, left) {
+  if (!left) return null;
+  const need = {};
+  for (const it of lines) {
+    for (const [g, per] of Object.entries(ITEMS[it.id]?.recipe || {})) {
+      if (!(g in left)) continue;
+      need[g] = (need[g] || 0) + per * (Number(it.qty) || 0);
+      if (need[g] > left[g] + 1e-9) return it.id;
+    }
+  }
+  return null;
+}
+// Items that can't be made with what's left: shown as sold out
+export function soldOutFrom(left) {
+  return Object.keys(ITEMS).filter(id => servingsLeft(id, left) === 0).sort();
+}
 export const MAX_LINES = 20, MAX_QTY = 99; // also enforced in firestore.rules
 
 export const peso = n => "₱" + Number(n || 0).toLocaleString("en-PH");
@@ -102,7 +179,8 @@ export const defaultFees = () => Object.fromEntries(Object.values(ZONES).map(z =
 // (guards against orders sent straight to the database with edited prices).
 export function priceCheck(order) {
   const items = Array.isArray(order.items) ? order.items : [];
-  const ok = items.length > 0 && items.every(it => it && ITEMS[it.id] && ITEMS[it.id].price === it.price
+  // the current price, or an earlier one (the order was placed before the owner changed it)
+  const ok = items.length > 0 && items.every(it => it && ITEMS[it.id] && (ITEMS[it.id].price === it.price || ITEMS[it.id].was.includes(it.price))
     && Number.isInteger(it.qty) && it.qty > 0 && it.qty <= MAX_QTY);
   if (!ok) return false;
   // the delivery fee itself is checked against the barangay fee list by firestore.rules

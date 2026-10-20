@@ -74,7 +74,7 @@ export const DELIVERY_ZONES = [
 export const MENU = [
   { id: "lugaw", name: "Lugaw Series", box: true, items: [
     ["L01", "Plain Lugaw", 39],
-    ["L02", "Lugaw with Egg and Stripe", 85],
+    ["L11", "Lugaw with Egg", 59],
     ["L03", "Lugaw with Chicken", 79],
     ["L04", "Lugaw with Liver", 69],
     ["L05", "Lugaw with Lechon Kawali", 89],
@@ -93,12 +93,19 @@ export const MENU = [
     ["R06", "Fried Rice with Chicharon Bulaklak", 119],
     ["R07", "Fried Rice with Tofu", 99],
     ["R08", "Fried Rice Overload 1", 159, "Chicken Wings + Chicken Liver + Egg + Tofu"],
-    ["R09", "Fried Rice Overload 2", 159, "Lechon Kawali + Chicharon Bulaklak + Egg"]
+    ["R09", "Fried Rice Overload 2", 159, "Lechon Kawali + Chicharon Bulaklak + Egg"],
+    ["R10", "Plain Rice with Fried Dumplings (3 pcs)", 79],
+    ["R11", "Plain Rice with Shanghai Rolls (3 pcs)", 79],
+    ["R12", "Plain Rice with Chicken and Liver Adobo", 99]
   ]},
   { id: "dumplings", name: "Dumpling Series", box: true, items: [
     ["D01", "Fried Dumplings (5 pcs)", 75],
     ["D02", "Steam Dumplings (5 pcs)", 75],
-    ["D03", "Dumpling Soup (3 pcs)", 129, "With bokchoy and meatballs"]
+    ["D03", "Dumpling Soup (3 pcs)", 129, "With bokchoy and meatballs"],
+    ["D04", "Raw Dumplings (10 pcs)", 150]
+  ]},
+  { id: "pancit", name: "Pancit", box: true, items: [
+    ["P01", "Pancit Guisado", 99]
   ]},
   { id: "addons", name: "Add-ons", note: "Top up any bowl", items: [
     ["A01", "Add-on: Egg", 20],
@@ -107,7 +114,8 @@ export const MENU = [
     ["A04", "Add-on: Lechon Kawali", 50],
     ["A05", "Add-on: Chicharon Bulaklak", 50],
     ["A06", "Add-on: Tofu", 20],
-    ["A07", "Add-on: Dumplings (3 pcs)", 59]
+    ["A07", "Add-on: Dumplings (3 pcs)", 59],
+    ["A08", "Plain Rice", 20]
   ]},
   { id: "drinks", name: "Drinks", items: [
     ["B01", "Mineral Water", 15],

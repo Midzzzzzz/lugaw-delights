@@ -17,6 +17,12 @@ service cloud.firestore {
     }
     // Anyone who works the counter: the owner or an approved seller
     function isStaff() { return isAdmin() || isSeller(); }
+    // Kitchen staff (kitchen.html): see orders being cooked and mark them ready, nothing else
+    function isKitchen() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/kitchen/$(uid()))
+        && get(/databases/$(database)/documents/kitchen/$(uid())).data.status == 'approved';
+    }
     // The only delivery areas a rider can choose (rider.html)
     // Where the shop sends a rider's earnings: a GCash number, or a bank account
     function payoutOk(d) {
@@ -72,7 +78,14 @@ service cloud.firestore {
       allow write: if (isAdmin()
           && (!('cashMax' in request.resource.data) || (request.resource.data.cashMax is int && request.resource.data.cashMax >= 0)))
         || (isSeller() && id == 'store'
-          && (resource == null ? request.resource.data.keys().hasOnly(['open']) : changed().hasOnly(['open'])));
+          && (resource == null ? request.resource.data.keys().hasOnly(['open']) : changed().hasOnly(['open'])))
+        // Items sold out because an ingredient ran low: worked out on the seller dashboard from
+        // the inventory count and the orders, published here for the customer page
+        || (isSeller() && id == 'stock'
+          && request.resource.data.keys().hasOnly(['soldOut', 'left', 'updatedAt'])
+          && request.resource.data.soldOut is list && request.resource.data.soldOut.size() <= 300
+          && (!('left' in request.resource.data) || (request.resource.data.left is map && request.resource.data.left.size() <= 300))
+          && request.resource.data.updatedAt == request.time);
     }
 
     // Seller applications and profiles. Sellers sign up on seller.html and the
@@ -88,6 +101,52 @@ service cloud.firestore {
         && str(request.resource.data.email, 120)
         && request.resource.data.createdAt == request.time;
       allow update, delete: if isAdmin();
+    }
+
+    // Kitchen staff applications and profiles. Kitchen staff sign up on kitchen.html and
+    // the owner approves or suspends them on owner.html (same steps as sellers).
+    match /kitchen/{staffId} {
+      allow read: if isAdmin() || (signedIn() && uid() == staffId);
+      allow create: if signedIn() && uid() == staffId
+        && request.auth.token.firebase.sign_in_provider == 'password'
+        && request.resource.data.keys().hasOnly(['name','phone','email','status','createdAt'])
+        && request.resource.data.status == 'pending'
+        && str(request.resource.data.name, 80) && request.resource.data.name.size() > 0
+        && str(request.resource.data.phone, 20)
+        && str(request.resource.data.email, 120)
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if isAdmin();
+    }
+
+    // Inventory counts (owner.html): the owner records the beginning stock per menu item at the
+    // start of a shift; what's used is worked out from the orders placed since then. Ending the
+    // shift saves the breakdown. Sellers read the open count to see what's left.
+    match /inventory/{countId} {
+      allow read: if isStaff();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['since','closedAt','items','by','createdAt'])
+        && request.resource.data.since == request.time && request.resource.data.createdAt == request.time
+        && request.resource.data.closedAt == null
+        && request.resource.data.items is map && request.resource.data.items.size() <= 300
+        && request.resource.data.by == uid();
+      allow update: if isAdmin() && resource.data.closedAt == null
+        && changed().hasOnly(['items','closedAt','result'])
+        && request.resource.data.items is map && request.resource.data.items.size() <= 300
+        && (!changed().hasAny(['closedAt']) || request.resource.data.closedAt == request.time)
+        && (!changed().hasAny(['result']) || (request.resource.data.result is map && changed().hasAny(['closedAt'])));
+      allow delete: if isAdmin();
+    }
+
+    // Menu photos (owner.html → Menu), one per item, shown on the customer menu. Kept as small
+    // JPEG pictures inside the record, like the rider proof photos.
+    match /menuPhotos/{itemId} {
+      allow read: if true;
+      allow write: if isAdmin()
+        && request.resource.data.keys().hasOnly(['photo','updatedAt'])
+        && request.resource.data.photo is string && request.resource.data.photo.size() < 800000
+        && request.resource.data.photo.matches('data:image/jpeg;base64,[A-Za-z0-9+/=]+')
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAdmin();
     }
 
     // Owner accounts. Added by hand in the Firebase console (setup guide, step 7).
@@ -216,7 +275,8 @@ service cloud.firestore {
         && request.resource.data.customerUid == uid()
         && request.resource.data.pin is string && request.resource.data.pin.matches('[0-9]{4}')
         && getAfter(/databases/$(database)/documents/orders/$(orderId)).data.customerUid == uid();
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isAdmin(); // with its order
     }
 
     // Customer problem reports, one per order, read and handled by the owner.
@@ -306,15 +366,17 @@ service cloud.firestore {
       // ordering is closed. Credited to whoever records it.
       function dineIn(d) {
         return d.keys().hasOnly(
-             ['code','customerUid','mode','table','notes','payment','cashGiven','paid','paidAt','gcashRef','sellerUid','sellerName',
+             ['code','customerUid','mode','table','notes','payment','cashGiven','paid','paidAt','gcashRef','paidTotal','sellerUid','sellerName',
               'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt'])
           && d.customerUid == uid()
+          // paidTotal: the total the payment covered (changes after paying show a balance)
+          && (!('paidTotal' in d) || ((('cashGiven' in d) || ('paid' in d)) && d.paidTotal == d.total))
           && d.sellerUid == uid() && str(d.sellerName, 80)
           && d.mode == 'Dine-in'
           && (!('cashGiven' in d) || (amount(d.cashGiven) && d.cashGiven >= d.total))
-          // paid by GCash at the counter: needs the GCash Ref No.
+          // paid by GCash at the counter: the seller taps "GCash received" (a Ref No. is optional)
           && (!('paid' in d) || (d.paid == true && d.payment == 'GCash' && d.paidAt == request.time
-                && d.get('gcashRef', '') is string && d.get('gcashRef', '').matches('[0-9A-Za-z]{6,20}')))
+                && (!('gcashRef' in d) || (d.gcashRef is string && d.gcashRef.matches('[0-9A-Za-z]{6,20}')))))
           && (!('gcashRef' in d) || ('paid' in d))
           && d.status == 'preparing'
           && d.riderUid == null
@@ -330,7 +392,27 @@ service cloud.firestore {
       // waiting for a rider (address only, no name or number), plus the ones they took.
       allow read: if isStaff()
         || (signedIn() && resource.data.customerUid == uid())
-        || (isApprovedRider() && (resource.data.riderUid == uid() || needsRider(resource.data)));
+        || (isApprovedRider() && (resource.data.riderUid == uid() || needsRider(resource.data)))
+        || isKitchen();
+
+      // A sale the owner adds by hand, for any date up to now (owner.html → Orders → Add a sale):
+      // already finished and paid, marked manual with who added it and when.
+      function manualSale(d) {
+        return d.keys().hasOnly(['code','customerUid','mode','table','notes','payment','items','subtotal','deliveryFee','boxFee','total',
+              'status','riderUid','createdAt','manual','addedBy','addedAt','sellerUid','sellerName','cashGiven','paid','paidTotal'])
+          && d.manual == true && d.addedBy == uid() && d.addedAt == request.time
+          && d.customerUid == uid() && d.sellerUid == uid() && str(d.sellerName, 80)
+          && d.mode == 'Dine-in' && d.status == 'completed' && d.riderUid == null
+          && d.createdAt is timestamp && d.createdAt <= request.time
+          && d.payment in ['Cash', 'GCash']
+          && okItems(d.items)
+          && amount(d.subtotal) && d.subtotal > 0
+          && d.deliveryFee == 0 && boxOk(d) && d.total == d.subtotal + d.get('boxFee', 0)
+          && (!('cashGiven' in d) || (amount(d.cashGiven) && d.cashGiven >= d.total))
+          && (!('paid' in d) || (d.paid == true && d.payment == 'GCash'))
+          && (!('paidTotal' in d) || d.paidTotal == d.total)
+          && str(d.code, 20) && str(d.table, 30) && str(d.notes, 300);
+      }
 
       allow create: if (signedIn()
         && storeOpen()
@@ -342,7 +424,8 @@ service cloud.firestore {
             || (request.resource.data.get('hasPin', false) == true && existsAfter(/databases/$(database)/documents/pins/$(orderId))))
         && getAfter(/databases/$(database)/documents/customers/$(uid())).data.lastOrderAt == request.time
         && getAfter(/databases/$(database)/documents/customers/$(uid())).data.lastOrderId == orderId)
-        || (isStaff() && dineIn(request.resource.data));
+        || (isStaff() && dineIn(request.resource.data))
+        || (isAdmin() && manualSale(request.resource.data));
 
       // Only the rider who carried a delivery can mark it delivered (with the customer's
       // delivery code). Neither the owner nor a seller can, so a rider can't ask the shop
@@ -374,9 +457,19 @@ service cloud.firestore {
             && (!changed().hasAny(['cashGiven']) || (!('cashGiven' in resource.data)
                  && amount(request.resource.data.cashGiven) && request.resource.data.cashGiven >= resource.data.total))
             && (!changed().hasAny(['paid']) || (request.resource.data.paid == true && resource.data.get('paid', false) != true
-                 && request.resource.data.get('gcashRef', '') is string && request.resource.data.get('gcashRef', '').matches('[0-9A-Za-z]{6,20}')))
+                 && resource.data.mode == 'Dine-in' && resource.data.payment == 'GCash'
+                 && (!('gcashRef' in request.resource.data) || (request.resource.data.gcashRef is string
+                     && request.resource.data.gcashRef.matches('[0-9A-Za-z]{6,20}')))))
             // the GCash Ref No. and payment time are set together with the payment, never edited later
             && (!changed().hasAny(['gcashRef','paidAt']) || changed().hasAny(['paid']))
+            // paidTotal: the total the payment covered, set once with the payment.
+            // settledTotal: after a later change, the total once the balance is settled
+            // (extra paid, or money given back).
+            && (!changed().hasAny(['paidTotal']) || (resource.data.mode == 'Dine-in' && !('paidTotal' in resource.data)
+                 && request.resource.data.paidTotal == resource.data.total
+                 && (('cashGiven' in request.resource.data) || request.resource.data.get('paid', false) == true)))
+            && (!changed().hasAny(['settledTotal']) || (resource.data.mode == 'Dine-in' && ('paidTotal' in resource.data)
+                 && request.resource.data.settledTotal == resource.data.total))
             // (items, prices, box fees and the removal log only change through the dine-in change rule below)
             && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','boxFee','total','payment','createdAt',
                                   'addedAt','removed','editedAt','editedBy','editedByName'])
@@ -385,13 +478,17 @@ service cloud.firestore {
                 || (request.resource.data.sellerUid == uid() && str(request.resource.data.sellerName, 80)
                     && resource.data.get('sellerUid', null) in [null, uid()])))
 
-        // Dine-in customer changes their order before paying: a seller adds, removes or
-        // changes items. A lower total is only allowed when the removal is logged
-        // (removed list grows, with who and when), so totals can't be quietly cut.
+        // Dine-in customer changes their order, before or after paying: a seller adds, removes
+        // or changes items. A lower total is only allowed when the removal is logged
+        // (removed list grows, with who and when), so totals can't be quietly cut. A paid
+        // order keeps its payment; the difference shows as a balance to settle.
         || (isSeller() && resource.data.mode == 'Dine-in'
             && resource.data.status in ['preparing', 'completed']
-            && !('cashGiven' in resource.data) && resource.data.get('paid', false) != true
-            && changed().hasOnly(['items','subtotal','boxFee','total','status','addedAt','removed','editedAt','editedBy','editedByName'])
+            && changed().hasOnly(['items','subtotal','boxFee','total','status','addedAt','removed','editedAt','editedBy','editedByName','paidTotal'])
+            // older paid orders have no paidTotal yet: it's filled in with the total they paid
+            && (!changed().hasAny(['paidTotal']) || (!('paidTotal' in resource.data)
+                 && request.resource.data.paidTotal == resource.data.total
+                 && (('cashGiven' in resource.data) || resource.data.get('paid', false) == true)))
             && okItems(request.resource.data.items)
             && amount(request.resource.data.subtotal) && request.resource.data.subtotal > 0
             && boxOk(request.resource.data)
@@ -407,6 +504,15 @@ service cloud.firestore {
                     && str(request.resource.data.editedByName, 80)))
             && ((request.resource.data.total >= resource.data.total && request.resource.data.get('boxFee', 0) >= resource.data.get('boxFee', 0))
                 || changed().hasAny(['removed'])))
+
+        // Kitchen staff mark food ready: dine-in -> served, pickup -> ready for pickup,
+        // delivery -> food ready. Only the status and its time change.
+        || (resource.data.status == 'preparing'
+            && request.resource.data.status == (resource.data.mode == 'Dine-in' ? 'completed'
+                 : (resource.data.mode == 'Delivery' ? 'ready' : 'ready_pickup'))
+            && changed().hasOnly(['status', request.resource.data.status + 'At'])
+            && request.resource.data[request.resource.data.status + 'At'] == request.time
+            && isKitchen())
 
         // Customer cancels before the shop accepts the order
         || (signedIn() && resource.data.customerUid == uid() && resource.data.status == 'new'
@@ -467,7 +573,8 @@ service cloud.firestore {
                 && changed().hasOnly(['status','riderUid','riderName','riderPhone','assignedAt']))
            ));
 
-      allow delete: if false;
+      // The owner can delete orders (for example test orders) on owner.html → Orders
+      allow delete: if isAdmin();
     }
   }
 }

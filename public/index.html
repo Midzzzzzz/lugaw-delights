@@ -22,6 +22,12 @@ section.cat h2 small{font-family:var(--body);font-size:.8rem;color:var(--muted);
 .item .inc{font-size:.85rem;color:var(--muted)}
 .item .price{font-variant-numeric:tabular-nums;font-weight:700;color:var(--brand-deep);font-size:.95rem}
 .item .meta{min-width:0}
+.item.has-photo{grid-template-columns:88px minmax(0,1fr) auto}
+.item .ph{width:88px;height:88px;object-fit:cover;border-radius:14px;display:block;cursor:zoom-in;background:var(--sunk)}
+.phview{position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.85);display:grid;place-items:center;align-content:center;gap:12px;padding:16px;color:#fff;text-align:center}
+.phview img{max-width:100%;max-height:70vh;border-radius:16px}
+.item.sold .name,.item.sold .price{opacity:.55}
+.soldtag{font-weight:800;color:var(--brand-deep);font-size:.9rem;white-space:nowrap}
 .item.best .name::after{content:"Best seller";margin-left:8px;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;background:var(--yolk);color:#3a1a22;padding:1px 7px;border-radius:99px;vertical-align:2px}
 .step{display:inline-flex;align-items:center;border:2px solid var(--brand);border-radius:99px;overflow:hidden}
 .step button{border:0;background:transparent;color:var(--brand);width:34px;height:32px;font-size:1.2rem;font-weight:800;cursor:pointer}
@@ -100,8 +106,8 @@ aside h2{font-size:1.4rem;color:var(--brand)}
 
 <script type="module">
 import { onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, doc, getDoc, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { auth, db, isConfigured, SHOP, MENU, ITEMS, MAX_LINES, MAX_QTY, REPORT_REASONS, phoneKey, DELIVERY_ZONES, ZONES, zoneLabel, peso, esc, STATUS, FLOW, stepLabel, calcTotals, boxRow, itemsHTML, fmtTime, orderCode, friendlyError, setupNotice } from "./common.js";
+import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { auth, db, isConfigured, SHOP, MENU, ITEMS, shortItem, servingsLeft, MAX_LINES, MAX_QTY, REPORT_REASONS, phoneKey, DELIVERY_ZONES, ZONES, zoneLabel, peso, esc, STATUS, FLOW, stepLabel, calcTotals, boxRow, itemsHTML, fmtTime, orderCode, friendlyError, setupNotice } from "./common.js";
 
 const $ = s => document.querySelector(s);
 const cart = {};
@@ -119,21 +125,35 @@ $("#cats").innerHTML = MENU.map((c,i)=>`<a href="#${c.id}" class="${i?"":"on"}">
 $("#menu").innerHTML = MENU.map(c => `
   <section class="cat" id="${c.id}"><h2>${esc(c.name)}${c.note?`<small>${esc(c.note)}</small>`:""}</h2>
   ${c.items.map(([id])=>{const it=ITEMS[id];return `
-    <div class="item${it.best?" best":""}"><div class="meta"><div class="name">${esc(it.name.replace("Add-on: ",""))}</div>
+    <div class="item${it.best?" best":""}" data-item="${id}"><img class="ph" data-ph="${id}" alt="${esc(it.name)}" hidden><div class="meta"><div class="name">${esc(it.name.replace("Add-on: ",""))}</div>
     ${it.inc?`<div class="inc">${esc(it.inc)}</div>`:""}<div class="price">${peso(it.price)}</div></div>
     <div class="ctl" data-id="${id}"></div></div>`}).join("")}</section>`).join("");
 
+// Items sold out because an ingredient ran out (settings/stock, kept up to date by the shop)
+let soldOut=new Set(), stockLeftNow=null; // stockLeftNow: what's left of each counted ingredient
+// Whether the cart (plus one more of an item) can still be made; returns a message or ""
+function stockProblem(extra){
+  const lines=Object.entries(cart).map(([id,qty])=>({id,qty})); if(extra) lines.push(extra);
+  const id=shortItem(lines,stockLeftNow); if(!id) return "";
+  const n=servingsLeft(id,stockLeftNow);
+  return n?`Sorry, we only have ${n} ${ITEMS[id].name} left.`:`Sorry, ${ITEMS[id].name} is sold out right now.`;
+}
 function renderCtl(id){
   const el=document.querySelector(`.ctl[data-id="${id}"]`), q=cart[id]||0;
+  if(!el) return;
+  el.closest(".item").classList.toggle("sold",soldOut.has(id));
+  if(soldOut.has(id) && !q){ el.innerHTML=`<span class="soldtag">Sold out</span>`; return; }
   el.innerHTML = q ? `<div class="step"><button type="button" data-d="-1" aria-label="Remove one">−</button><span>${q}</span><button type="button" data-d="1" aria-label="Add one"${q>=MAX_QTY?" disabled":""}>+</button></div>`
                    : `<button type="button" class="btn" data-d="1">Add</button>`;
 }
-Object.keys(ITEMS).forEach(renderCtl);
+MENU.forEach(c=>c.items.forEach(([id])=>renderCtl(id))); // sold-out items aren't on the menu
 $("#menu").addEventListener("click", e=>{
   const b=e.target.closest("button[data-d]"); if(!b) return;
   const id=b.closest(".ctl").dataset.id, q=(cart[id]||0)+ +b.dataset.d;
   if(!cart[id] && Object.keys(cart).length>=MAX_LINES) return showErr(`You can order up to ${MAX_LINES} different items at a time.`);
   if(q>MAX_QTY) return;
+  if(+b.dataset.d>0 && soldOut.has(id)) return showErr(`Sorry, ${ITEMS[id].name} is sold out right now.`);
+  if(+b.dataset.d>0){ const p=stockProblem({id,qty:1}); if(p) return showErr(p); }
   showErr("");
   if(q>0) cart[id]=q; else delete cart[id];
   renderCtl(id); renderCart();
@@ -183,10 +203,27 @@ const obs=new IntersectionObserver(es=>es.forEach(e=>{ if(e.isIntersecting)
   {rootMargin:"-80px 0px -70% 0px"});
 document.querySelectorAll("section.cat").forEach(s=>obs.observe(s));
 
+// Food photos the owner added (owner dashboard → Menu). Tapping one shows it bigger.
+if(isConfigured) getDocs(collection(db,"menuPhotos")).then(s=>s.docs.forEach(d=>{
+  const img=document.querySelector(`img[data-ph="${CSS.escape(d.id)}"]`); if(!img) return;
+  img.src=d.data().photo; img.hidden=false; img.closest(".item").classList.add("has-photo");
+})).catch(()=>{});
+$("#menu").addEventListener("click",e=>{
+  const img=e.target.closest("img.ph"); if(!img) return;
+  const v=document.createElement("div"); v.className="phview"; v.setAttribute("role","dialog"); v.setAttribute("aria-label",img.alt);
+  v.innerHTML=`<img src="${img.src}" alt="${esc(img.alt)}"><b>${esc(img.alt)}</b><button type="button" class="btn small">Close</button>`;
+  v.onclick=()=>v.remove(); document.body.append(v);
+});
+
 // ---------- Live data ----------
 $("#setup").innerHTML = setupNotice();
 if(isConfigured){
   onSnapshot(doc(db,"settings","delivery"), s=>{ fees = s.exists() ? (s.data().fees||{}) : {}; renderZones(); renderCart(); }, ()=>{});
+  onSnapshot(doc(db,"settings","stock"), s=>{
+    soldOut=new Set(s.exists()?s.data().soldOut||[]:[]);
+    const l=s.exists()?s.data().left:null; stockLeftNow=l&&Object.keys(l).length?l:null;
+    MENU.forEach(c=>c.items.forEach(([id])=>renderCtl(id))); renderCart();
+  }, ()=>{});
   onSnapshot(doc(db,"settings","store"), s=>{
     storeOpen = !s.exists() || s.data().open !== false;
     $("#closed").hidden = storeOpen; renderCart();
@@ -418,6 +455,9 @@ $("#form").addEventListener("submit", async e=>{
   if(mode()==="Delivery" && zoneFee()==null) miss.push("your barangay (we deliver in Los Baños and Bay only)");
   if(mode()==="Delivery" && !address) miss.push("your house no., street and landmark");
   if(miss.length) return showErr("Please add "+miss.join(", ")+".");
+  const gone=Object.keys(cart).filter(id=>soldOut.has(id));
+  if(gone.length) return showErr(`Sorry, ${gone.map(id=>ITEMS[id].name).join(", ")} ${gone.length===1?"is":"are"} sold out now. Please remove ${gone.length===1?"it":"them"} from your order.`);
+  { const p=stockProblem(); if(p) return showErr(p+" Please lower the quantity."); }
   if(!user) return showErr("Still connecting. Try again in a few seconds.");
   const wait=Math.ceil((lastOrderAt()+61000-Date.now())/1000);
   if(wait>0) return showErr(`Your last order just went through. You can place another in ${wait} seconds.`);

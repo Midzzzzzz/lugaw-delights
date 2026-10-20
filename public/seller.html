@@ -15,16 +15,42 @@
 .rider-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 6px var(--sunk)}}
 @media (prefers-reduced-motion:no-preference){.order.alert{animation:pulse 1.6s ease-in-out 3}}
-.dine-grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start}
+/* Dine-in sale screen (tap-first, like a POS): menu tiles on the left, the ticket on the right */
+.dine-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
+.dine-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
 @media (max-width:760px){.dine-grid{grid-template-columns:minmax(0,1fr)}}
-#dineMenu{max-height:430px;overflow-y:auto;padding-right:4px}
-#dineMenu h3{font-size:1.05rem;color:var(--brand-deep);margin:10px 0 2px}
-.dine-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:6px 0;border-bottom:1px dashed var(--line);font-size:.92rem}
-.dine-item .price{color:var(--muted);font-variant-numeric:tabular-nums}
+@media (min-width:761px){#dineMenuWrap{max-height:72vh;overflow-y:auto;padding-right:4px}}
+.cats{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding-bottom:8px;position:sticky;top:0;background:var(--surface);z-index:2}
+.cats button{flex:none;border:2px solid var(--line);background:transparent;border-radius:99px;padding:7px 14px;font-weight:700;cursor:pointer;touch-action:manipulation}
+.cats button.on{border-color:var(--brand);background:var(--brand);color:var(--on-brand)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));gap:8px}
+.tiles h3{grid-column:1/-1;font-size:1rem;color:var(--brand-deep);margin:8px 0 0}
+.tile{position:relative;display:grid;align-content:space-between;gap:6px;min-height:84px;text-align:left;border:2px solid var(--line);background:var(--bg);border-radius:12px;padding:10px;cursor:pointer;font-size:.88rem;font-weight:700;line-height:1.25;touch-action:manipulation;user-select:none}
+.tile:active{transform:scale(.97)}
+.tile.on{border-color:var(--brand);background:var(--sunk)}
+.tile .price{color:var(--muted);font-weight:600;font-variant-numeric:tabular-nums}
+.tile .qty{position:absolute;top:6px;right:6px;min-width:26px;height:26px;padding:0 6px;border-radius:99px;background:var(--brand);color:var(--on-brand);display:grid;place-items:center;font-size:.85rem;font-weight:800}
+.tile.on span:first-child{padding-right:28px}
+.tile .left{font-weight:800;color:var(--ok)}
+.tile .left.low{color:var(--warn)}
+.tile .left.out{color:var(--brand-deep)}
+.tile.sold{opacity:.55;border-style:dashed}
+.tile:disabled{cursor:not-allowed}
+.quick{display:flex;flex-wrap:wrap;gap:6px}
+.quick button{border:2px solid var(--line);background:transparent;border-radius:10px;padding:8px 12px;font-weight:700;font-size:.9rem;cursor:pointer;touch-action:manipulation;font-variant-numeric:tabular-nums}
+.quick button.on{border-color:var(--brand);background:var(--brand);color:var(--on-brand)}
+.lines.tl li{grid-template-columns:minmax(0,1fr) auto auto;align-items:center}
+#dineBar{position:fixed;left:16px;right:16px;bottom:max(12px,env(safe-area-inset-bottom));z-index:20;width:auto;border-radius:14px;padding:12px;font-size:1.05rem;box-shadow:0 4px 16px rgba(0,0,0,.25)}
+@media (min-width:761px){#dineBar{display:none!important}}
 .step{display:inline-flex;align-items:center;border:2px solid var(--brand);border-radius:99px;overflow:hidden}
-.step button{border:0;background:transparent;color:var(--brand);width:32px;height:28px;font-size:1.1rem;font-weight:800;cursor:pointer}
+.step button{border:0;background:transparent;color:var(--brand);width:38px;height:34px;font-size:1.15rem;font-weight:800;cursor:pointer;touch-action:manipulation}
 .step button:disabled{opacity:.35;cursor:default}
 .step span{min-width:22px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums}
+/* Delivery progress on each delivery card */
+.dsteps{display:flex;flex-wrap:wrap;gap:4px}
+.dstep{font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:99px;background:var(--off-bg);color:var(--off)}
+.dstep.done{background:var(--ok-bg);color:var(--ok)}
+.dstep.now{background:var(--brand);color:var(--on-brand)}
 /* Signed-in seller profile */
 .profile{display:flex;flex-wrap:wrap;gap:14px;align-items:center;margin-bottom:12px}
 .profile .avatar{width:56px;height:56px;border-radius:50%;background:var(--brand);color:var(--on-brand);display:grid;place-items:center;font-family:var(--display);font-weight:800;font-size:1.3rem;flex:none}
@@ -55,6 +81,7 @@
     <div class="btnrow"><button class="btn" type="submit" id="loginBtn">Sign in</button>
       <button class="btn ghost small" type="button" id="regToggle">New seller? Register</button></div>
     <p class="muted" style="font-size:.85rem;margin:0" id="loginHint">For sellers only. The owner signs in on the owner dashboard.</p>
+    <p style="font-size:.88rem;margin:0"><a href="kitchen.html">Kitchen staff? Sign in on the kitchen page</a></p>
   </form>
 
   <div class="card narrow" id="notAdmin" hidden></div>
@@ -69,19 +96,12 @@
       </div>
     </div>
     <div class="card" id="dinePanel" hidden style="margin-top:12px">
-      <h2 style="color:var(--brand);margin-bottom:6px" id="dineTitle">Dine-in order</h2>
+      <div class="dine-head"><h2 style="color:var(--brand)" id="dineTitle">Dine-in order</h2>
+        <button class="btn ghost small" type="button" id="dineClose">Cancel</button></div>
       <div class="dine-grid">
-        <div id="dineMenu"></div>
+        <div id="dineMenuWrap"><div class="cats" id="dineCats"></div><div class="tiles" id="dineMenu"></div></div>
         <form class="stack" id="dineForm" novalidate>
-          <label class="f" for="d-table" id="tableWrap">Table/Customer (name to call when the food is ready)<input id="d-table" maxlength="30" placeholder="e.g. Juan, or Table 3"></label>
-          <div class="group" id="dinePayWrap"><span>Payment</span>
-            <div class="seg">
-              <input type="radio" name="dpay" id="d-cash" value="Cash" checked><label for="d-cash">Cash</label>
-              <input type="radio" name="dpay" id="d-gc" value="GCash"><label for="d-gc">GCash</label>
-            </div>
-          </div>
-          <label class="f" for="d-ref" id="refWrap" hidden>GCash Ref No. (if they paid already)<input id="d-ref" inputmode="numeric" maxlength="24" autocomplete="off" placeholder="From the GCash notification"></label>
-          <label class="f" for="d-given" id="givenWrap">Cash received (optional)<input id="d-given" type="number" inputmode="numeric" min="0" step="1" placeholder="e.g. 500"></label>
+          <div id="dineCart"></div>
           <div class="group"><span>Take-out?</span>
             <div class="seg" style="grid-template-columns:repeat(3,1fr)">
               <input type="radio" name="dpack" id="d-pack-no" value="" checked><label for="d-pack-no">No, eating here</label>
@@ -89,14 +109,22 @@
               <input type="radio" name="dpack" id="d-pack-plastic" value="plastic"><label for="d-pack-plastic">Plastic (free)</label>
             </div>
           </div>
-          <label class="f" for="d-notes">Notes (optional)<input id="d-notes" maxlength="300" placeholder="Extra spicy, no spring onion"></label>
-          <div id="dineCart"></div>
+          <div class="group" id="dinePayWrap"><span>Payment</span>
+            <div class="seg">
+              <input type="radio" name="dpay" id="d-cash" value="Cash" checked><label for="d-cash">Cash</label>
+              <input type="radio" name="dpay" id="d-gc" value="GCash"><label for="d-gc">GCash</label>
+            </div>
+          </div>
+          <div class="group" id="givenWrap"><span>Cash received</span>
+            <div class="quick" id="cashChips"></div>
+            <input id="d-given" type="number" inputmode="numeric" min="0" step="1" placeholder="Other amount" aria-label="Other cash amount"></div>
+          <div class="group" id="gcashWrap" hidden><span>GCash payment</span><div class="quick" id="gcashChips"></div></div>
           <p class="err" id="d-err" hidden></p>
-          <div class="btnrow"><button class="btn" type="submit" id="dineSave">Send to kitchen</button>
-            <button class="btn ghost small" type="button" id="dineClose">Cancel</button></div>
+          <button class="btn big" type="submit" id="dineSave">Send to kitchen</button>
         </form>
       </div>
     </div>
+    <button class="btn big" type="button" id="dineBar" hidden></button>
     <div class="stats">
       <div class="stat"><b id="sOrders">0</b><span>Orders today</span></div>
       <div class="stat"><b id="sSales">₱0</b><span>Sales today</span></div>
@@ -113,9 +141,11 @@
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { auth, db, isConfigured, SHOP, MENU, ITEMS, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
+import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 
 const $=s=>document.querySelector(s);
+// A device set up for the kitchen (kitchen.html remembers it) opens the kitchen page instead
+try{ if(localStorage.getItem("lugaw-device")==="kitchen") location.replace("kitchen.html"); }catch(_){}
 let subs=[], lists={}, orders=[], riders=[], contacts={}, asked=new Set(), tab="new", known=null;
 let me=null, myName="", myProfile=null, watchSeller=null, registering=false;
 const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
@@ -136,6 +166,14 @@ if(isConfigured) onAuthStateChanged(auth, async u=>{
         <p>The seller dashboard needs a seller account. Sign out and sign in with a seller account, or use the
         <a href="owner.html">owner dashboard</a>.</p><p class="muted" style="font-size:.88rem">To take orders yourself,
         register a separate seller account here and approve it on the owner dashboard.</p>`;
+      return;
+    }
+  }catch(_){}
+  try{
+    if(!(await getDoc(doc(db,"sellers",me.uid))).exists() && (await getDoc(doc(db,"kitchen",me.uid))).exists()){
+      show("notAdmin");
+      $("#notAdmin").innerHTML=`<h2 style="color:var(--brand)">This is a kitchen account</h2>
+        <p>Kitchen staff use the <a href="kitchen.html">kitchen page</a>. Sign out here, or open the kitchen page.</p>`;
       return;
     }
   }catch(_){}
@@ -224,6 +262,14 @@ function start(){
     s.docs.forEach(d=>contacts[d.id]=d.data()); render();
   }, ()=>{}));
   subs.push(onSnapshot(collection(db,"riders"), s=>{ riders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  // The owner's open inventory count, to show what's left on the dine-in menu
+  subs.push(onSnapshot(query(collection(db,"inventory"),orderBy("since","desc"),limit(1)), s=>{
+    const c=s.docs[0]?.data({serverTimestamps:"estimate"}); stockCount=c&&!c.closedAt?c:null; updateStock(); if(!$("#dinePanel").hidden) renderDine();
+  }, ()=>{}));
+  // Menu changes the owner saves (recipes, prices) count right away, without a refresh
+  subs.push(onSnapshot(doc(db,"settings","menu"), s=>{ if(s.exists()){ applyMenu(s.data().sections); updateStock(); if(!$("#dinePanel").hidden) renderDine(); } }, ()=>{}));
+  // The sold-out list as last published (by this or another seller, or the owner)
+  subs.push(onSnapshot(doc(db,"settings","stock"), s=>{ const d=s.exists()?s.data():{}; publishedSoldOut=JSON.stringify([d.soldOut||[],d.left||{}]); updateStock(); }, ()=>{}));
 }
 function merge(){
   const m=new Map(); Object.values(lists).forEach(l=>l.forEach(o=>m.set(o.id,o)));
@@ -234,6 +280,7 @@ function merge(){
     if(known && [...ids].some(id=>!known.has(id))) chime();
     known=ids;
   }
+  updateStock(); if(stockCount && !$("#dinePanel").hidden) renderDine(); // keep "N left" current
   render();
 }
 // Contact details for older orders outside the latest 300
@@ -259,21 +306,63 @@ const dineItems=()=>Object.entries(dine).map(([id,qty])=>({id,name:ITEMS[id].nam
 // When adding to an existing dine-in order: that order (otherwise null)
 let addingTo=null;
 const dineErr=m=>{ $("#d-err").textContent=m||""; $("#d-err").hidden=!m; };
+// Tap-first, like a POS: one tap on a tile adds one; cash and GCash are buttons too.
+// Typing is only needed for a cash amount that isn't on a button.
+let dineCat="all", gcashNow=false;
+// Inventory: the owner's open count holds the beginning amount of each ingredient; every order
+// since then uses its items' recipes. stockLeft(id): servings of an item still possible
+// (null when nothing it uses is counted). 0 = sold out.
+let stockCount=null, leftNow=null;
+const stockLeft=id=>servingsLeft(id,leftNow);
+// Work out what's left and publish it for the customer page: the sold-out items, and how much
+// of each ingredient is left (so customers can't order more than that). Only written on a change.
+let publishedSoldOut=null;
+function updateStock(){
+  leftNow=ingredientsLeft(stockCount,orders);
+  const out=JSON.stringify([soldOutFrom(leftNow),leftNow||{}]);
+  if(publishedSoldOut!==null && out!==publishedSoldOut){
+    const [soldOut,left]=JSON.parse(out);
+    setDoc(doc(db,"settings","stock"),{soldOut,left,updatedAt:serverTimestamp()}).then(()=>{ publishedSoldOut=out; }).catch(()=>{});
+  }
+}
+// Everything this order would use on top of what's already been ordered: new items, plus any
+// quantity raised on an order being changed. Returns an error message, or "" when it fits.
+function stockProblem(extra){
+  const lines=[...Object.entries(dine).map(([id,qty])=>({id,qty}))];
+  if(addingTo) editLines.forEach((it,i)=>{ const more=it.qty-(addingTo.items[i]?.qty||0); if(more>0) lines.push({id:it.id,qty:more}); });
+  if(extra) lines.push(extra);
+  const id=shortItem(lines,leftNow); if(!id) return "";
+  const n=stockLeft(id);
+  const shared=lines.some(l=>l.id!==id && Object.keys(ITEMS[l.id]?.recipe||{}).some(g=>g in (ITEMS[id]?.recipe||{})));
+  return n===0?`${ITEMS[id].name} is sold out.`:`Not enough left for that: ${ITEMS[id].name} has ${n} left${shared?" (other items in this order use the same ingredients)":""}.`;
+}
 function renderDine(){
-  $("#dineMenu").innerHTML=MENU.map(c=>`<h3>${esc(c.name)}</h3>`+c.items.map(([id])=>{
+  $("#dineCats").innerHTML=[["all","All"],...MENU.map(c=>[c.id,c.name.replace(" Series","")])]
+    .map(([id,l])=>`<button type="button" class="${dineCat===id?"on":""}" data-cat="${esc(id)}">${esc(l)}</button>`).join("");
+  const cats=dineCat==="all"?MENU:MENU.filter(c=>c.id===dineCat);
+  $("#dineMenu").innerHTML=cats.map(c=>(dineCat==="all"?`<h3>${esc(c.name)}</h3>`:"")+c.items.map(([id])=>{
     const it=ITEMS[id], q=dine[id]||0;
-    return `<div class="dine-item"><span>${esc(it.name)} <span class="price">${peso(it.price)}</span></span>
-      <div class="step"><button type="button" data-dd="-1" data-item="${id}" aria-label="Remove one"${q?"":" disabled"}>−</button><span>${q}</span><button type="button" data-dd="1" data-item="${id}" aria-label="Add one"${q>=MAX_QTY?" disabled":""}>+</button></div></div>`;
+    const left=stockLeft(id);
+    return `<button type="button" class="tile${q?" on":""}${left===0?" sold":""}" data-add="${id}"${left===0&&!q?" disabled":""} aria-label="Add ${esc(it.name)}, ${peso(it.price)}${q?`, ${q} in order`:""}${left!=null?(left?`, ${left} left`:", sold out"):""}">
+      <span>${esc(it.name)}</span><span class="price">${peso(it.price)}${left!=null?` · <span class="left${left<=0?" out":left<=3?" low":""}">${left<=0?"sold out":left+" left"}</span>`:""}</span>${q?`<span class="qty" aria-hidden="true">${q}</span>`:""}</button>`;
   }).join("")).join("");
   renderDineTotals();
 }
+// Amounts a customer is likely to hand over: exact, then round amounts and bills above the total
+function cashChoices(total){
+  const up=n=>Math.ceil(total/n)*n;
+  return [...new Set([total,up(50),up(100),up(500),up(1000),200,500,1000].filter(n=>n>=total))].sort((a,b)=>a-b).slice(0,5);
+}
+const cashLabel=(n,i)=>i?peso(n):`Exact ${peso(n)}`;
+const stepper=(id,q)=>`<span class="step"><button type="button" data-dd="-1" data-item="${id}" aria-label="One less">−</button><span>${q}</span><button type="button" data-dd="1" data-item="${id}" aria-label="One more"${q>=MAX_QTY?" disabled":""}>+</button></span>`;
+const ticketLine=it=>`<li><span>${esc(it.name)}<br><span class="muted" style="font-size:.82rem">${peso(it.price)}</span></span>${stepper(it.id,it.qty)}<span class="amt">${peso(it.price*it.qty)}</span></li>`;
 // Cash typed into "Cash received", or null when it's GCash or left blank
 function cashGiven(){
   const v=$("#d-given").value.trim();
   return dinePay()==="Cash" && v!=="" ? Math.floor(Number(v)) : null;
 }
 const dinePay=()=>document.querySelector('input[name="dpay"]:checked').value;
-// ---------- Changing a dine-in order (before it's paid) ----------
+// ---------- Changing a dine-in order (before or after it's paid) ----------
 // editLines: a copy of the order's current lines whose quantities the seller can lower or raise.
 let editLines=[];
 const lineLabel=it=>esc(ITEMS[it.id]?.name||it.name)+(it.pack?` <span class="pill work" style="font-size:.7rem">Take-out · ${it.pack==="box"?"box":"plastic"}</span>`:"");
@@ -284,41 +373,66 @@ function renderChangeCart(items){
     <ul class="lines">${editLines.map((it,i)=>`<li style="${it.qty?"":"opacity:.5;text-decoration:line-through"}">
       <span class="step" style="display:inline-flex"><button type="button" data-el="${i}" data-ed="-1" aria-label="One less"${it.qty?"":" disabled"}>−</button><span>${it.qty}</span><button type="button" data-el="${i}" data-ed="1" aria-label="One more"${it.qty>=MAX_QTY?" disabled":""}>+</button></span>
       <span>${lineLabel(it)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
-    ${items.length?`<b style="font-size:.9rem">Adding</b><ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${lineLabel(it)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>`:""}
-    <div class="totals"><div><span>Was</span><span>${peso(addingTo.total)}</span></div>${boxRow(t)}<div class="grand"><span>New total</span><span>${peso(t.total)}</span></div></div>`;
+    ${items.length?`<b style="font-size:.9rem">Adding</b><ul class="lines tl">${items.map(ticketLine).join("")}</ul>`:`<p class="muted" style="margin:0;font-size:.88rem">Tap the menu to add items.</p>`}
+    <div class="totals"><div><span>Was</span><span>${peso(addingTo.total)}</span></div>${boxRow(t)}<div class="grand"><span>New total</span><span>${peso(t.total)}</span></div>${afterPay(t.total)}</div>`;
   $("#dineSave").disabled=!changed || !all.length;
+  dineBar(items, t.total, changed);
 }
+// Changing an order that's already paid: what to collect or give back once it's saved
+function afterPay(newTotal){
+  if(!hasPayment(addingTo)) return "";
+  const d=newTotal-coveredTotal(addingTo);
+  return `<div><span>Already paid</span><span>${peso(coveredTotal(addingTo))}</span></div>`
+    +(d>0?`<div style="color:var(--brand-deep);font-weight:800"><span>Collect</span><span>${peso(d)}</span></div>`
+      :d<0?`<div style="color:var(--brand-deep);font-weight:800"><span>Give back</span><span>${peso(-d)}</span></div>`:"");
+}
+// Phones: the ticket is below the menu, so a bar at the bottom shows the total and jumps to it
+let saveInView=false;
+function dineBar(items,total,show){
+  const n=items.reduce((s,it)=>s+it.qty,0);
+  $("#dineBar").textContent=addingTo?`Review changes · ${peso(total)}`:`${n} item${n===1?"":"s"} · ${peso(total)} · View order`;
+  $("#dineBar").hidden=$("#dinePanel").hidden || !show || saveInView;
+}
+new IntersectionObserver(es=>{ saveInView=es[0].isIntersecting; if(saveInView) $("#dineBar").hidden=true; else renderDineTotals(); }).observe($("#dineSave"));
+$("#dineBar").onclick=()=>$("#dineForm").scrollIntoView({behavior:"smooth",block:"start"});
 $("#dineCart").addEventListener("click",e=>{
   const b=e.target.closest("[data-el]"); if(!b||!addingTo) return;
-  const it=editLines[+b.dataset.el]; it.qty=Math.max(0,Math.min(MAX_QTY,it.qty+ +b.dataset.ed)); renderDineTotals();
+  const it=editLines[+b.dataset.el];
+  if(+b.dataset.ed>0){ const p=stockProblem({id:it.id,qty:1}); if(p) return dineErr(p); }
+  dineErr(); it.qty=Math.max(0,Math.min(MAX_QTY,it.qty+ +b.dataset.ed)); renderDineTotals();
 });
 function renderDineTotals(){
   const items=dineItems(), t=calcTotals(items,"Dine-in"), given=cashGiven();
   $("#givenWrap").hidden=dinePay()!=="Cash" || !!addingTo;
-  $("#refWrap").hidden=dinePay()!=="GCash" || !!addingTo;
+  $("#gcashWrap").hidden=dinePay()!=="GCash" || !!addingTo;
+  $("#gcashChips").innerHTML=`<button type="button" class="${gcashNow?"":"on"}" data-gcash-now="">Pay later</button>
+    <button type="button" class="${gcashNow?"on":""}" data-gcash-now="1">GCash received${items.length?` · ${peso(t.total)}`:""}</button>`;
+  $("#dineSave").textContent=addingTo?"Save changes":items.length?`Send to kitchen · ${peso(t.total)}`:"Send to kitchen";
+  const gv=$("#d-given").value.trim();
+  $("#cashChips").innerHTML=items.length&&!addingTo?[`<button type="button" class="${gv===""?"on":""}" data-cash="">Pay later</button>`,
+    ...cashChoices(t.total).map((n,i)=>`<button type="button" class="${gv===String(n)?"on":""}" data-cash="${n}">${cashLabel(n,i)}</button>`)].join(""):"";
   const change = given===null ? "" : given>=t.total
     ? `<div><span>Cash received</span><span>${peso(given)}</span></div><div class="grand"><span>Change</span><span>${peso(given-t.total)}</span></div>`
     : `<div style="color:var(--brand-deep);font-weight:700"><span>Short by</span><span>${peso(t.total-given)}</span></div>`;
   if(addingTo) return renderChangeCart(items);
   $("#dineCart").innerHTML=items.length
-    ? `<ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${esc(it.name)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
-       <div class="totals">${addingTo?`<div><span>Already ordered</span><span>${peso(addingTo.total)}</span></div><div><span>Adding</span><span>${peso(t.total)}</span></div><div class="grand"><span>New total</span><span>${peso(addingTo.total+t.total)}</span></div>`
-         :`${boxRow(t)}<div class="grand"><span>Total</span><span>${peso(t.total)}</span></div>${change}`}</div>`
-    : `<p class="empty" style="margin:0">Tap + on the menu to add items.</p>`;
+    ? `<ul class="lines tl">${items.map(ticketLine).join("")}</ul>
+       <div class="totals">${boxRow(t)}<div class="grand"><span>Total</span><span>${peso(t.total)}</span></div>${change}</div>`
+    : `<p class="empty" style="margin:0">Tap the menu to add items.</p>`;
   $("#dineSave").disabled=!items.length;
+  dineBar(items, t.total, items.length>0);
 }
 $("#d-given").addEventListener("input",renderDineTotals);
 document.querySelectorAll('input[name="dpack"]').forEach(r=>r.addEventListener("change",renderDineTotals));
 $("#d-pack-box-label").textContent=`Box (+${peso(SHOP.boxFee)} each)`;
 document.querySelectorAll('input[name="dpay"]').forEach(r=>r.addEventListener("change",renderDineTotals));
-function closeDine(){ Object.keys(dine).forEach(k=>delete dine[k]); $("#d-table").value=""; $("#d-notes").value=""; $("#d-given").value=""; $("#d-ref").value=""; $("#d-cash").checked=true; $("#d-pack-no").checked=true; dineErr(); $("#dinePanel").hidden=true; setAdding(null); }
+function closeDine(){ Object.keys(dine).forEach(k=>delete dine[k]); dineCat="all"; gcashNow=false; $("#d-given").value=""; $("#d-cash").checked=true; $("#d-pack-no").checked=true; dineErr(); $("#dinePanel").hidden=true; $("#dineBar").hidden=true; setAdding(null); }
 // Switch the panel between a new dine-in order and adding to an existing one
 function setAdding(o){
   addingTo=o;
   $("#dineTitle").textContent=o?`Change ${o.code}${o.table?" · "+o.table:""}`:"Dine-in order";
   editLines=o?(o.items||[]).map(it=>({...it})):[];
-  $("#tableWrap").hidden=$("#dinePayWrap").hidden=!!o;
-  $("#dineSave").textContent=o?"Save changes":"Send to kitchen";
+  $("#dinePayWrap").hidden=!!o;
 }
 function openAddItems(o){
   Object.keys(dine).forEach(k=>delete dine[k]); dineErr(); setAdding(o);
@@ -326,49 +440,58 @@ function openAddItems(o){
 }
 $("#dineBtn").onclick=()=>{ if(addingTo) closeDine(); $("#dinePanel").hidden=false; renderDine(); $("#dinePanel").scrollIntoView({behavior:"smooth",block:"start"}); };
 $("#dineClose").onclick=closeDine;
-$("#dineMenu").addEventListener("click",e=>{
-  const b=e.target.closest("[data-dd]"); if(!b) return;
-  const id=b.dataset.item, q=(dine[id]||0)+ +b.dataset.dd;
+function changeQty(id,d){
+  const q=(dine[id]||0)+d;
+  // not enough ingredients left for another one (counting the whole order)
+  if(d>0){ const p=stockProblem({id,qty:d}); if(p) return dineErr(p); }
   const used=(addingTo?.items?.length||0)+Object.keys(dine).length;
   if(!dine[id] && used>=MAX_LINES) return dineErr(`Up to ${MAX_LINES} lines per order. Start a new dine-in order for more.`);
   dineErr(); if(q>0) dine[id]=Math.min(q,MAX_QTY); else delete dine[id];
   renderDine();
+}
+$("#dinePanel").addEventListener("click",e=>{
+  const c=e.target.closest("[data-cat]"); if(c){ dineCat=c.dataset.cat; renderDine(); return; }
+  const g=e.target.closest("[data-gcash-now]"); if(g){ gcashNow=!!g.dataset.gcashNow; renderDineTotals(); return; }
+  const m=e.target.closest("[data-cash]"); if(m){ $("#d-given").value=m.dataset.cash; renderDineTotals(); return; }
+  const a=e.target.closest("[data-add]"); if(a) return changeQty(a.dataset.add,1);
+  const s=e.target.closest("[data-dd]"); if(s) changeQty(s.dataset.item,+s.dataset.dd);
 });
 $("#dineForm").onsubmit=async e=>{
   e.preventDefault(); dineErr();
-  const items=dineItems(); if(!items.length) return;
+  const items=dineItems();
+  if(!items.length && !addingTo) return; // a change can be removals only
   if(addingTo){
     // Added items are appended as a new round so the kitchen sees what's new
     const o=orders.find(x=>x.id===addingTo.id)||addingTo;
-    if(isPaid(o) || !["preparing","completed"].includes(o.status)) return dineErr("This order is already paid or closed. Start a new dine-in order.");
+    if(!["preparing","completed"].includes(o.status)) return dineErr("This order is already closed. Start a new dine-in order.");
     if((o.items||[]).length!==editLines.length) return dineErr("This order changed on another screen. Close this panel and try again.");
     const round=Math.max(1,...(o.items||[]).map(it=>it.round||1))+1;
     const removedNow=[], at=Date.now();
     editLines.forEach((it,i)=>{ const less=(o.items[i].qty||0)-it.qty; if(less>0) removedNow.push({id:it.id,name:ITEMS[it.id]?.name||it.name,price:it.price,qty:less,...(it.pack?{pack:it.pack}:{}),by:myName,at}); });
     const more=editLines.some((it,i)=>it.qty>(o.items[i].qty||0));
+    const short=stockProblem(); if(short) return dineErr(short); // stock may have changed since the items were tapped
     const all=[...editLines.filter(it=>it.qty>0),...items.map(it=>({...it,round}))], t=calcTotals(all,"Dine-in");
+    if(!all.length) return dineErr(hasPayment(o)?"Leave at least one item.":"To remove everything, cancel the order instead.");
     const upd={items:all,subtotal:t.subtotal,boxFee:t.boxFee,total:t.total};
+    if(hasPayment(o) && o.paidTotal==null) upd.paidTotal=o.total; // older paid order: remember what was paid
     if(items.length||more){ upd.status="preparing"; upd.addedAt=serverTimestamp(); } // something new for the kitchen
     if(removedNow.length) Object.assign(upd,{removed:[...(o.removed||[]),...removedNow],editedAt:serverTimestamp(),editedBy:me.uid,editedByName:myName});
     $("#dineSave").disabled=true;
     try{
       await updateDoc(doc(db,"orders",o.id),upd);
-      closeDine(); tab="kitchen"; render();
+      closeDine(); if(upd.status) tab="kitchen"; render(); // only removals: nothing new for the kitchen
     }catch(x){ dineErr(friendlyError(x)); $("#dineSave").disabled=false; }
     return;
   }
+  const short=stockProblem(); if(short) return dineErr(short); // stock may have changed since the items were tapped
   const t=calcTotals(items,"Dine-in"), ref=doc(collection(db,"orders")), given=cashGiven();
   if(given!==null && !(given>=t.total)) return dineErr(`Cash received is less than the ${peso(t.total)} total.`);
   $("#dineSave").disabled=true;
   const order={ code:orderCode(ref.id), customerUid:me.uid, sellerUid:me.uid, sellerName:myName, mode:"Dine-in",
-    table:$("#d-table").value.trim(), notes:$("#d-notes").value.trim(), payment:dinePay(), items,
+    table:"", notes:"", payment:dinePay(), items,
     subtotal:t.subtotal, deliveryFee:0, boxFee:t.boxFee, total:t.total, status:"preparing", riderUid:null, createdAt:serverTimestamp() };
-  if(given!==null) order.cashGiven=given;
-  const gref=cleanRef($("#d-ref").value);
-  if(dinePay()==="GCash" && gref){
-    if(!/^[0-9A-Za-z]{6,20}$/.test(gref)){ $("#dineSave").disabled=false; return dineErr("That GCash Ref No. looks too short. Check it in your GCash History."); }
-    Object.assign(order,{paid:true,paidAt:serverTimestamp(),gcashRef:gref});
-  }
+  if(given!==null) Object.assign(order,{cashGiven:given,paidTotal:t.total});
+  if(dinePay()==="GCash" && gcashNow) Object.assign(order,{paid:true,paidAt:serverTimestamp(),paidTotal:t.total});
   try{
     await setDoc(ref,order);
     closeDine(); tab="kitchen"; render();
@@ -379,19 +502,41 @@ const unsettled=o=>o.status==="delivered"&&o.settled===false;
 // Orders the store must act on now: pickup orders just placed, and delivery
 // orders a rider has accepted (delivery orders find a rider before the store cooks)
 const needsStore=o=>(o.status==="new"&&o.mode!=="Delivery")||(o.status==="assigned"&&o.mode==="Delivery");
-// A dine-in order is paid once cash received is recorded, or GCash is marked received
-const isPaid=o=>o.cashGiven!=null||o.paid===true;
-const unpaidDine=o=>o.mode==="Dine-in"&&o.status!=="cancelled"&&!isPaid(o);
+// A dine-in order has a payment once cash received is recorded, or GCash is marked received.
+// It can still be changed afterwards: paidTotal is what the payment covered, settledTotal the
+// total once a later difference was settled, and the balance is what's left (+ collect, - give back).
+const hasPayment=o=>o.cashGiven!=null||o.paid===true;
+const coveredTotal=o=>o.settledTotal??o.paidTotal??o.total;
+const balanceOf=o=>hasPayment(o)?(o.total||0)-coveredTotal(o):(o.total||0);
+const isPaid=o=>hasPayment(o)&&balanceOf(o)===0;
+const unpaidDine=o=>o.mode==="Dine-in"&&o.status!=="cancelled"&&balanceOf(o)!==0;
+// Delivery orders stay in one Delivery tab while they're on their way (each card shows its
+// progress), so the seller doesn't have to follow them from tab to tab. Once delivered they
+// move to Done today. New, Kitchen and Ready for pickup are pickup and dine-in orders.
+const isDel=o=>o.mode==="Delivery";
+const delActive=o=>isDel(o)&&ACTIVE.includes(o.status);
 const TABS=[
-  ["new","New",needsStore],
-  ["finding","Finding rider",o=>o.mode==="Delivery"&&o.status==="new"],
-  ["kitchen","Kitchen",o=>o.status==="preparing"],
-  ["out","Ready & out",o=>["ready","ready_pickup","picked_up"].includes(o.status)],
+  ["new","New",o=>needsStore(o)&&!isDel(o)],
+  ["delivery","Delivery",delActive],
+  ["kitchen","Kitchen",o=>o.status==="preparing"&&!isDel(o)],
+  ["out","Ready for pickup",o=>o.status==="ready_pickup"],
   ["done","Done today",o=>["delivered","completed"].includes(o.status)&&isToday(o.createdAt)],
   ["unpaid","Unpaid",unpaidDine],
   ["settle","Settle with riders",unsettled],
   ["cancelled","Cancelled",o=>o.status==="cancelled"&&isToday(o.createdAt)],
 ];
+// Delivery tab: oldest first
+const ms=o=>o.createdAt?.toMillis?.()??Infinity;
+const delSort=(a,b)=>ms(a)-ms(b);
+// Progress along the delivery steps, shown on every delivery card
+const DEL_STEPS=[["new","Finding rider"],["assigned","Rider found"],["preparing","Cooking"],["ready","Food ready"],["picked_up","On the way"],["delivered","Delivered"]];
+function deliverySteps(o){
+  if(o.status==="cancelled") return "";
+  const i=DEL_STEPS.findIndex(([s])=>s===o.status), done=o.status==="delivered";
+  const steps=DEL_STEPS.map(([s,l],k)=>`<span class="dstep ${k<i||(done&&k===i)?"done":k===i?"now":""}">${l}</span>`);
+  steps.push(`<span class="dstep ${!done?"":o.settled===false?"now":"done"}">${done&&o.settled!==false?"Settled":"Settle with rider"}</span>`);
+  return `<div class="dsteps" aria-label="Delivery progress">${steps.join("")}</div>`;
+}
 
 // ---------- My profile ----------
 // Who is signed in, and their own orders and sales today (orders credited to them)
@@ -452,7 +597,7 @@ function render(force){
   const done=today.filter(o=>["delivered","completed"].includes(o.status));
   const owed=orders.filter(unsettled);
   $("#sOrders").textContent=today.length;
-  $("#sUnpaid").textContent=peso(orders.filter(unpaidDine).reduce((s,o)=>s+(o.total||0),0));
+  $("#sUnpaid").textContent=peso(orders.filter(unpaidDine).reduce((s,o)=>s+Math.max(0,balanceOf(o)),0));
   $("#sSales").textContent=peso(done.reduce((s,o)=>s+shopAmount(o),0));
   $("#sFees").textContent=peso(done.reduce((s,o)=>s+(o.deliveryFee||0),0));
   // Cash orders: the rider keeps the fee and hands over the food money.
@@ -465,6 +610,7 @@ function render(force){
   }).join("");
   const list=orders.filter(TABS.find(t=>t[0]===tab)[2]);
   if(tab==="new"||tab==="kitchen") list.reverse(); // oldest first
+  if(tab==="delivery") list.sort(delSort);
   // keep the cursor in a cash or cancel-reason box when new orders refresh the board
   const focusKey=document.activeElement?.dataset?.focusKey;
   $("#board").innerHTML=(tab==="settle"?settleSummary(list):"")+(list.length?list.map(orderCard).join(""):`<p class="empty">Nothing here right now.</p>`);
@@ -498,8 +644,9 @@ function orderCard(o){
   if(o.status==="picked_up" && o.hasPin) acts.push(["showpin","Customer can't show the code?","btn ghost small"]);
   if(unsettled(o)) acts.push(["settle", o.payment==="Cash" ? `Got ${peso(shopAmount(o))} from rider` : `Paid rider's ${peso(o.deliveryFee)} fee`, "btn ok"]);
   if(o.payment==="GCash" && !dineIn && !o.paymentConfirmed && o.status!=="cancelled") acts.unshift(["paid","GCash payment received","btn ok"]);
-  if(dineIn && ["preparing","completed"].includes(o.status) && !isPaid(o)) acts.push(["additems","Change order","btn ghost small"]);
-  if(ACTIVE.includes(o.status) || (dineIn && o.status==="completed" && !isPaid(o))) acts.push(["cancelled","Cancel","btn ghost small"]);
+  if(dineIn && ["preparing","completed"].includes(o.status)) acts.push(["additems","Change order","btn ghost small"]);
+  // a paid order isn't cancelled (the sale stays on the books): change it instead
+  if((ACTIVE.includes(o.status) && !(dineIn && hasPayment(o))) || (dineIn && o.status==="completed" && !hasPayment(o))) acts.push(["cancelled","Cancel","btn ghost small"]);
   const rider=o.riderName?`<b>Rider</b><span>${esc(o.riderName)} · <span class="num">${esc(o.riderPhone)}</span></span>`:
     (del&&["preparing","ready"].includes(o.status)?`<b>Rider</b><span style="color:var(--brand-deep)">No rider yet: finding a new one (${avail.length} available)</span>`
     : o.status==="new"&&del?`<b>Riders</b><span>${avail.length?`<span class="pill go">${avail.length} available now</span> ${avail.map(r=>esc(r.name)).join(", ")}`
@@ -509,13 +656,14 @@ function orderCard(o){
   const settle=unsettled(o)?`<b>Settle</b><span>${o.payment==="Cash"
     ? `Older cash order: the rider collected ${peso(o.total)} cash, keeps the ${peso(o.deliveryFee)} fee and owes you ${peso(shopAmount(o))}.`
     : `Paid by GCash. You owe the rider the ${peso(o.deliveryFee)} fee.${payTo(o.riderUid)}`}</span>`:"";
-  return `<div class="order ${o.status==="new"?"alert":""}">
+  return `<div class="order ${o.status==="new"||needsStore(o)?"alert":""}">
     <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${esc(st.tone)}">${esc(statusLabel(o))}</span></div>
+    ${del?deliverySteps(o):""}
     ${o.unconfirmedAt&&o.status==="new"?`<div class="flag">Rider ${esc(o.unconfirmedByName||"")} couldn't confirm this customer by phone (${fmtTime(o.unconfirmedAt)}). Call the customer; if it's a fake order, cancel it.</div>`:""}
     ${priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
     ${!dineIn && c && ["new","preparing"].includes(o.status) && phoneConfirmed(c.phone)===false?`<div class="flag">New number. Call ${esc(c.phone)} to check the order is real before cooking.</div>`:""}
     <div class="kv"><b>Time</b><span>${fmtTime(o.createdAt)} · ${esc(o.mode)}</span>
-      ${dineIn?`<b>Table/Customer</b><span style="font-size:1.1rem;font-weight:800">${esc(o.table)||"—"}</span>`
+      ${dineIn?(o.table?`<b>Table/Customer</b><span style="font-size:1.1rem;font-weight:800">${esc(o.table)}</span>`:"")
         :`<b>Customer</b><span>${c?`${esc(c.name)} · <a class="num" href="${esc(telLink(c.phone))}">${esc(c.phone)}</a><br>${phoneBadge(c.phone)}`:`<span class="muted">Loading…</span>`}</span>`}
       ${del?`<b>Address</b><span>${esc(o.address)} · <a href="${mapsLink(o.address)}" target="_blank" rel="noopener">Map</a></span>`:""}
       <b>Payment</b><span>${o.payment==="GCash"?(dineIn?"GCash":gcashLine(o)):"Cash"}</span>
@@ -539,9 +687,6 @@ const changeText=(o,v)=>{
   if(v==="" || !Number.isFinite(n)) return "";
   return n>=o.total ? `Change: <b>${peso(n-o.total)}</b>` : `<span style="color:var(--brand-deep)">Short by ${peso(o.total-n)}</span>`;
 };
-// GCash Ref No. typed for each dine-in order (kept across board refreshes)
-const refDraft={};
-const cleanRef=v=>String(v||"").replace(/[\s-]/g,"");
 // The same Ref No. on another order means one payment is being counted twice
 function refReused(o){
   const on=orders.filter(x=>x.id!==o.id && x.gcashRef && x.gcashRef===o.gcashRef).map(x=>x.code);
@@ -549,28 +694,42 @@ function refReused(o){
 }
 function cashBlock(o){
   if(o.mode!=="Dine-in" || o.status==="cancelled") return "";
-  const due=isPaid(o)?"":`<div class="flag">Not paid yet · ${peso(o.total)}</div>`;
-  if(o.payment!=="Cash") return o.paid
-    ? `<div><span class="pill done">Paid</span> GCash${o.gcashRef?` · Ref <b class="num">${esc(o.gcashRef)}</b>`:""}</div>${refReused(o)}`
-    : `${due}<div class="btnrow"><input inputmode="numeric" maxlength="24" autocomplete="off" placeholder="GCash Ref No." aria-label="GCash reference number"
-        data-ref-for="${esc(o.id)}" data-focus-key="ref-${esc(o.id)}" value="${esc(refDraft[o.id]||"")}" style="max-width:200px">
-        <button class="btn small ok" data-gcash-paid="${esc(o.id)}">Save payment</button></div>
-      <div class="muted" style="font-size:.85rem">Find the payment in your GCash History and type its Ref No.</div>`;
-  if(o.cashGiven==null) return due+cashInput(o);
-  if(o.cashGiven!=null) return `<div class="totals">
-    <div><span>Paid (cash)</span><span>${peso(o.cashGiven)}</span></div>
-    <div class="grand"><span>Change</span><span>${peso(o.cashGiven-o.total)}</span></div></div>`;
+  const due=`<div class="flag">Not paid yet · ${peso(o.total)}</div>`;
+  if(!hasPayment(o)) return o.payment!=="Cash"
+    ? `${due}<div class="btnrow"><button class="btn small ok" data-gcash-paid="${esc(o.id)}">GCash received · ${peso(o.total)}</button></div>
+      <div class="muted" style="font-size:.85rem">Check the ${peso(o.total)} payment arrived in your GCash, then tap.</div>`
+    : due+cashInput(o);
+  const first=o.paidTotal??o.total;
+  const paid=o.payment!=="Cash"
+    ? `<div><span class="pill done">Paid</span> GCash ${peso(first)}${o.gcashRef?` · Ref <b class="num">${esc(o.gcashRef)}</b>`:""}</div>${refReused(o)}`
+    : `<div class="totals"><div><span>Paid (cash)</span><span>${peso(o.cashGiven)}</span></div>
+       <div class="grand"><span>Change</span><span>${peso(o.cashGiven-first)}</span></div></div>`;
+  return paid+adjustLine(o)+balanceBlock(o);
+}
+// What was settled after earlier changes (extra paid, or money given back)
+function adjustLine(o){
+  const d=(o.settledTotal??o.paidTotal??o.total)-(o.paidTotal??o.total);
+  return d>0?`<div class="muted" style="font-size:.88rem">Extra paid after changes: <b>${peso(d)}</b></div>`
+    :d<0?`<div class="muted" style="font-size:.88rem">Given back after changes: <b>${peso(-d)}</b></div>`:"";
+}
+// The order changed after it was paid: collect the extra or give money back, then tap to record it
+function balanceBlock(o){
+  const b=balanceOf(o); if(!b) return "";
+  const id=esc(o.id);
+  return b>0
+    ? `<div class="flag">Changed after paying: collect ${peso(b)} more</div><div class="btnrow"><button class="btn small ok" data-settle-bal="${id}">Got ${peso(b)} more</button></div>`
+    : `<div class="flag">Changed after paying: give back ${peso(-b)}</div><div class="btnrow"><button class="btn small ok" data-settle-bal="${id}">Gave back ${peso(-b)}</button></div>`;
 }
 function cashInput(o){
   const v=givenDraft[o.id]??"";
   return `<div class="stack" style="display:grid;gap:6px">
+    <div class="quick">${cashChoices(o.total).map((n,i)=>`<button type="button" class="${v===String(n)?"on":""}" data-quick-given="${esc(o.id)}" data-amt="${n}">${cashLabel(n,i)}</button>`).join("")}</div>
     <div class="btnrow"><input type="number" inputmode="numeric" min="0" step="1" data-given-for="${esc(o.id)}" data-focus-key="cash-${esc(o.id)}" value="${esc(v)}"
-      placeholder="Cash received" aria-label="Cash received" style="max-width:170px">
+      placeholder="Other amount" aria-label="Cash received" style="max-width:170px">
       <button class="btn small" data-paid="${esc(o.id)}">Save payment</button></div>
     <div data-change-for="${esc(o.id)}" style="font-size:1.05rem">${changeText(o,v)}</div></div>`;
 }
 $("#board").addEventListener("input",e=>{
-  const r=e.target.closest("[data-ref-for]"); if(r){ refDraft[r.dataset.refFor]=r.value; return; }
   const i=e.target.closest("[data-given-for]"); if(!i) return;
   const id=i.dataset.givenFor, o=orders.find(x=>x.id===id); givenDraft[id]=i.value;
   const out=document.querySelector(`[data-change-for="${CSS.escape(id)}"]`); if(o&&out) out.innerHTML=changeText(o,i.value);
@@ -646,7 +805,10 @@ function receiptHTML(o){
   }).join("");
   const who=o.mode==="Dine-in" ? (o.table?row("Table/Customer",esc(o.table)):"")
     : (c?row("Customer",esc(c.name))+row("Mobile",esc(c.phone)):"")+(o.mode==="Delivery"?`<tr><td colspan="2">Deliver to: ${esc(o.address)}</td></tr>`:"");
-  const change=o.cashGiven!=null ? row("Cash",peso(o.cashGiven))+row("Change",peso(o.cashGiven-o.total),"big") : "";
+  const first=o.paidTotal??o.total, adj=(o.settledTotal??first)-first, bal=balanceOf(o);
+  const change=(o.cashGiven!=null ? row("Cash",peso(o.cashGiven))+row("Change",peso(o.cashGiven-first),"big") : "")
+    +(adj>0?row("Extra paid",peso(adj)):adj<0?row("Given back",peso(-adj)):"")
+    +(hasPayment(o)&&bal>0?row("STILL TO PAY",peso(bal),"big"):hasPayment(o)&&bal<0?row("TO GIVE BACK",peso(-bal),"big"):"");
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Receipt ${esc(o.code)}</title><style>
 @page{margin:4mm}
@@ -661,7 +823,7 @@ hr{border:0;border-top:1px dashed #000;margin:6px 0}.big td{font-weight:bold;fon
 <table>${row("Order",esc(o.code))}${row("Date",when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}${row("Type",esc(o.mode))}${who}</table><hr>
 <table>${lines}</table><hr>
 <table>${row("Subtotal",peso(o.subtotal))}${o.deliveryFee?row("Delivery fee",peso(o.deliveryFee)):""}${o.boxFee?row("Take-out boxes",peso(o.boxFee)):""}${row("TOTAL",peso(o.total),"big")}
-${row("Payment",esc(o.payment)+(o.mode==="Dine-in"&&o.status!=="cancelled"&&!isPaid(o)?" · NOT PAID":""))}${o.gcashRef?row("GCash Ref",esc(o.gcashRef)):""}${change}</table>
+${row("Payment",esc(o.payment)+(o.mode==="Dine-in"&&o.status!=="cancelled"&&!hasPayment(o)?" · NOT PAID":""))}${o.gcashRef?row("GCash Ref",esc(o.gcashRef)):""}${change}</table>
 ${o.notes?`<hr><div>Notes: ${esc(o.notes)}</div>`:""}<hr>
 <div class="c">Salamat po! Come again.<br><small>Order slip only. Not an official receipt.</small></div>
 <div class="noprint"><button onclick="print()">Print</button><button onclick="close()">Close</button></div>
@@ -679,12 +841,21 @@ function printReceipt(o){
 const CONFIRM=new Set(["reassign"]);
 $("#board").addEventListener("click", async e=>{
   const b=e.target.closest("button"); if(!b) return;
+  if(b.dataset.settleBal){
+    const o=orders.find(x=>x.id===b.dataset.settleBal); if(!o) return;
+    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent=`${balanceOf(o)>0?"Got the money":"Gave it back"}? Tap again`; return; }
+    b.disabled=true;
+    try{ await updateDoc(doc(db,"orders",o.id),{settledTotal:o.total}); }
+    catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
+    return;
+  }
+  if(b.dataset.quickGiven){ givenDraft[b.dataset.quickGiven]=b.dataset.amt; render(true); return; }
   if(b.dataset.paid){
     const id=b.dataset.paid, o=orders.find(x=>x.id===id), n=Math.floor(Number(givenDraft[id]));
     const out=document.querySelector(`[data-change-for="${CSS.escape(id)}"]`);
     if(!o || !Number.isFinite(n) || n<o.total){ if(out) out.innerHTML=`<span style="color:var(--brand-deep)">Type at least ${peso(o?.total)}.</span>`; return; }
     b.disabled=true;
-    try{ await updateDoc(doc(db,"orders",id),{cashGiven:n}); delete givenDraft[id]; }
+    try{ await updateDoc(doc(db,"orders",id),{cashGiven:n,...(o.paidTotal==null?{paidTotal:o.total}:{})}); delete givenDraft[id]; }
     catch(x){ b.disabled=false; if(out) out.textContent=friendlyError(x); }
     return;
   }
@@ -719,12 +890,11 @@ $("#board").addEventListener("click", async e=>{
     b.closest(".btnrow").after(box); b.remove(); return;
   }
   if(b.dataset.gcashPaid){
-    const id=b.dataset.gcashPaid, ref=cleanRef(refDraft[id]);
-    if(!/^[0-9A-Za-z]{6,20}$/.test(ref)){ b.textContent="Type the GCash Ref No. first"; return; }
-    const dup=orders.find(x=>x.id!==id && x.gcashRef===ref);
-    if(dup && b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent=`Ref already on ${dup.code}. Save anyway?`; return; }
+    const id=b.dataset.gcashPaid;
+    if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Payment is in your GCash? Tap again"; return; }
     b.disabled=true;
-    try{ await updateDoc(doc(db,"orders",id),{paid:true,paidAt:serverTimestamp(),gcashRef:ref}); delete refDraft[id]; }
+    const o=orders.find(x=>x.id===id);
+    try{ await updateDoc(doc(db,"orders",id),{paid:true,paidAt:serverTimestamp(),...(o&&o.paidTotal==null?{paidTotal:o.total}:{})}); }
     catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
     return;
   }
