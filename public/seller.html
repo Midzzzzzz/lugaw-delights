@@ -161,7 +161,7 @@ let subs=[], lists={}, orders=[], riders=[], contacts={}, asked=new Set(), tab="
 let me=null, myName="", myProfile=null, watchSeller=null, registering=false;
 const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
 $("#setup").innerHTML=setupNotice();
-function stopData(){ subs.forEach(f=>f()); subs=[]; shift=null; lastClosed=null; shiftLoaded=false; storeOpen=null; stockCount=null; countOrders=[]; invDoc=null; publishedSoldOut=null; lists={}; orders=[]; contacts={}; asked=new Set(); known=null; }
+function stopData(){ subs.forEach(f=>f()); subs=[]; shift=null; lastClosed=null; shiftLoaded=false; storeOpen=null; stockCount=null; countOrders=[]; invDoc=null; publishedSoldOut=null; clearTimeout(publishTimer); publishTimer=null; lists={}; orders=[]; contacts={}; asked=new Set(); known=null; }
 
 // Only sellers the owner approved can use this page. The owner has their own
 // login on owner.html; to work the counter, the owner registers a seller account.
@@ -292,7 +292,8 @@ function start(){
   // Menu changes the owner saves (recipes, prices) count right away, without a refresh
   subs.push(onSnapshot(doc(db,"settings","menu"), s=>{ if(s.exists()){ applyMenu(s.data().sections); updateStock(); if(!$("#dinePanel").hidden) renderDine(); } }, ()=>{}));
   // The sold-out list as last published (by this or another seller, or the owner)
-  subs.push(onSnapshot(doc(db,"settings","stock"), s=>{ const d=s.exists()?s.data():{}; publishedSoldOut=JSON.stringify([d.soldOut||[],d.left||{}]); updateStock(); }, ()=>{}));
+  // What's published now: read once, so a page that just opened doesn't save the same thing again
+  getDoc(doc(db,"settings","stock")).then(s=>{ const d=s.exists()?s.data():{}; if(publishedSoldOut===null) publishedSoldOut=JSON.stringify([d.soldOut||[],d.left||{}]); updateStock(); }).catch(()=>{ publishedSoldOut=""; });
 }
 function merge(){
   const m=new Map(); Object.values(lists).forEach(l=>l.forEach(o=>m.set(o.id,o)));
@@ -343,15 +344,25 @@ let stockCount=null, leftNow=null, countOrders=[], invDoc=null;
 const stockLeft=id=>servingsLeft(id,leftNow,dinePack()==="box");
 // Work out what's left and publish it for the customer page: the sold-out items, and how much
 // of each ingredient is left (so customers can't order more than that). Only written on a change.
-let publishedSoldOut=null;
+// Only this screen's own changes are saved (never in reply to another screen's version, which
+// made two screens overwrite each other in a loop), and at most once every few seconds.
+let publishedSoldOut=null, publishTimer=null, lastPublishAt=0;
 function updateStock(){
   const m=new Map(); [...countOrders,...orders].forEach(o=>m.set(o.id,o)); // newest copy of each order wins
   leftNow=ingredientsLeft(stockCount,[...m.values()]);
-  const out=JSON.stringify([soldOutFrom(leftNow),leftNow||{}]);
-  if(publishedSoldOut!==null && out!==publishedSoldOut){
+  schedulePublish();
+}
+function schedulePublish(){
+  if(publishedSoldOut===null || publishTimer) return;
+  publishTimer=setTimeout(()=>{
+    publishTimer=null;
+    const out=JSON.stringify([soldOutFrom(leftNow),leftNow||{}]);
+    if(out===publishedSoldOut) return;
+    if(Date.now()-lastPublishAt<4000) return schedulePublish();
+    lastPublishAt=Date.now(); publishedSoldOut=out;
     const [soldOut,left]=JSON.parse(out);
-    setDoc(doc(db,"settings","stock"),{soldOut,left,updatedAt:serverTimestamp()}).then(()=>{ publishedSoldOut=out; }).catch(()=>{});
-  }
+    setDoc(doc(db,"settings","stock"),{soldOut,left,updatedAt:serverTimestamp()}).catch(()=>{ publishedSoldOut=""; setTimeout(schedulePublish,5000); });
+  },1500);
 }
 // Everything this order would use on top of what's already been ordered: new items, plus any
 // quantity raised on an order being changed. Returns an error message, or "" when it fits.

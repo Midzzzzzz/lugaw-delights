@@ -361,8 +361,14 @@ export function chime() {
   });
 }
 
+// A save Firebase hasn't confirmed after a while: when it refuses because the free daily limit
+// is used up, it doesn't fail, it keeps retrying in the background, so the page would look saved.
+export const saved = (p, ms = 20000) => Promise.race([p, new Promise((_, no) => setTimeout(() => no({ code: "save-timeout" }), ms))]);
+
 export function friendlyError(e) {
   const c = (e && e.code) || "";
+  if (c.includes("resource-exhausted")) return "Firebase's free daily limit is used up, so changes can't be saved until it resets (3 PM Philippine time). Check Firebase console → Firestore → Usage.";
+  if (c === "save-timeout") return "Not saved: Firebase isn't accepting changes right now. If this keeps happening, the free daily limit may be used up (Firebase console → Firestore → Usage; it resets at 3 PM Philippine time). Your change will be lost when you refresh.";
   if (c.includes("invalid-credential") || c.includes("wrong-password") || c.includes("user-not-found")) return "Wrong email or password.";
   if (c.includes("email-already-in-use")) return "That email already has an account. Sign in instead.";
   if (c.includes("weak-password")) return "Use a password with at least 6 characters.";

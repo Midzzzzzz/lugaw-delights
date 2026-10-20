@@ -115,6 +115,7 @@ import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot,
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
 import { findShifts } from "./pastshifts.js";
+import { saved } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
 const $=s=>document.querySelector(s);
@@ -399,7 +400,7 @@ async function deleteOrders(ids){
   for(let i=0;i<ids.length;i+=150){ // 3 writes per order, 500 per batch
     const b=writeBatch(db);
     ids.slice(i,i+150).forEach(id=>{ b.delete(doc(db,"orders",id)); b.delete(doc(db,"contacts",id)); b.delete(doc(db,"pins",id)); });
-    await b.commit();
+    await saved(b.commit());
   }
 }
 $("#view").addEventListener("change",e=>{
@@ -850,7 +851,7 @@ async function saveMenu(b){
   try{
     // a category left with no items is removed (e.g. after deleting its only item)
     const kept=sections.filter(c=>c.items.length), dropped=sections.length-kept.length, retired=[...new Set(menuRetired)];
-    await setDoc(doc(db,"settings","menu"),{sections:kept,retired,updatedAt:serverTimestamp()});
+    await saved(setDoc(doc(db,"settings","menu"),{sections:kept,retired,updatedAt:serverTimestamp()}));
     menuDoc={...(menuDoc||{}),sections:kept,retired}; applyMenu(kept); menuCat=0;
     menuDraft=null; openRecipe=null;
     menuMsg=`Saved.${dropped?` ${plural(dropped,"empty category")} removed.`:""} Customers see the new menu when they refresh the page or app; the seller's screen updates by itself.`;
@@ -880,10 +881,13 @@ function watchInv(){
 const onHandNow=()=>ingredientsLeft(trackerCount(invDoc),invOrders)||{};
 // Publish the items that are sold out right now for the customer page (the seller dashboard
 // does the same as orders come in). Only written when the list changes.
-let lastSoldOut="";
+let lastSoldOut="", stockTimer=null, stockLeft=null;
 function publishStock(left){
-  const soldOut=soldOutFrom(left), k=JSON.stringify([soldOut,left||{}]); if(k===lastSoldOut) return; lastSoldOut=k;
-  setDoc(doc(db,"settings","stock"),{soldOut,left:left||{},updatedAt:serverTimestamp()}).catch(()=>{ lastSoldOut=""; });
+  stockLeft=left; if(stockTimer) return;
+  stockTimer=setTimeout(()=>{ stockTimer=null;
+    const soldOut=soldOutFrom(stockLeft), k=JSON.stringify([soldOut,stockLeft||{}]); if(k===lastSoldOut) return; lastSoldOut=k;
+    setDoc(doc(db,"settings","stock"),{soldOut,left:stockLeft||{},updatedAt:serverTimestamp()}).catch(()=>{ lastSoldOut=""; });
+  },5000);
 }
 // Ingredients the menu uses that have no standard stock: their dishes show as sold out
 function notTracked(){
@@ -949,7 +953,7 @@ $("#view").addEventListener("click",async e=>{
       batch.set(doc(db,"settings","ingredients"),{list,updatedAt:serverTimestamp()});
       if(invDoc) batch.update(doc(db,"settings","inventory"),{par,base,since:serverTimestamp(),...(counted?{countedAt:serverTimestamp()}:{})});
       else batch.set(doc(db,"settings","inventory"),{par,base,since:serverTimestamp(),refillDue:false});
-      await batch.commit(); ingDraft=null; ingMsg=counted?"Saved. On hand now matches your count.":"Saved.";
+      await saved(batch.commit()); ingDraft=null; ingMsg=counted?"Saved. On hand now matches your count.":"Saved.";
     }catch(x){ ingMsg="Couldn't save: "+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase."; b.disabled=false; }
     return render(true);
   }
@@ -1003,9 +1007,9 @@ $("#view").addEventListener("click",async e=>{
     const t=calcTotals(items,"Dine-in"), ref=doc(collection(db,"orders")), uid=auth.currentUser.uid;
     b.disabled=true;
     try{
-      await setDoc(ref,{code:orderCode(ref.id),customerUid:uid,sellerUid:uid,sellerName:"Owner",mode:"Dine-in",table:"",notes:saleNotes.trim(),payment:salePay,items,
+      await saved(setDoc(ref,{code:orderCode(ref.id),customerUid:uid,sellerUid:uid,sellerName:"Owner",mode:"Dine-in",table:"",notes:saleNotes.trim(),payment:salePay,items,
         subtotal:t.subtotal,deliveryFee:0,boxFee:t.boxFee,total:t.total,status:"completed",riderUid:null,createdAt:Timestamp.fromDate(when),
-        manual:true,addedBy:uid,addedAt:serverTimestamp(),...(salePay==="Cash"?{cashGiven:t.total}:{paid:true}),paidTotal:t.total});
+        manual:true,addedBy:uid,addedAt:serverTimestamp(),...(salePay==="Cash"?{cashGiven:t.total}:{paid:true}),paidTotal:t.total}));
       const [a,z]=rangeDates();
       saleOpen=false; delMsg=`Sale of ${peso(t.total)} saved for ${when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})}.`+(when<a||when>=z?" Pick that date above to see it.":"");
     }catch(x){ saleMsg="Couldn't save: "+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase."; b.disabled=false; }

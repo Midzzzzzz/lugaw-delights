@@ -85,7 +85,9 @@ service cloud.firestore {
           && request.resource.data.keys().hasOnly(['soldOut', 'left', 'updatedAt'])
           && request.resource.data.soldOut is list && request.resource.data.soldOut.size() <= 300
           && (!('left' in request.resource.data) || (request.resource.data.left is map && request.resource.data.left.size() <= 300))
-          && request.resource.data.updatedAt == request.time)
+          && request.resource.data.updatedAt == request.time
+          // at most once every 2 seconds, so screens can't overwrite each other in a loop
+          && (resource == null || !('updatedAt' in resource.data) || request.time > resource.data.updatedAt + duration.value(2, 's')))
         // Stock tracker (settings/inventory): the owner sets each ingredient's standard stock
         // (par) once. base = what was on hand at the last refill (since); what's on hand now is
         // base minus what the orders since then used. Closing a shift asks the kitchen to refill;
