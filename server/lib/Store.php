@@ -42,6 +42,7 @@ final class Store {
       $db->exec('CREATE TABLE IF NOT EXISTS hits (k VARCHAR(190) NOT NULL PRIMARY KEY, n INT NOT NULL, until BIGINT NOT NULL)');
       $db->exec('CREATE TABLE IF NOT EXISTS meta (k VARCHAR(16) NOT NULL PRIMARY KEY, v BIGINT NOT NULL)');
       $db->exec("INSERT INTO meta (k, v) VALUES ('write', 0) ON CONFLICT (k) DO NOTHING");
+      self::addUsernames($db);
       return;
     }
     $db->exec("CREATE TABLE IF NOT EXISTS docs (coll VARCHAR(64) NOT NULL, id VARCHAR(190) NOT NULL, data LONGTEXT NOT NULL,
@@ -57,6 +58,12 @@ final class Store {
     $db->exec("CREATE TABLE IF NOT EXISTS hits (k VARCHAR(190) NOT NULL PRIMARY KEY, n INT NOT NULL, until BIGINT NOT NULL) DEFAULT CHARSET=utf8mb4");
     $db->exec("CREATE TABLE IF NOT EXISTS meta (k VARCHAR(16) NOT NULL PRIMARY KEY, v BIGINT NOT NULL) DEFAULT CHARSET=utf8mb4");
     $db->exec("INSERT IGNORE INTO meta (k, v) VALUES ('write', 0)");
+    self::addUsernames($db);
+  }
+  // Staff can sign in with a username the owner gives them (added 2026-10-21)
+  private static function addUsernames(PDO $db): void {
+    $db->exec('ALTER TABLE users ADD COLUMN IF NOT EXISTS username VARCHAR(40) NULL');
+    $db->exec('CREATE UNIQUE INDEX IF NOT EXISTS users_username ON users (username)');
   }
 
   public static function now(): int { return (int)floor(microtime(true) * 1000); }

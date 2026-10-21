@@ -364,7 +364,7 @@ export function friendlyError(e) {
   if (c === "aborted") return "Someone else changed this at the same moment. Please try again.";
   if (c === "not-found") return "That was deleted or doesn't exist any more.";
   if (c === "internal") return "The server had a problem. Please try again.";
-  if (c.includes("invalid-credential") || c.includes("wrong-password") || c.includes("user-not-found")) return "Wrong email or password.";
+  if (c.includes("invalid-credential") || c.includes("wrong-password") || c.includes("user-not-found")) return "Wrong username, email or password.";
   if (c.includes("email-already-in-use")) return "That email already has an account. Sign in instead.";
   if (c.includes("weak-password")) return "Use a password with at least 6 characters.";
   if (c.includes("invalid-email")) return "That email address doesn't look right.";

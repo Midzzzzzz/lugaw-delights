@@ -84,7 +84,8 @@ try {
     case 'auth.logout': $auth->logout($token); reply(['ok' => true]);
     case 'auth.reauth': $auth->reauth($token, $in->password ?? ''); reply(['ok' => true]);
     case 'auth.reset': $auth->sendReset($in->email ?? ''); reply(['ok' => true]);
-    case 'auth.setPassword': $auth->setPasswordFor($token, $in->uid ?? '', $in->password ?? ''); reply(['ok' => true]);
+    case 'auth.setLogin': $auth->setLoginFor($token, $in->uid ?? '', $in->username ?? null, $in->password ?? null); reply(['ok' => true]);
+    case 'auth.usernames': reply(['usernames' => (object)$auth->usernames($token)]);
     case 'auth.resetDone': $auth->finishReset($in->token ?? '', $in->password ?? ''); reply(['ok' => true]);
 
     case 'get': reply($store->get((string)($in->path ?? '')));

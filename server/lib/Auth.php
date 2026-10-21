@@ -68,11 +68,14 @@ final class Auth {
       ->execute([$u['uid'], $email, password_hash($pass, PASSWORD_DEFAULT), 'password', Store::now()]);
     return $this->out($u, $this->session($u['uid']));
   }
+  // Signs in with an email, or with the username the owner gave (anything without an @)
   public function login($email, $pass): array {
-    $email = self::cleanEmail($email);
-    $this->limit('login:' . $email, 10, 600000);
-    $q = $this->db->prepare('SELECT uid, email, pass, provider FROM users WHERE email = ?'); $q->execute([$email]); $u = $q->fetch(PDO::FETCH_ASSOC);
-    if (!$u || !$u['pass'] || !password_verify((string)$pass, $u['pass'])) throw new ApiError('auth/invalid-credential', 'Wrong email or password.', 401);
+    $id = strtolower(trim((string)$email));
+    $byName = $id !== '' && !str_contains($id, '@');
+    if (!$byName) $id = self::cleanEmail($id);
+    $this->limit('login:' . $id, 10, 600000);
+    $q = $this->db->prepare('SELECT uid, email, pass, provider FROM users WHERE ' . ($byName ? 'username' : 'email') . ' = ?'); $q->execute([$id]); $u = $q->fetch(PDO::FETCH_ASSOC);
+    if (!$u || !$u['pass'] || !password_verify((string)$pass, $u['pass'])) throw new ApiError('auth/invalid-credential', 'Wrong username, email or password.', 401);
     return $this->out($u, $this->session($u['uid']));
   }
   public function anonymous(): array {
@@ -112,20 +115,41 @@ final class Auth {
       if ($code >= 300) error_log("Lugaw API: reset email not sent ($code): $res");
     } else @mail($email, $subject, $body, "From: Lugaw Delights <$from>\r\nContent-Type: text/plain; charset=utf-8");
   }
-  // The owner gives a staff member a new password (no email needed). Only accounts in "admins" may
-  // do this; the staff member is signed out everywhere and signs in again with the new password.
-  public function setPasswordFor(?string $token, $uid, $pass): void {
+  // Only the owner (an account listed in "admins") may manage staff sign-ins
+  private function owner(?string $token): array {
     $me = $this->user($token);
     if (!$me) throw new ApiError('permission-denied', 'Please sign in again.', 403);
     $q = $this->db->prepare("SELECT 1 FROM docs WHERE coll = 'admins' AND id = ?"); $q->execute([$me['uid']]);
-    if (!$q->fetchColumn()) throw new ApiError('permission-denied', 'Only the owner can set passwords.', 403);
-    $this->limit('setpw:' . $me['uid'], 30, 3600000);
-    if (!is_string($pass) || strlen($pass) < 6) throw new ApiError('auth/weak-password', 'Use a password with at least 6 characters.');
-    $q = $this->db->prepare('SELECT uid FROM users WHERE uid = ? AND provider = ?'); $q->execute([(string)$uid, 'password']);
-    if (!$q->fetchColumn()) throw new ApiError('not-found', 'That person has no account with an email.', 404);
-    $this->db->prepare('UPDATE users SET pass = ? WHERE uid = ?')->execute([password_hash($pass, PASSWORD_DEFAULT), (string)$uid]);
-    $this->db->prepare('DELETE FROM sessions WHERE uid = ? AND token <> ?')->execute([(string)$uid, (string)$token]);
-    $this->db->prepare('DELETE FROM resets WHERE uid = ?')->execute([(string)$uid]);
+    if (!$q->fetchColumn()) throw new ApiError('permission-denied', 'Only the owner can change staff sign-ins.', 403);
+    return $me;
+  }
+  // The owner gives a staff member a username and/or a new password (no email needed).
+  // null leaves that part as it is; a new password signs them out everywhere.
+  public function setLoginFor(?string $token, $uid, $username, $pass): void {
+    $me = $this->owner($token);
+    $this->limit('setpw:' . $me['uid'], 60, 3600000);
+    $uid = (string)$uid;
+    $q = $this->db->prepare('SELECT uid FROM users WHERE uid = ? AND provider = ?'); $q->execute([$uid, 'password']);
+    if (!$q->fetchColumn()) throw new ApiError('not-found', 'That person has no sign-in account.', 404);
+    if ($username !== null) {
+      $name = strtolower(trim((string)$username));
+      if (!preg_match('/^[a-z0-9._-]{3,30}$/', $name))
+        throw new ApiError('invalid-argument', 'A username needs 3 to 30 letters or numbers (dots, dashes and _ are OK; no spaces).');
+      $q = $this->db->prepare('SELECT 1 FROM users WHERE username = ? AND uid <> ?'); $q->execute([$name, $uid]);
+      if ($q->fetchColumn()) throw new ApiError('already-exists', "Someone else already has the username \"$name\".");
+      $this->db->prepare('UPDATE users SET username = ? WHERE uid = ?')->execute([$name, $uid]);
+    }
+    if ($pass !== null) {
+      if (!is_string($pass) || strlen($pass) < 6) throw new ApiError('auth/weak-password', 'Use a password with at least 6 characters.');
+      $this->db->prepare('UPDATE users SET pass = ? WHERE uid = ?')->execute([password_hash($pass, PASSWORD_DEFAULT), $uid]);
+      $this->db->prepare('DELETE FROM sessions WHERE uid = ? AND token <> ?')->execute([$uid, (string)$token]);
+      $this->db->prepare('DELETE FROM resets WHERE uid = ?')->execute([$uid]);
+    }
+  }
+  // Usernames of everyone who has one (for the owner's staff list)
+  public function usernames(?string $token): array {
+    $this->owner($token);
+    return $this->db->query('SELECT uid, username FROM users WHERE username IS NOT NULL')->fetchAll(PDO::FETCH_KEY_PAIR);
   }
   public function finishReset($token, $pass): void {
     if (!is_string($pass) || strlen($pass) < 6) throw new ApiError('auth/weak-password', 'Use a password with at least 6 characters.');
