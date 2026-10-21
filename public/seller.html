@@ -859,10 +859,19 @@ let receiptLogo=null, receiptLogoDots=null;
   for(let i=0;i<W*H;i++) bits[i]=(0.299*px[i*4]+0.587*px[i*4+1]+0.114*px[i*4+2])<200?1:0;
   receiptLogoDots={width:W,height:H,bits};
 }catch(_){} }; img.src="logo.jpg"; })();
+// A delivered order prints as a completed receipt: paid or not, when it was delivered, the rider
+function finishedInfo(o){
+  if(o.mode!=="Delivery" || o.status!=="delivered") return null;
+  const when=o.deliveredAt?.toDate?.(), qr=o.payment==="GCash";
+  const paid=!qr || o.paymentConfirmed===true;
+  return { paid, rider:o.riderName||"",
+    title:"Delivered"+(when?" "+when.toLocaleString("en-PH",{month:"short",day:"numeric",year:"numeric",hour:"numeric",minute:"2-digit"}):""),
+    payText: qr ? `${o.payShotAt?"QR":"GCash"}, ${paid?"paid (confirmed by the shop)":"waiting for the shop to confirm"}` : "Cash, paid on delivery" };
+}
 // Shop details as printed on receipts
 const receiptShop=()=>({ name:SHOP.name, pickupAddress:SHOP.receiptAddress||SHOP.pickupAddress, phone:SHOP.receiptPhone||SHOP.phone, logo:receiptLogoDots });
 function receiptHTML(o){
-  const c=o.mode==="Dine-in"?null:contacts[o.id], when=o.createdAt?.toDate?.()||new Date();
+  const c=o.mode==="Dine-in"?null:contacts[o.id], when=o.createdAt?.toDate?.()||new Date(), fin=finishedInfo(o);
   const row=(l,r,cls="")=>`<tr class="${cls}"><td>${l}</td><td class="r">${r}</td></tr>`;
   const lines=mergedLines(o.items).map(it=>{
     const k=ITEMS[it?.id], qty=Number(it?.qty)||0, price=Number(it?.price)||0;
@@ -881,6 +890,7 @@ body{font-family:ui-monospace,Consolas,Menlo,monospace;font-size:12px;line-heigh
 h1{font-size:16px;margin:0}.c{text-align:center}small{color:#333}
 table{width:100%;border-collapse:collapse}td{vertical-align:top;padding:1px 0}.r{text-align:right;white-space:nowrap;padding-left:8px}
 hr{border:0;border-top:1px dashed #000;margin:6px 0}.big td{font-weight:bold;font-size:14px}
+.stamp{display:inline-block;font-size:22px;font-weight:bold;letter-spacing:.15em;border:3px solid #000;border-radius:6px;padding:2px 16px;margin:4px 0}
 .noprint{display:flex;gap:8px;justify-content:center;margin-top:14px}.noprint button{font:inherit;padding:8px 14px}
 @media print{.noprint{display:none}}
 </style></head><body>
@@ -888,8 +898,9 @@ hr{border:0;border-top:1px dashed #000;margin:6px 0}.big td{font-weight:bold;fon
 <table>${row("Order",esc(o.code))}${row("Date",when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}${row("Type",esc(o.mode))}${who}</table><hr>
 <table>${lines}</table><hr>
 <table>${row("Subtotal",peso(o.subtotal))}${o.deliveryFee?row("Delivery fee",peso(o.deliveryFee)):""}${o.boxFee?row("Take-out boxes",peso(o.boxFee)):""}${row("TOTAL",peso(o.total),"big")}
-${row("Payment",esc(o.payment)+(o.mode==="Dine-in"&&o.status!=="cancelled"&&!hasPayment(o)?" · NOT PAID":""))}${o.gcashRef?row("GCash Ref",esc(o.gcashRef)):""}${change}</table>
+${fin?row("Payment",esc(fin.payText)):row("Payment",esc(o.payment)+(o.mode==="Dine-in"&&o.status!=="cancelled"&&!hasPayment(o)?" · NOT PAID":""))}${o.gcashRef?row("GCash Ref",esc(o.gcashRef)):""}${change}</table>
 ${o.notes?`<hr><div>Notes: ${esc(o.notes)}</div>`:""}<hr>
+${fin?`<div class="c"><div class="stamp">${fin.paid?"PAID":"NOT PAID YET"}</div><div>${esc(fin.title)}</div>${fin.rider?`<div>Rider: ${esc(fin.rider)}</div>`:""}</div><hr>`:""}
 <div class="c">Salamat po! Come again.<br><small>Order slip only. Not an official receipt.</small></div>
 <div class="noprint"><button onclick="print()">Print</button><button onclick="close()">Close</button></div>
 <script>addEventListener("load",()=>setTimeout(print,300))<\/script>
@@ -917,7 +928,7 @@ function receiptOf(o){
   const c=o.mode==="Dine-in"?null:contacts[o.id], first=o.paidTotal??o.total, adj=(o.settledTotal??first)-first;
   return receiptBytes(o,receiptShop(),{ customer:c?.name, mobile:c?.phone, lines:mergedLines(o.items),
     itemName:it=>ITEMS[it?.id]?.name||it?.name||"Item", cashFirst:first, adjust:adj,
-    balance:hasPayment(o)?balanceOf(o):0, notPaid:o.mode==="Dine-in"&&o.status!=="cancelled"&&!hasPayment(o) });
+    balance:hasPayment(o)?balanceOf(o):0, notPaid:o.mode==="Dine-in"&&o.status!=="cancelled"&&!hasPayment(o), finished:finishedInfo(o) });
 }
 async function btPrint(arr){
   const p=printer(); if(!p) return false;

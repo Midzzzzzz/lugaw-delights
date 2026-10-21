@@ -67,7 +67,8 @@ export function rasterBytes(logo) {
 }
 
 // The receipt for an order. shop: { name, pickupAddress, phone, logo? (see rasterBytes) }. extra: { customer, mobile,
-// itemName(id) -> name, lines (merged order lines), cashFirst, adjust, balance, notPaid }
+// itemName(id) -> name, lines (merged order lines), cashFirst, adjust, balance, notPaid,
+// finished? { paid, title ("Delivered Oct 21, 3:05 PM"), rider, payText } for a delivered order }
 export function receiptBytes(o, shop, extra = {}) {
   const L = [], line = s => L.push(s), rule = () => line("-".repeat(WIDTH));
   const when = o.createdAt?.toDate?.() || new Date();
@@ -93,7 +94,8 @@ export function receiptBytes(o, shop, extra = {}) {
   const body = L.splice(0);
 
   lr("TOTAL", money(o.total)); const total = L.splice(0);
-  lr("Payment", (o.payment || "") + (extra.notPaid ? " - NOT PAID" : ""));
+  if (extra.finished?.payText) wrap("Payment: " + extra.finished.payText).forEach(line);
+  else lr("Payment", (o.payment || "") + (extra.notPaid ? " - NOT PAID" : ""));
   if (o.gcashRef) lr("GCash Ref", o.gcashRef);
   if (o.cashGiven != null) { lr("Cash", money(o.cashGiven)); }
   const pay = L.splice(0);
@@ -112,6 +114,8 @@ export function receiptBytes(o, shop, extra = {}) {
     CMD.init, CMD.center, shop.logo ? [rasterBytes(shop.logo), "\n"] : [], CMD.boldOn, CMD.big, nl(wrap(shop.name, WIDTH / 2)), CMD.normal, CMD.boldOff,
     nl(wrap(shop.pickupAddress || "")), shop.phone ? ascii(shop.phone) + "\n" : "", CMD.left,
     nl(body), CMD.boldOn, nl(total), CMD.boldOff, nl(pay), CMD.boldOn, nl(change), CMD.boldOff, nl(after), nl(tail),
+    extra.finished ? [CMD.center, CMD.boldOn, CMD.big, extra.finished.paid ? "PAID\n" : "NOT PAID YET\n", CMD.normal, CMD.boldOff,
+      nl(wrap(extra.finished.title || "")), extra.finished.rider ? nl(wrap("Rider: " + extra.finished.rider)) : [], "-".repeat(WIDTH) + "\n"] : [],
     CMD.center, "Salamat po! Come again.\n", "Order slip only.\nNot an official receipt.\n", CMD.left, CMD.feed(4)
   );
 }
