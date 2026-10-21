@@ -51,14 +51,6 @@ try {
   // First call on a new server creates the tables
   if (!is_file(__DIR__ . '/.schema-ok') || !empty($cfg['test_mode'])) { Store::schema($db); @file_put_contents(__DIR__ . '/.schema-ok', '1'); }
 
-  // One-time copy of the shop's data from Firebase (2026-10). Opens only with the key whose
-  // SHA-256 is below; adds or replaces documents, adds accounts that aren't there yet.
-  if ($r === 'admin.import') {
-    if (!hash_equals('9dfac8d92310cfac6197caa4278e27ddacf85062d1401afac02456d03268cccf', hash('sha256', (string)($_SERVER['HTTP_X_IMPORT_KEY'] ?? ''))))
-      throw new ApiError('permission-denied', 'Missing or insufficient permissions.', 403);
-    reply(Store::import($db, (array)($in->docs ?? []), (array)($in->users ?? [])));
-  }
-
   $auth = new Auth($db, $cfg);
   $token = $_SERVER['HTTP_X_LUGAW_TOKEN'] ?? null;
   $user = $auth->user($token);

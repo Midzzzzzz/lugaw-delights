@@ -267,34 +267,6 @@ final class Store {
     return $v;
   }
 
-  // ---------- one-time copy from Firebase (index.php, admin.import) ----------
-  // docs: [{coll, id, data}]; users: [{uid, email, pass (hash or null), provider, created}]
-  public static function import(PDO $db, array $docs, array $users): array {
-    $pg = self::isPg($db);
-    $db->beginTransaction();
-    try {
-      $db->query("SELECT v FROM meta WHERE k = 'write' FOR UPDATE");
-      $addChange = $db->prepare('INSERT INTO changes (coll) VALUES (?)' . ($pg ? ' RETURNING ver' : ''));
-      $putDoc = $db->prepare('INSERT INTO docs (coll, id, data, ver) VALUES (?, ?, ?, ?) ' . ($pg
-        ? 'ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, ver = EXCLUDED.ver'
-        : 'ON DUPLICATE KEY UPDATE data = VALUES(data), ver = VALUES(ver)'));
-      foreach ($docs as $d) {
-        [$coll, $id] = self::split($d->coll . '/' . $d->id);
-        $addChange->execute([$coll]); $ver = $pg ? (int)$addChange->fetchColumn() : (int)$db->lastInsertId();
-        $putDoc->execute([$coll, $id, self::encode($d->data), $ver]);
-      }
-      $has = $db->prepare('SELECT 1 FROM users WHERE uid = ?');
-      $addUser = $db->prepare('INSERT INTO users (uid, email, pass, provider, created) VALUES (?, ?, ?, ?, ?)');
-      $added = [];
-      foreach ($users as $u) {
-        $has->execute([$u->uid]); if ($has->fetchColumn()) continue;
-        $addUser->execute([$u->uid, $u->email ? strtolower($u->email) : null, $u->pass ?? null, $u->provider, (int)$u->created]); $added[] = $u->uid;
-      }
-      $db->commit();
-      return ['docs' => count($docs), 'usersAdded' => $added];
-    } catch (Throwable $e) { $db->rollBack(); throw $e; }
-  }
-
   // ---------- live updates: what changed since version N ----------
   public function version(): int { return (int)$this->db->query('SELECT COALESCE(MAX(ver), 0) FROM changes')->fetchColumn(); }
   public function changedSince(int $since): ?array { // null = too old to tell: send everything

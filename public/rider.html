@@ -36,7 +36,7 @@
       <label class="f" for="l-pass">Password<input id="l-pass" type="password" autocomplete="current-password"></label>
       <p class="err" id="l-err" hidden></p>
       <button class="btn big" type="submit">Sign in</button>
-      <button class="btn ghost small" type="button" id="forgot" style="justify-self:start">Forgot password?</button>
+      <p class="muted" style="margin:0;font-size:.88rem">Forgot your password? Ask the shop owner for a new one.</p>
     </form>
 
     <form class="stack card" id="regForm" novalidate hidden>
@@ -127,7 +127,7 @@
 </div>
 
 <script type="module">
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, EmailAuthProvider, reauthenticateWithCredential } from "./fb/auth.js";
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, EmailAuthProvider, reauthenticateWithCredential } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, runTransaction, serverTimestamp } from "./fb/firestore.js";
 import { CONTRACT_VERSION, riderContract, agreementHTML } from "./contract.js";
 import { auth, db, isConfigured, SHOP, phoneKey, hasPayout, payoutText, readPayout, shopAmount, peso, esc, STATUS, statusLabel, fmtTime, todayKey, mapsLink, itemsHTML, compressPhoto, PROOF_KINDS, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -172,10 +172,6 @@ $("#loginForm").onsubmit=async e=>{
   e.preventDefault(); err("#l-err");
   try{ await signInWithEmailAndPassword(auth,$("#l-email").value.trim(),$("#l-pass").value); }
   catch(x){ err("#l-err",friendlyError(x)); }
-};
-$("#forgot").onclick=async()=>{
-  const em=$("#l-email").value.trim(); if(!em) return err("#l-err","Type your email above first.");
-  try{ await sendPasswordResetEmail(auth,em); err("#l-err","Password reset link sent to "+em+"."); }catch(x){ err("#l-err",friendlyError(x)); }
 };
 $("#regForm").onsubmit=async e=>{
   e.preventDefault(); err("#r-err");

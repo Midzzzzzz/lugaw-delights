@@ -2,7 +2,7 @@
 
 A real-time web app for a 24-hour lugaw restaurant in Los Baños, Laguna. Customers order online, sellers run the kitchen and dine-in counter, independent riders deliver, and the owner tracks sales and staff.
 
-**Live site:** https://lugawdelights.netlify.app
+**Live site:** https://lugawdelights.com (Render; same site at https://lugaw-delights.onrender.com)
 
 ## Who uses it
 
