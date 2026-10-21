@@ -110,7 +110,7 @@ table.inv input{width:90px;text-align:right;padding:5px 8px}
 </div>
 
 <script type="module">
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, setPasswordFor } from "./fb/auth.js";
 import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
@@ -665,7 +665,12 @@ function renderTeam(){
     <div class="head"><span class="code">${esc(p.name)}</span><span class="pill ${TONE[p.status]||"off"}">${esc(p.status)}${kind==="riders"&&p.status==="approved"&&p.online?" · available":""}</span></div>
     <div class="kv"><b>Mobile</b><span><a class="num" href="${esc(telLink(p.phone))}">${esc(p.phone)}</a><br>${phoneBadge(p.phone)}</span><b>Email</b><span>${esc(p.email)}</span>${extra}
       <b>Applied</b><span>${p.createdAt?.toDate?.().toLocaleDateString("en-PH")||"—"}</span></div>
-    <div class="btnrow">${(ACTS[p.status]||[]).map(([s,l,c])=>`<button class="${c}" data-kind="${kind}" data-who="${esc(p.id)}" data-st="${s}">${l}</button>`).join("")}</div></div>`;
+    <div class="btnrow">${(ACTS[p.status]||[]).map(([s,l,c])=>`<button class="${c}" data-kind="${kind}" data-who="${esc(p.id)}" data-st="${s}">${l}</button>`).join("")}
+      ${p.email?`<button class="btn ghost small" data-pw="${esc(p.id)}">Set password</button>`:""}</div>
+    ${pwOpen===p.id?`<form class="stack" data-pwform="${esc(p.id)}" style="margin-top:8px" novalidate>
+      <label class="f">New password for ${esc(p.name)}<input data-pwinput value="${esc(pwDraft)}" autocomplete="off" minlength="6" style="font-size:1.1rem"></label>
+      <div class="btnrow"><button class="btn small" type="submit">Save password</button><button class="btn ghost small" type="button" data-pwcancel>Cancel</button></div>
+      ${pwMsg?`<p class="${pwOk?"":"err"}" style="margin:0">${esc(pwMsg)}</p>`:""}</form>`:""}</div>`;
   $("#view").innerHTML=`<h2 style="color:var(--brand-deep);margin:16px 0 4px">Sellers</h2>
     <p class="muted" style="margin:0 0 8px;font-size:.88rem">Sellers register at <b>seller.html</b>. Approve them here so they can take orders.</p>
     ${teamErr?`<div class="flag">${esc(teamErr)}</div>`:""}<div class="grid-cards">${sort(sellers).map(s=>card(s,"sellers","")).join("")||`<p class="empty">No seller applications yet.</p>`}</div>
@@ -680,6 +685,27 @@ function renderTeam(){
       <b>Payout</b><span>${payoutCell(r)}</span>`)).join("")
       ||`<p class="empty">No rider applications yet. Share the link to <b>rider.html</b>.</p>`}</div>`;
 }
+// The owner sets a staff member's password (shown here while typing, so it can be passed on).
+// Passwords are stored scrambled: an old one can never be looked up, only replaced.
+let pwOpen=null, pwDraft="", pwMsg="", pwOk=false;
+const suggestPw=()=>["lugaw","goto","arroz","tokwa","itlog","kalamansi","luya","bawang"][Math.floor(Math.random()*8)]+"-"+(1000+Math.floor(Math.random()*9000));
+$("#view").addEventListener("click",e=>{
+  if(tab!=="team") return;
+  const o=e.target.closest("[data-pw]"); if(o){ pwOpen=pwOpen===o.dataset.pw?null:o.dataset.pw; pwDraft=suggestPw(); pwMsg=""; pwOk=false; return renderTeam(); }
+  if(e.target.closest("[data-pwcancel]")){ pwOpen=null; return renderTeam(); }
+});
+$("#view").addEventListener("input",e=>{ if(e.target.matches("[data-pwinput]")){ pwDraft=e.target.value; } });
+$("#view").addEventListener("submit",async e=>{
+  const f=e.target.closest("[data-pwform]"); if(!f) return;
+  e.preventDefault();
+  const who=[...sellers,...kitchen,...riders].find(p=>p.id===f.dataset.pwform), pw=pwDraft.trim();
+  if(pw.length<6){ pwMsg="Use at least 6 characters."; pwOk=false; return renderTeam(); }
+  f.querySelector("button[type=submit]").disabled=true;
+  try{ await setPasswordFor(auth,f.dataset.pwform,pw); pwOk=true;
+    pwMsg=`Saved. Give ${who?.name||"them"} this password: ${pw}. They're signed out on their phones and sign in with ${who?.email||"their email"} and this password.`; }
+  catch(x){ pwOk=false; pwMsg="Not saved: "+friendlyError(x); }
+  renderTeam();
+});
 $("#view").addEventListener("click",async e=>{
   const b=e.target.closest("[data-kind]"); if(!b) return;
   if(["rejected","suspended"].includes(b.dataset.st) && b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Tap again to confirm"; return; }

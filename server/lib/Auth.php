@@ -112,6 +112,21 @@ final class Auth {
       if ($code >= 300) error_log("Lugaw API: reset email not sent ($code): $res");
     } else @mail($email, $subject, $body, "From: Lugaw Delights <$from>\r\nContent-Type: text/plain; charset=utf-8");
   }
+  // The owner gives a staff member a new password (no email needed). Only accounts in "admins" may
+  // do this; the staff member is signed out everywhere and signs in again with the new password.
+  public function setPasswordFor(?string $token, $uid, $pass): void {
+    $me = $this->user($token);
+    if (!$me) throw new ApiError('permission-denied', 'Please sign in again.', 403);
+    $q = $this->db->prepare("SELECT 1 FROM docs WHERE coll = 'admins' AND id = ?"); $q->execute([$me['uid']]);
+    if (!$q->fetchColumn()) throw new ApiError('permission-denied', 'Only the owner can set passwords.', 403);
+    $this->limit('setpw:' . $me['uid'], 30, 3600000);
+    if (!is_string($pass) || strlen($pass) < 6) throw new ApiError('auth/weak-password', 'Use a password with at least 6 characters.');
+    $q = $this->db->prepare('SELECT uid FROM users WHERE uid = ? AND provider = ?'); $q->execute([(string)$uid, 'password']);
+    if (!$q->fetchColumn()) throw new ApiError('not-found', 'That person has no account with an email.', 404);
+    $this->db->prepare('UPDATE users SET pass = ? WHERE uid = ?')->execute([password_hash($pass, PASSWORD_DEFAULT), (string)$uid]);
+    $this->db->prepare('DELETE FROM sessions WHERE uid = ? AND token <> ?')->execute([(string)$uid, (string)$token]);
+    $this->db->prepare('DELETE FROM resets WHERE uid = ?')->execute([(string)$uid]);
+  }
   public function finishReset($token, $pass): void {
     if (!is_string($pass) || strlen($pass) < 6) throw new ApiError('auth/weak-password', 'Use a password with at least 6 characters.');
     $q = $this->db->prepare('SELECT uid, expires FROM resets WHERE token = ?'); $q->execute([(string)$token]); $r = $q->fetch(PDO::FETCH_ASSOC);

@@ -57,3 +57,5 @@ export async function reauthenticateWithCredential(user, cred) {
   await call(auth.app, "auth.reauth", { password: cred.password }, auth._headers());
   return { user };
 }
+// Not in Firebase: the owner sets a staff member's password (the server checks it's the owner)
+export async function setPasswordFor(auth, uid, password) { await call(auth.app, "auth.setPassword", { uid, password }, auth._headers()); }
