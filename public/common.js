@@ -486,6 +486,22 @@ export async function loadProofs(orderId) {
   return { pickup, delivery };
 }
 
+// A customer's payment screenshot (orders paid by QR): a button that loads it on demand, so the
+// lists don't download every picture. Staff tap it, then tap the picture to see it full size.
+export function payShotButton(o) {
+  return o.payShotAt ? `<button type="button" class="btn ghost small" data-payshot="${esc(o.id)}">View payment screenshot</button>` : "";
+}
+if (typeof document !== "undefined") document.addEventListener("click", async e => {
+  const b = e.target.closest?.("[data-payshot]"); if (!b) return;
+  b.disabled = true; b.textContent = "Loading…";
+  try {
+    const s = await getDoc(doc(db, "payshots", b.dataset.payshot)), p = s.exists() ? s.data().photo : "";
+    if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(p || "")) { b.textContent = "No screenshot found"; return; }
+    const when = s.data().sentAt?.toDate?.().toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" }) || "";
+    b.outerHTML = `<figure style="margin:0;display:grid;gap:4px;justify-items:start"><button type="button" data-proof-full style="padding:0;border:0;background:none;cursor:zoom-in"><img src="${p}" alt="Payment screenshot" style="width:160px;max-height:320px;object-fit:contain;border-radius:10px;border:2px solid var(--line)"></button><figcaption style="font-size:.8rem;color:var(--muted)">Payment screenshot${when ? " · " + esc(when) : ""}. Tap to enlarge.</figcaption></figure>`;
+  } catch (x) { b.disabled = false; b.textContent = "Couldn't load. Tap to try again"; }
+});
+
 // Proof photos as HTML (tap a photo to open it full size)
 export function proofsHTML(p) {
   const one = kind => {

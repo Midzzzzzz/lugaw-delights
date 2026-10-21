@@ -112,6 +112,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
 <script type="module">
 import { onAuthStateChanged, signInAnonymously } from "./fb/auth.js";
 import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp } from "./fb/firestore.js";
+import { compressPhoto } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, shortItem, servingsLeft, MAX_LINES, MAX_QTY, REPORT_REASONS, phoneKey, DELIVERY_ZONES, ZONES, zoneLabel, peso, esc, STATUS, FLOW, stepLabel, calcTotals, boxRow, itemsHTML, fmtTime, orderCode, friendlyError, setupNotice } from "./common.js";
 import { notify, setupAlerts, statusLabel } from "./common.js";
 setupAlerts();
@@ -317,7 +318,7 @@ function renderTrack(){
     const hide = finished ? `<button class="btn ghost small" data-hide="${o.id}" style="justify-self:start">Hide</button>` : "";
     return `<div style="border-top:2px dashed var(--line);padding-top:10px;display:grid;gap:6px">
       <div class="btnrow" style="justify-content:space-between"><b class="num">${esc(o.code)}</b><span class="muted">${fmtTime(o.createdAt)} · ${peso(o.total)}</span></div>
-      ${payingId===o.id&&o.payment==="GCash"&&o.status!=="cancelled"&&!o.paymentConfirmed&&(!o.gcashRef||payDraft[o.id]?.editing)?payStep(o):""}
+      ${payingId===o.id&&o.payment==="GCash"&&o.status!=="cancelled"&&!o.paymentConfirmed&&((!o.gcashRef&&!o.payShotAt)||payDraft[o.id]?.editing)?payStep(o):""}
       ${steps}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
   }).join("");
   if(focusKey){ const el=document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); if(el){ el.focus(); if(el.tagName==="TEXTAREA") el.setSelectionRange(el.value.length,el.value.length); } }
@@ -363,14 +364,22 @@ function payStep(o){
       <li>Open <b>GCash</b>, <b>Maya</b> or your <b>bank app</b>, tap <b>Scan QR</b>, then <b>Upload QR</b> / <b>Gallery</b> and choose the saved picture.
         On another phone, just scan the code on this screen.</li>
       <li>Pay exactly <b class="num">${peso(o.total)}</b>. ${copy(String(o.total),"amount")} If there's a message box, type your order code <b class="num">${esc(o.code)}</b>.</li>
-      <li>Copy the <b>reference number</b> from your receipt here:</li>
-    </ol>`:`<ol class="paysteps">
+      <li>Take a <b>screenshot</b> of your payment receipt and upload it here:</li>
+    </ol>
+    ${shotDraft[o.id]?`<img src="${shotDraft[o.id]}" alt="Your payment screenshot" style="max-width:200px;max-height:300px;object-fit:contain;justify-self:center;border-radius:10px;border:2px solid var(--line)">`:""}
+    <label class="btn ${shotDraft[o.id]?"ghost small":""}" style="cursor:pointer;justify-self:center">${shotDraft[o.id]?"Choose a different screenshot":"Upload payment screenshot"}
+      <input type="file" accept="image/*" data-shot-pick="${id}" hidden></label>
+    ${d.err?`<p class="err" style="margin:0">${esc(d.err)}</p>`:""}
+    ${shotDraft[o.id]?`<button class="btn big" data-shot-send="${id}">Send screenshot</button>`:""}
+    <button class="btn ghost small" data-pay-later="${id}" style="justify-self:center">I'll pay later</button>
+  </div></div>`:`<ol class="paysteps">
       <li><b>Open your GCash app</b> and choose <b>Send Money</b>.</li>
       <li>Send <b class="num">${peso(o.total)}</b> to <b class="num">${esc(SHOP.gcashNumber)}</b> (${esc(SHOP.gcashName)}).
         <span class="btnrow" style="margin-top:4px">${copy(SHOP.gcashNumber.replace(/\s/g,""),"number")}${copy(String(o.total),"amount")}</span></li>
       <li>In the message, type your order code <b class="num">${esc(o.code)}</b>. ${copy(o.code,"code")}</li>
       <li>After sending, copy the <b>Ref No.</b> from your GCash receipt here:</li>
-    </ol>`}
+    </ol>
+
     <label class="f" for="ps-ref-${id}">Reference number
       <input id="ps-ref-${id}" data-pay-ref="${id}" data-focus-key="ps-ref-${id}" inputmode="numeric" maxlength="20" autocomplete="off" value="${esc(d.ref||o.gcashRef||"")}" placeholder="e.g. 1234567890123"></label>
     <label class="f" for="ps-sender-${id}">Name or number you paid from
@@ -378,12 +387,14 @@ function payStep(o){
     ${d.err?`<p class="err" style="margin:0">${esc(d.err)}</p>`:""}
     <button class="btn big" data-pay-send="${id}">Send reference number</button>
     <button class="btn ghost small" data-pay-later="${id}" style="justify-self:center">I'll pay later</button>
-  </div></div>`;
+  </div></div>`}`;
 }
 function payBox(o){
   if(o.payment!=="GCash" || o.status==="cancelled") return "";
-  if(o.paymentConfirmed) return `<p style="margin:0"><span class="pill done">Paid</span> GCash payment confirmed by the shop.</p>`;
+  if(o.paymentConfirmed) return `<p style="margin:0"><span class="pill done">Paid</span> Payment confirmed by the shop.</p>`;
   const d=payDraft[o.id]||(payDraft[o.id]={ref:"",sender:"",err:"",editing:false}), id=esc(o.id);
+  if(o.payShotAt && !d.editing) return payingId===o.id ? "" : `<div class="notice" style="margin:0;font-size:.9rem">Payment screenshot sent.
+    Waiting for the shop to confirm your payment.<br><button class="btn ghost small" data-pay-edit="${id}" style="margin-top:6px">Send a different screenshot</button></div>`;
   if(!o.gcashRef && !d.editing) return `<div class="notice closed" style="margin:0;display:grid;gap:6px">
     <div>Not paid yet. The shop starts cooking once you pay ${peso(o.total)}${SHOP.payQr?"":" by GCash"}.</div>
     <button class="btn small" data-pay-open="${id}" style="justify-self:start;background:#fff;color:var(--brand-deep)">Pay now</button></div>`;
@@ -405,6 +416,28 @@ $("#trackBox").addEventListener("input",e=>{
   const r=e.target.closest("[data-pay-ref]"); if(r){ r.value=r.value.replace(/[^0-9A-Za-z]/g,""); payDraft[r.dataset.payRef].ref=r.value; }
   const s=e.target.closest("[data-pay-sender]"); if(s) payDraft[s.dataset.paySender].sender=s.value;
 });
+// Payment screenshot (QR payments): shrunk on the phone, then saved with the order in one go
+const shotDraft={}; // order id -> picture (data URL) chosen but not sent yet
+$("#trackBox").addEventListener("change", async e=>{
+  const f=e.target.closest("[data-shot-pick]"); if(!f || !f.files?.[0]) return;
+  const id=f.dataset.shotPick, d=payDraft[id]||(payDraft[id]={ref:"",sender:"",err:"",editing:false});
+  try{ shotDraft[id]=await compressPhoto(f.files[0], 1280, 0.7); d.err=""; }
+  catch(_){ d.err="That picture couldn't be opened. Try another screenshot."; }
+  renderTrack();
+});
+async function sendPayShot(id){
+  const d=payDraft[id]||(payDraft[id]={ref:"",sender:"",err:"",editing:false}), photo=shotDraft[id];
+  if(!photo){ d.err="Upload a screenshot of your payment first."; return renderTrack(); }
+  try{
+    const b=writeBatch(db);
+    b.set(doc(db,"payshots",id),{ customerUid:user.uid, photo, sentAt:serverTimestamp() });
+    b.update(doc(db,"orders",id),{ payShotAt:serverTimestamp() });
+    await b.commit();
+    delete shotDraft[id]; payDraft[id]={ref:"",sender:"",err:"",editing:false};
+    if(payingId===id) payingId=null; // paid: close the pay step
+  }catch(x){ d.err=String(x?.code).includes("permission-denied")?"The shop already confirmed this payment, so it can't be changed. Call us if something's wrong.":friendlyError(x); }
+  renderTrack();
+}
 async function sendPayRef(id){
   const o=live[id], d=payDraft[id], ref=(d.ref||o.gcashRef||"").replace(/[\s-]/g,""), sender=(d.sender||o.gcashSender||"").trim();
   if(!/^[0-9A-Za-z]{6,20}$/.test(ref)){ d.err="Type the reference number from your GCash receipt (the Ref No.)."; return renderTrack(); }
@@ -460,6 +493,7 @@ async function sendReport(id){
 }
 
 $("#trackBox").addEventListener("click", async e=>{
+  const ss=e.target.closest("[data-shot-send]"); if(ss){ ss.disabled=true; ss.textContent="Sending…"; await sendPayShot(ss.dataset.shotSend); return; }
   const ps=e.target.closest("[data-pay-send]"); if(ps){ ps.disabled=true; await sendPayRef(ps.dataset.paySend); return; }
   const pe=e.target.closest("[data-pay-edit]"); if(pe){ payDraft[pe.dataset.payEdit].editing=true; payingId=pe.dataset.payEdit; renderTrack(); return; }
   const po=e.target.closest("[data-pay-open]"); if(po){ payingId=po.dataset.payOpen; renderTrack(); return; }

@@ -378,6 +378,23 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Screenshot of a customer's QR payment (orders paid by QR, saved as GCash). The customer
+    // adds it and can replace it until the shop confirms the payment; staff check it against
+    // the bank app before tapping "payment received".
+    match /payshots/{orderId} {
+      function paidOrder() { return get(/databases/$(database)/documents/orders/$(orderId)).data; }
+      allow read: if isStaff() || (signedIn() && resource.data.customerUid == uid());
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['customerUid','photo','sentAt'])
+        && request.resource.data.customerUid == uid()
+        && request.resource.data.photo is string && request.resource.data.photo.size() < 800000
+        && request.resource.data.photo.matches('data:image/jpeg;base64,[A-Za-z0-9+/=]+')
+        && request.resource.data.sentAt == request.time
+        && paidOrder().customerUid == uid() && paidOrder().payment == 'GCash'
+        && paidOrder().status != 'cancelled' && paidOrder().get('paymentConfirmed', false) != true;
+      allow delete: if isAdmin();
+    }
+
     // A delivery order riders can take: no rider yet, and not finished or cancelled.
     // New delivery orders look for a rider first; the store cooks once a rider accepts.
     function needsRider(d) {
@@ -553,7 +570,7 @@ service cloud.firestore {
             // An online GCash order isn't cooked until the customer sends their GCash reference number
             && !(resource.data.status in ['new', 'assigned'] && request.resource.data.status == 'preparing'
                  && resource.data.payment == 'GCash' && resource.data.mode != 'Dine-in'
-                 && !('gcashRef' in resource.data))
+                 && !('gcashRef' in resource.data) && !('payShotAt' in resource.data))
             // A paid order can't be cancelled (the sale stays on the books)
             && !(resource.data.mode == 'Dine-in' && request.resource.data.status == 'cancelled' && resource.data.status != 'cancelled'
                  && (('cashGiven' in resource.data) || resource.data.get('paid', false) == true))
@@ -633,6 +650,15 @@ service cloud.firestore {
             && request.resource.data.gcashRef is string && request.resource.data.gcashRef.matches('[0-9A-Za-z]{6,20}')
             && str(request.resource.data.gcashSender, 60)
             && request.resource.data.gcashSentAt == request.time)
+
+        // Customer sent a screenshot of their QR payment (payshots/<this order>, same batch)
+        || (signedIn() && resource.data.customerUid == uid() && resource.data.payment == 'GCash'
+            && resource.data.status != 'cancelled'
+            && resource.data.get('paymentConfirmed', false) != true
+            && changed().hasOnly(['payShotAt'])
+            && request.resource.data.payShotAt == request.time
+            && existsAfter(/databases/$(database)/documents/payshots/$(orderId))
+            && getAfter(/databases/$(database)/documents/payshots/$(orderId)).data.sentAt == request.time)
 
         // Rider couldn't confirm the customer by phone: flags the order for the shop
         || (isApprovedRider() && needsRider(resource.data)
