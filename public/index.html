@@ -28,6 +28,7 @@ section.cat h2 small{font-family:var(--body);font-size:.8rem;color:var(--muted);
 .phview img{max-width:100%;max-height:70vh;border-radius:16px}
 .item.sold .name,.item.sold .price{opacity:.55}
 .soldtag{font-weight:800;color:var(--brand-deep);font-size:.9rem;white-space:nowrap}
+#best .item.best .name::after{display:none}
 .item.best .name::after{content:"Best seller";margin-left:8px;font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;background:var(--yolk);color:#3a1a22;padding:1px 7px;border-radius:99px;vertical-align:2px}
 .step{display:inline-flex;align-items:center;border:2px solid var(--brand);border-radius:99px;overflow:hidden}
 .step button{border:0;background:transparent;color:var(--brand);width:34px;height:32px;font-size:1.2rem;font-weight:800;cursor:pointer}
@@ -129,8 +130,11 @@ const zoneFee = ()=>fees && zone() in fees ? fees[zone()] : null;
 $("#hoursPill").textContent = "Open " + SHOP.hours;
 $("#foot").innerHTML = `${esc(SHOP.deliveryNote)} Questions? Call or text ${esc(SHOP.phone)}.<br>
   <a href="rider.html#register">Ride with us</a>`;
-$("#cats").innerHTML = MENU.map((c,i)=>`<a href="#${c.id}" class="${i?"":"on"}">${esc(c.name.replace(" Series",""))}</a>`).join("");
-$("#menu").innerHTML = MENU.map(c => `
+// Best sellers first: every item the owner marked "best seller", repeated from its own category
+const BEST=MENU.flatMap(c=>c.items.map(([id])=>id)).filter(id=>ITEMS[id]?.best);
+const SECTIONS=BEST.length?[{id:"best",name:"Best sellers",note:"Our customers' favourites",items:BEST.map(id=>[id])},...MENU]:MENU;
+$("#cats").innerHTML = SECTIONS.map((c,i)=>`<a href="#${c.id}" class="${i?"":"on"}">${esc(c.name.replace(" Series",""))}</a>`).join("");
+$("#menu").innerHTML = SECTIONS.map(c => `
   <section class="cat" id="${c.id}"><h2>${esc(c.name)}${c.note?`<small>${esc(c.note)}</small>`:""}</h2>
   ${c.items.map(([id])=>{const it=ITEMS[id];return `
     <div class="item${it.best?" best":""}" data-item="${id}"><img class="ph" data-ph="${id}" alt="${esc(it.name)}" hidden><div class="meta"><div class="name">${esc(it.name.replace("Add-on: ",""))}</div>
@@ -146,9 +150,9 @@ function stockProblem(extra){
   const n=servingsLeft(id,stockLeftNow,true);
   return n?`Sorry, we only have ${n} ${ITEMS[id].name} left.`:`Sorry, ${ITEMS[id].name} is sold out right now.`;
 }
-function renderCtl(id){
-  const el=document.querySelector(`.ctl[data-id="${id}"]`), q=cart[id]||0;
-  if(!el) return;
+function renderCtl(id){ document.querySelectorAll(`.ctl[data-id="${id}"]`).forEach(el=>renderCtlIn(el,id)); } // a best seller shows twice
+function renderCtlIn(el,id){
+  const q=cart[id]||0;
   if(removed.has(id)){ el.closest(".item").classList.add("sold"); el.innerHTML=`<span class="soldtag">Not available</span>`; return; }
   el.closest(".item").classList.toggle("sold",soldOut.has(id));
   if(soldOut.has(id) && !q){ el.innerHTML=`<span class="soldtag">Sold out</span>`; return; }
@@ -221,8 +225,8 @@ document.querySelectorAll("section.cat").forEach(s=>obs.observe(s));
 
 // Food photos the owner added (owner dashboard → Menu). Tapping one shows it bigger.
 if(isConfigured) getDocs(collection(db,"menuPhotos")).then(s=>s.docs.forEach(d=>{
-  const img=document.querySelector(`img[data-ph="${CSS.escape(d.id)}"]`); if(!img) return;
-  img.src=d.data().photo; img.hidden=false; img.closest(".item").classList.add("has-photo");
+  document.querySelectorAll(`img[data-ph="${CSS.escape(d.id)}"]`).forEach(img=>{
+    img.src=d.data().photo; img.hidden=false; img.closest(".item").classList.add("has-photo"); });
 })).catch(()=>{});
 $("#menu").addEventListener("click",e=>{
   const img=e.target.closest("img.ph"); if(!img) return;
