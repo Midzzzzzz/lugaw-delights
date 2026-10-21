@@ -110,7 +110,7 @@ table.inv input{width:90px;text-align:right;padding:5px 8px}
 </div>
 
 <script type="module">
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, setLoginFor, getUsernames } from "./fb/auth.js";
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, setLoginFor, getUsernames, EmailAuthProvider, reauthenticateWithCredential } from "./fb/auth.js";
 import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
@@ -580,8 +580,42 @@ $("#view").addEventListener("submit",async e=>{
 });
 
 // ---------- Shop settings ----------
+// ---------- The owner's own sign-in (Shop settings) ----------
+// Username and/or a new password; the current password is asked first. Other phones signed in
+// as the owner are signed out when the password changes.
+let acct={ loaded:null, user:"", pw:"", cur:"", msg:"", ok:false };
+function accountCard(){
+  if(acct.loaded===null){ acct.loaded=""; getUsernames(auth).then(u=>{ acct.loaded=u[auth.currentUser?.uid]||""; acct.user=acct.loaded;
+    if(tab==="settings" && !document.activeElement?.closest?.("#acct")) render(); }).catch(()=>{}); }
+  return `<div class="card" id="acct" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
+    <h2 style="color:var(--brand-deep);font-size:1.2rem">Your sign-in</h2>
+    <p style="margin:0">You sign in with <b>${esc(auth.currentUser?.email||"your email")}</b>${acct.loaded?` or the username <b>${esc(acct.loaded)}</b>`:""}.</p>
+    <label class="f">Username <span class="muted">(3 to 30 letters or numbers, no spaces)</span><input data-acct="user" value="${esc(acct.user)}" autocomplete="off" autocapitalize="none" spellcheck="false"></label>
+    <label class="f">New password <span class="muted">(leave empty to keep your password)</span><input data-acct="pw" type="password" autocomplete="new-password" value="${esc(acct.pw)}"></label>
+    <label class="f">Your current password<input data-acct="cur" type="password" autocomplete="current-password" value="${esc(acct.cur)}"></label>
+    ${acct.msg?`<p class="${acct.ok?"":"err"}" style="margin:0">${esc(acct.msg)}</p>`:""}
+    <div class="btnrow"><button class="btn" data-acct-save>Save sign-in</button></div></div>`;
+}
+$("#view").addEventListener("input",e=>{ const f=e.target.dataset?.acct; if(f) acct[f]=e.target.value; });
+$("#view").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-acct-save]"); if(!b) return;
+  const user=acct.user.trim().toLowerCase(), pw=acct.pw, changedUser=user!==acct.loaded;
+  const say=(m,ok=false)=>{ acct.msg=m; acct.ok=ok; render(); };
+  if(!changedUser && !pw) return say("Nothing changed.");
+  if(changedUser && !/^[a-z0-9._-]{3,30}$/.test(user)) return say("A username needs 3 to 30 letters or numbers (dots, dashes and _ are OK; no spaces).");
+  if(pw && pw.length<6) return say("Use a new password with at least 6 characters.");
+  if(!acct.cur) return say("Type your current password first.");
+  b.disabled=true;
+  try{
+    await reauthenticateWithCredential(auth.currentUser, EmailAuthProvider.credential(auth.currentUser.email, acct.cur));
+    await setLoginFor(auth, auth.currentUser.uid, { username:changedUser?user:null, password:pw||null });
+    if(changedUser) acct.loaded=user;
+    acct.pw=""; acct.cur="";
+    say(`Saved. Sign in with ${auth.currentUser.email}${acct.loaded?` or ${acct.loaded}`:""}${pw?" and your new password. Other phones signed in as you were signed out.":"."}`, true);
+  }catch(x){ acct.cur=""; say(String(x?.code).includes("invalid-credential")?"Your current password isn't right.":friendlyError(x)); }
+});
 function renderSettings(){
-  $("#view").innerHTML=`<div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
+  $("#view").innerHTML=accountCard()+`<div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
     <h2 style="color:var(--brand-deep);font-size:1.2rem">Delivery areas and fees</h2>
     <p style="margin:0">Customers can only order delivery to the barangays ticked here, and pay that barangay's fee.
       Set higher fees for barangays farther from the stall. The fee goes to the rider.</p>
