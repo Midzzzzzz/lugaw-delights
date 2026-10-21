@@ -237,7 +237,7 @@ function renderRefill(){
   box.hidden=!due && !list.length;
   refillTab(box.hidden?0:list.length,due);
   if(box.hidden) return;
-  const all=list.length>0 && list.every(r=>d.got[r.g]);
+  const all=list.length>0 && list.every(r=>d.got[r.g]), ticked=list.filter(r=>d.got[r.g]).length;
   box.className="card"+(due?"":" calm");
   box.innerHTML=`<h2 style="color:var(--brand-deep)">${due?"To refill":"Running low"} <span class="pill work">${list.length}</span></h2>
     <p class="muted" style="margin:4px 0 6px;font-size:.88rem">${due?`${esc(inv.refillAskedByName||"The seller")} closed the shift${asked?" at "+asked.toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}):""}. `:""}
@@ -248,25 +248,29 @@ function renderRefill(){
       <label class="rbuy">Got <input type="number" inputmode="decimal" min="0" step="any" data-buy="${esc(r.g)}" value="${esc(v)}" aria-label="Amount of ${esc(ingName(r.g))} bought"> ${esc(ingUnit(r.g))}</label></div>`; }).join("")
       :`<p class="empty">Everything is at its standard stock. Nothing to buy.</p>`}
     ${refillMsg?`<p class="err">${esc(refillMsg)}</p>`:""}
-    <div class="btnrow" style="margin-top:10px"><button class="btn big ok" data-refilled${all||!list.length?"":" disabled"}>${!list.length?"Done":all?"All refilled":`Tick everything first (${list.filter(r=>d.got[r.g]).length} of ${list.length})`}</button></div>`;
+    <div class="btnrow" style="margin-top:10px"><button class="btn big ok" data-refilled${ticked||!list.length?"":" disabled"}>${!list.length?"Done":all?"All refilled":ticked?`Save ${ticked} refilled item${ticked>1?"s":""}`:"Tick what you got"}</button></div>
+    ${ticked&&!all?`<p class="muted" style="margin:6px 0 0;font-size:.85rem">The stock goes up now for what you ticked. The rest stay on this list.</p>`:""}`;
 }
 $("#refill").addEventListener("change",e=>{ const g=e.target.closest("[data-got]"); if(g){ refillDraft.got[g.dataset.got]=g.checked; renderRefill(); } });
 $("#refill").addEventListener("input",e=>{ const i=e.target.closest("[data-buy]"); if(i) refillDraft.buy[i.dataset.buy]=i.value===""?0:Math.max(0,Number(i.value)); });
 $("#refill").addEventListener("focusout",()=>setTimeout(renderRefill,200));
 $("#refill").addEventListener("click",async e=>{
   const b=e.target.closest("[data-refilled]"); if(!b || !inv) return;
-  if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Everything is in? Tap again"; return; }
-  const left=onHand(), list=belowStandard(inv,left), bought={}, before={}, after={};
+  if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Save these? Tap again"; return; }
+  // Saves what was ticked (all of it, or part): the stock on hand now plus what was bought.
+  // Items not ticked stay on the list, and the refill stays due until they're done too.
+  const left=onHand(), list=belowStandard(inv,left), got=list.filter(r=>refillDraft.got[r.g]), bought={}, before={}, after={};
   Object.keys(inv.par||{}).forEach(g=>{ before[g]=Math.round((left[g]??inv.base?.[g]??0)*100)/100; after[g]=before[g]; });
-  list.forEach(r=>{ bought[r.g]=Math.round((refillDraft.buy[r.g]??r.need)*100)/100; after[r.g]=Math.round((before[r.g]+bought[r.g])*100)/100; });
+  got.forEach(r=>{ bought[r.g]=Math.round((refillDraft.buy[r.g]??r.need)*100)/100; after[r.g]=Math.round((before[r.g]+bought[r.g])*100)/100; });
+  const stillDue=!!inv.refillDue && got.length<list.length;
   b.disabled=true; refillMsg="";
   try{
     const batch=writeBatch(db), name=$("#meName").textContent||"Kitchen";
-    batch.update(doc(db,"settings","inventory"),{base:after,since:serverTimestamp(),refillDue:false,refilledAt:serverTimestamp(),refilledBy:me.uid,refilledByName:name});
-    if(list.length) batch.set(doc(collection(db,"refills")),{at:serverTimestamp(),by:me.uid,byName:name,bought,before,after});
+    batch.update(doc(db,"settings","inventory"),{base:after,since:serverTimestamp(),refillDue:stillDue,refilledAt:serverTimestamp(),refilledBy:me.uid,refilledByName:name});
+    if(got.length) batch.set(doc(collection(db,"refills")),{at:serverTimestamp(),by:me.uid,byName:name,bought,before,after});
     await batch.commit();
-    refillDraft={got:{},buy:{}};
-  }catch(x){ refillMsg="Couldn't save: "+friendlyError(x)+" If the owner just updated the app, the new security rules may not be published yet."; b.disabled=false; }
+    got.forEach(r=>{ delete refillDraft.got[r.g]; delete refillDraft.buy[r.g]; }); // the rest keep what was typed
+  }catch(x){ refillMsg="Couldn't save: "+friendlyError(x); b.disabled=false; }
   renderRefill();
 });
 function render(){

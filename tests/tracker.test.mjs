@@ -34,10 +34,11 @@ await t("a customer can't ask for a refill", () => assertFails(updateDoc(doc(cus
 
 console.log("Kitchen refills");
 const refill = (over = {}) => ({ base: { egg: 80, liempo: 20 }, since: serverTimestamp(), refillDue: false, refilledAt: serverTimestamp(), refilledBy: "k1", refilledByName: "Ben", ...over });
-await t("kitchen can't leave it marked as still due", () => assertFails(updateDoc(doc(k1, "settings/inventory"), refill({ refillDue: true }))));
+await t("kitchen saves part of the refill; the rest stays due", () => assertSucceeds(updateDoc(doc(k1, "settings/inventory"), refill({ base: { egg: 70, liempo: 20 }, refillDue: true }))));
 await t("kitchen can't refill in someone else's name", () => assertFails(updateDoc(doc(k1, "settings/inventory"), refill({ refilledBy: "s1" }))));
 await t("a seller can't mark it refilled", () => assertFails(updateDoc(doc(s1, "settings/inventory"), refill({ refilledBy: "s1" }))));
 await t("kitchen refills and resets the stock on hand", () => assertSucceeds(updateDoc(doc(k1, "settings/inventory"), refill())));
+await t("kitchen can't ask for a refill itself", () => assertFails(updateDoc(doc(k1, "settings/inventory"), refill({ refillDue: true }))));
 const rec = (over = {}) => ({ at: serverTimestamp(), by: "k1", byName: "Ben", bought: { egg: 20 }, before: { egg: 60, liempo: 20 }, after: { egg: 80, liempo: 20 }, ...over });
 await t("kitchen records the refill in the history", () => assertSucceeds(addDoc(collection(k1, "refills"), rec())));
 await t("a seller can't add to the refill history", () => assertFails(addDoc(collection(s1, "refills"), rec({ by: "s1" }))));

@@ -101,7 +101,9 @@ service cloud.firestore {
           && changed().hasOnly(['base','since','refillDue','refilledAt','refilledBy','refilledByName'])
           && request.resource.data.base is map && request.resource.data.base.size() <= 300
           && request.resource.data.since == request.time
-          && request.resource.data.refillDue == false
+          // a partial refill (some items bought) keeps the request open; the kitchen can't open one
+          && (request.resource.data.refillDue == false
+              || (resource.data.get('refillDue', false) == true && request.resource.data.refillDue == true))
           && request.resource.data.refilledAt == request.time
           && request.resource.data.refilledBy == uid() && str(request.resource.data.refilledByName, 80));
     }
