@@ -53,7 +53,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
 @media (max-width:860px){.bar.show{display:flex}}
 .summary{display:grid;gap:4px;background:var(--sunk);border-radius:12px;padding:10px 12px}
 .summary .lines{margin:4px 0}
-.paystep{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);display:grid;place-items:center;padding:16px;overflow:auto}
+.paystep{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);display:grid;grid-template-columns:minmax(0,440px);justify-content:center;align-items:center;padding:16px;overflow:auto}
 .paystep .card{width:100%;max-width:440px;display:grid;gap:10px;max-height:100%;overflow:auto}
 .paysteps{margin:0;padding-left:20px;display:grid;gap:8px}
 </style>
@@ -92,6 +92,11 @@ aside h2{font-size:1.4rem;color:var(--brand)}
           <label class="f" for="f-addr" id="addrWrap">House no., street and landmark<textarea id="f-addr" rows="2" maxlength="200" placeholder="e.g. 12 Lopez Ave., near the chapel"></textarea></label>
           <div class="group"><span>Payment</span>
             <p style="margin:0;font-weight:700" id="cashLabel">Cash on delivery</p>
+            <div class="seg" id="payChoice" hidden>
+              <input type="radio" name="pay" id="p-cash" value="Cash" checked><label for="p-cash">Cash on delivery</label>
+              <input type="radio" name="pay" id="p-qr" value="GCash"><label for="p-qr">Pay now: GCash or bank app (QR)</label>
+            </div>
+            <p class="muted" id="qrNote" hidden style="margin:0;font-size:.88rem">After you place your order, we show a QR code. Pay with GCash, Maya or your bank app, then type the reference number.</p>
           </div>
           <label class="f" for="f-notes">Notes (optional)<input id="f-notes" maxlength="300" placeholder="Extra spicy, no spring onion, etc."></label>
           <p class="err" id="err" hidden></p>
@@ -164,7 +169,8 @@ $("#menu").addEventListener("click", e=>{
 });
 
 const mode=()=>"Delivery"; // customers order delivery only
-const pay=()=>"Cash"; // online orders are cash on delivery
+// Cash on delivery, or pay now by scanning the shop's QR (saved as "GCash" on the order)
+const pay=()=>SHOP.payQr && document.querySelector('input[name="pay"]:checked')?.value==="GCash" ? "GCash" : "Cash";
 const cartItems=()=>Object.entries(cart).map(([id,qty])=>({id,name:ITEMS[id].name,price:ITEMS[id].price,qty}));
 
 function renderCart(){
@@ -186,7 +192,10 @@ function renderPayNote(){
   const isDel = mode()==="Delivery";
   $("#addrWrap").hidden = !isDel; $("#zoneWrap").hidden = !isDel;
   $("#cashLabel").textContent = isDel ? "Cash on delivery" : "Cash on pickup";
+  $("#cashLabel").hidden = !!SHOP.payQr; $("#payChoice").hidden = !SHOP.payQr;
+  $("#qrNote").hidden = pay()!=="GCash";
 }
+document.querySelectorAll('input[name="pay"]').forEach(r=>r.addEventListener("change",renderPayNote));
 // Barangay list: only barangays the owner delivers to, each with its fee
 function renderZones(){
   const keep=zone();
@@ -281,7 +290,7 @@ function orderSummary(o){
       ${boxRow(o)}
       <div class="grand"><span>Total</span><span>${peso(o.total)}</span></div></div>
     <div class="muted" style="font-size:.88rem">${del?`Deliver to: ${esc(o.address)}`:`Pickup at: ${esc(SHOP.pickupAddress)}`}
-      <br>Payment: ${o.payment==="GCash"?"GCash":del?"Cash on delivery":"Cash on pickup"}${o.notes?`<br>Notes: ${esc(o.notes)}`:""}</div></div>`;
+      <br>Payment: ${o.payment==="GCash"?(SHOP.payQr?"Paid by QR (GCash / bank app)":"GCash"):del?"Cash on delivery":"Cash on pickup"}${o.notes?`<br>Notes: ${esc(o.notes)}`:""}</div></div>`;
 }
 function renderTrack(){
   const focusKey=document.activeElement?.dataset?.focusKey; // restore the cursor after redrawing
@@ -344,18 +353,27 @@ function payStep(o){
   const d=payDraft[o.id]||(payDraft[o.id]={ref:"",sender:"",err:"",editing:false}), id=esc(o.id);
   const copy=(text,label)=>`<button type="button" class="btn ghost small" data-copy="${esc(text)}">Copy ${label}</button>`;
   return `<div class="paystep" role="dialog" aria-modal="true" aria-labelledby="ps-title-${id}"><div class="card">
-    <h2 id="ps-title-${id}" style="color:var(--brand)">Pay ${peso(o.total)} with GCash</h2>
+    <h2 id="ps-title-${id}" style="color:var(--brand)">Pay ${peso(o.total)} ${SHOP.payQr?"by QR":"with GCash"}</h2>
     <p class="muted" style="margin:0">Order <b class="num">${esc(o.code)}</b>. The shop starts cooking once you pay.</p>
+    ${SHOP.payQr?`<img src="${esc(SHOP.payQr)}" alt="QR code to pay Lugaw Delights" style="width:100%;max-width:300px;justify-self:center;border-radius:12px;background:#fff">
+    <p class="muted" style="margin:0;text-align:center;font-size:.85rem">Pays to ${esc(SHOP.payQrName||SHOP.name)}</p>
+    <a class="btn small" href="${esc(SHOP.payQr)}" download="lugaw-delights-pay-qr" style="justify-self:center">Save QR code</a>
     <ol class="paysteps">
+      <li>Tap <b>Save QR code</b> (or take a screenshot).</li>
+      <li>Open <b>GCash</b>, <b>Maya</b> or your <b>bank app</b>, tap <b>Scan QR</b>, then <b>Upload QR</b> / <b>Gallery</b> and choose the saved picture.
+        On another phone, just scan the code on this screen.</li>
+      <li>Pay exactly <b class="num">${peso(o.total)}</b>. ${copy(String(o.total),"amount")} If there's a message box, type your order code <b class="num">${esc(o.code)}</b>.</li>
+      <li>Copy the <b>reference number</b> from your receipt here:</li>
+    </ol>`:`<ol class="paysteps">
       <li><b>Open your GCash app</b> and choose <b>Send Money</b>.</li>
       <li>Send <b class="num">${peso(o.total)}</b> to <b class="num">${esc(SHOP.gcashNumber)}</b> (${esc(SHOP.gcashName)}).
         <span class="btnrow" style="margin-top:4px">${copy(SHOP.gcashNumber.replace(/\s/g,""),"number")}${copy(String(o.total),"amount")}</span></li>
       <li>In the message, type your order code <b class="num">${esc(o.code)}</b>. ${copy(o.code,"code")}</li>
       <li>After sending, copy the <b>Ref No.</b> from your GCash receipt here:</li>
-    </ol>
-    <label class="f" for="ps-ref-${id}">GCash reference number
+    </ol>`}
+    <label class="f" for="ps-ref-${id}">Reference number
       <input id="ps-ref-${id}" data-pay-ref="${id}" data-focus-key="ps-ref-${id}" inputmode="numeric" maxlength="20" autocomplete="off" value="${esc(d.ref||o.gcashRef||"")}" placeholder="e.g. 1234567890123"></label>
-    <label class="f" for="ps-sender-${id}">Your GCash name or number
+    <label class="f" for="ps-sender-${id}">Name or number you paid from
       <input id="ps-sender-${id}" data-pay-sender="${id}" data-focus-key="ps-sender-${id}" maxlength="60" value="${esc(d.sender||o.gcashSender||"")}" placeholder="Juan D. or 0917…"></label>
     ${d.err?`<p class="err" style="margin:0">${esc(d.err)}</p>`:""}
     <button class="btn big" data-pay-send="${id}">Send reference number</button>
@@ -367,7 +385,7 @@ function payBox(o){
   if(o.paymentConfirmed) return `<p style="margin:0"><span class="pill done">Paid</span> GCash payment confirmed by the shop.</p>`;
   const d=payDraft[o.id]||(payDraft[o.id]={ref:"",sender:"",err:"",editing:false}), id=esc(o.id);
   if(!o.gcashRef && !d.editing) return `<div class="notice closed" style="margin:0;display:grid;gap:6px">
-    <div>Not paid yet. The shop starts cooking once you pay ${peso(o.total)} by GCash.</div>
+    <div>Not paid yet. The shop starts cooking once you pay ${peso(o.total)}${SHOP.payQr?"":" by GCash"}.</div>
     <button class="btn small" data-pay-open="${id}" style="justify-self:start;background:#fff;color:var(--brand-deep)">Pay now</button></div>`;
   if(payingId===o.id) return ""; // the pay step is open
   if(o.gcashRef && !d.editing) return `<div class="notice" style="margin:0;font-size:.9rem">GCash reference <b class="num">${esc(o.gcashRef)}</b> sent.
@@ -498,6 +516,7 @@ $("#form").addEventListener("submit", async e=>{
     await batch.commit();
     Object.values(live).filter(o=>FINAL.includes(o.status)).forEach(o=>forgetOrder(o.id)); // a new order replaces finished ones
     rememberOrder(ref.id); watchMyOrders();
+    if(pay()==="GCash") payingId=ref.id; // show the QR to pay right away
     try{ localStorage.setItem("ld_last", String(Date.now())); }catch(_){}
     Object.keys(cart).forEach(id=>{ delete cart[id]; renderCtl(id); });
     $("#f-notes").value=""; renderCart();

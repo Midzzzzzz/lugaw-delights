@@ -26,13 +26,13 @@ function place(payment, qty) {
   b.set(doc(db, "pins", id), { pin: "1234", customerUid: uid });
   return b.commit();
 }
-// Online orders (delivery and pickup) are cash only, with no amount limit.
-console.log("Cash-only online orders");
+// Online orders are cash on delivery or paid by QR (saved as GCash), with no amount limit.
+console.log("Online order payment");
 await t("small cash order allowed", () => assertSucceeds(place("Cash", 1)));
 await t("big cash order allowed (no cash limit)", () => assertSucceeds(place("Cash", 10)));
 await env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), "settings/store"), { open: true, cashMax: 300 }));
 await t("an old cash limit setting no longer blocks orders", () => assertSucceeds(place("Cash", 5)));
-await t("online GCash order refused", () => assertFails(place("GCash", 1)));
+await t("online order paid by QR (GCash) allowed", () => assertSucceeds(place("GCash", 1)));
 await t("unknown payment method refused", () => assertFails(place("Card", 1)));
 await t("seller still opens and closes the store", () => assertSucceeds(setDoc(doc(as("s1"), "settings/store"), { open: true }, { merge: true })));
 await t("seller can't change other shop settings", () => assertFails(setDoc(doc(as("s1"), "settings/store"), { cashMax: 0 }, { merge: true })));

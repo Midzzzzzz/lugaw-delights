@@ -453,7 +453,7 @@ service cloud.firestore {
           && d.status == 'new'
           && d.riderUid == null
           && d.mode == 'Delivery' // customers order delivery only (pickup orders from before stay valid)
-          && d.payment == 'Cash' // online orders are cash on delivery or pickup
+          && d.payment in ['Cash', 'GCash'] // cash on delivery, or paid by QR before cooking
           && okItems(d.items)
           && amount(d.subtotal) && amount(d.deliveryFee) && amount(d.total)
           && boxOk(d) && d.total == d.subtotal + d.deliveryFee + d.get('boxFee', 0) && d.subtotal > 0

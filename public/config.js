@@ -18,7 +18,11 @@ export const SHOP = {
   boxFee: 10,                            // take-out box, per piece, for menu sections marked box: true
   deliveryNote: "We deliver within Los Baños and Bay, Laguna. The fee depends on your barangay.",
   gcashName: "Ruel Calica",
-  gcashNumber: "0932 474 8114"
+  gcashNumber: "0932 474 8114",
+  // Pay-now QR (InstaPay / QR Ph: works from GCash, Maya and bank apps). A picture in this folder;
+  // leave payQr empty to offer cash on delivery only.
+  payQr: "",
+  payQrName: "Armida Contreras (MariBank)"
 };
 
 // Delivery areas. Customers can only order delivery to these barangays.
