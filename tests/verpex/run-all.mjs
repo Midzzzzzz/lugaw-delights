@@ -9,7 +9,7 @@ const root = fileURLToPath(new URL("../..", import.meta.url));
 const tests = fileURLToPath(new URL("..", import.meta.url));
 const php = process.env.PHP || "C:/xampp/php/php.exe";
 const filter = process.argv[2] || "";
-const server = spawn(php, ["-S", "127.0.0.1:8095", "-t", "public", "tools/dev-router.php"], { cwd: root, env: { ...process.env, LUGAW_TEST: "1", LUGAW_DB: "lugaw_test" }, stdio: "ignore" });
+const server = spawn(php, [...(process.env.LUGAW_PG ? ["-d", "extension=pdo_pgsql"] : []), "-S", "127.0.0.1:8095", "-t", "public", "tools/dev-router.php"], { cwd: root, env: { ...process.env, LUGAW_TEST: "1", LUGAW_DB: "lugaw_test" }, stdio: "ignore" });
 await new Promise(r => setTimeout(r, 1200));
 const files = readdirSync(tests).filter(f => f.endsWith(".test.mjs") && f.includes(filter)).sort();
 let failed = 0;

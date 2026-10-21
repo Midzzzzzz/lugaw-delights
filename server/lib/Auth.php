@@ -25,7 +25,15 @@ final class Auth {
     if ($r && (int)$r['until'] > $now) {
       if ((int)$r['n'] >= $max) throw new ApiError('auth/too-many-requests', 'Too many attempts. Try again in a few minutes.', 429);
       $this->db->prepare('UPDATE hits SET n = n + 1 WHERE k = ?')->execute([$key]);
-    } else $this->db->prepare('REPLACE INTO hits (k, n, until) VALUES (?, 1, ?)')->execute([$key, $now + $windowMs]);
+    } else $this->db->prepare(Store::isPg($this->db)
+        ? 'INSERT INTO hits (k, n, until) VALUES (?, 1, ?) ON CONFLICT (k) DO UPDATE SET n = 1, until = EXCLUDED.until'
+        : 'REPLACE INTO hits (k, n, until) VALUES (?, 1, ?)')->execute([$key, $now + $windowMs]);
+  }
+  // The visitor's address. Behind Render's proxy every request comes from the proxy, so the
+  // address it passes on (X-Forwarded-For) is used instead.
+  private function ip(): string {
+    $fwd = !empty($this->cfg['behind_proxy']) ? trim(explode(',', $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '')[0]) : '';
+    return $fwd !== '' ? $fwd : ($_SERVER['REMOTE_ADDR'] ?? '');
   }
   private static function cleanEmail($e): string {
     $e = strtolower(trim((string)$e));
@@ -51,7 +59,7 @@ final class Auth {
 
   public function signup($email, $pass): array {
     $email = self::cleanEmail($email);
-    $this->limit('signup:' . ($_SERVER['REMOTE_ADDR'] ?? ''), 10, 3600000);
+    $this->limit('signup:' . $this->ip(), 10, 3600000);
     if (!is_string($pass) || strlen($pass) < 6) throw new ApiError('auth/weak-password', 'Use a password with at least 6 characters.');
     $q = $this->db->prepare('SELECT 1 FROM users WHERE email = ?'); $q->execute([$email]);
     if ($q->fetchColumn()) throw new ApiError('auth/email-already-in-use', 'That email already has an account.');
@@ -68,7 +76,7 @@ final class Auth {
     return $this->out($u, $this->session($u['uid']));
   }
   public function anonymous(): array {
-    $this->limit('anon:' . ($_SERVER['REMOTE_ADDR'] ?? ''), 60, 3600000);
+    $this->limit('anon:' . $this->ip(), 60, 3600000);
     $u = ['uid' => self::newId(), 'email' => null, 'provider' => 'anonymous'];
     $this->db->prepare('INSERT INTO users (uid, email, pass, provider, created) VALUES (?, NULL, NULL, ?, ?)')->execute([$u['uid'], 'anonymous', Store::now()]);
     return $this->out($u, $this->session($u['uid']));
@@ -93,9 +101,16 @@ final class Auth {
     $site = rtrim($this->cfg['site_url'] ?? '', '/');
     $link = "$site/reset.html#$t";
     $from = $this->cfg['mail_from'] ?? 'no-reply@' . parse_url($site, PHP_URL_HOST);
-    @mail($email, 'Reset your Lugaw Delights password',
-      "Someone asked to reset the password for this email on Lugaw Delights.\n\nChoose a new password here (the link works for 1 hour):\n$link\n\nIf it wasn't you, ignore this email.",
-      "From: Lugaw Delights <$from>\r\nContent-Type: text/plain; charset=utf-8");
+    $subject = 'Reset your Lugaw Delights password';
+    $body = "Someone asked to reset the password for this email on Lugaw Delights.\n\nChoose a new password here (the link works for 1 hour):\n$link\n\nIf it wasn't you, ignore this email.";
+    if (!empty($this->cfg['resend_key'])) { // Render: sent through Resend (resend.com)
+      $ch = curl_init('https://api.resend.com/emails');
+      curl_setopt_array($ch, [CURLOPT_POST => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15,
+        CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $this->cfg['resend_key'], 'Content-Type: application/json'],
+        CURLOPT_POSTFIELDS => json_encode(['from' => "Lugaw Delights <$from>", 'to' => [$email], 'subject' => $subject, 'text' => $body])]);
+      $res = curl_exec($ch); $code = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+      if ($code >= 300) error_log("Lugaw API: reset email not sent ($code): $res");
+    } else @mail($email, $subject, $body, "From: Lugaw Delights <$from>\r\nContent-Type: text/plain; charset=utf-8");
   }
   public function finishReset($token, $pass): void {
     if (!is_string($pass) || strlen($pass) < 6) throw new ApiError('auth/weak-password', 'Use a password with at least 6 characters.');

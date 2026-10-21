@@ -10,6 +10,15 @@ require __DIR__ . '/lib/Auth.php';
 // or config.php here (protected by .htaccess), or the LUGAW_CONFIG environment variable.
 $cfgFile = getenv('LUGAW_CONFIG') ?: (is_file(__DIR__ . '/../../lugaw-config.php') ? __DIR__ . '/../../lugaw-config.php' : __DIR__ . '/config.php');
 $cfg = is_file($cfgFile) ? require $cfgFile : [];
+// On Render the settings come from environment variables (see render.yaml)
+if ($url = getenv('DATABASE_URL')) {
+  $u = parse_url($url);
+  $cfg['db'] = ['dsn' => sprintf('pgsql:host=%s;port=%d;dbname=%s', $u['host'], $u['port'] ?? 5432, ltrim($u['path'], '/')),
+    'user' => urldecode($u['user'] ?? ''), 'pass' => urldecode($u['pass'] ?? '')];
+}
+foreach (['SITE_URL' => 'site_url', 'MAIL_FROM' => 'mail_from', 'RESEND_API_KEY' => 'resend_key'] as $env => $key) if (getenv($env)) $cfg[$key] = getenv($env);
+if (getenv('BEHIND_PROXY')) $cfg['behind_proxy'] = true;
+if (getenv('ORIGINS')) $cfg['origins'] = array_map('trim', explode(',', getenv('ORIGINS')));
 
 // Who may call the API from another address: the apps (Capacitor) and the site itself
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
@@ -29,8 +38,10 @@ function reply($data, int $code = 200): never { http_response_code($code); echo 
 
 try {
   if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') reply(['ok' => true, 'service' => 'Lugaw Delights API']);
-  if (empty($cfg['db'])) throw new ApiError('failed-precondition', 'The server isn\'t set up yet (lugaw-config.php is missing).', 500);
-  $db = new PDO($cfg['db']['dsn'], $cfg['db']['user'], $cfg['db']['pass'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4, time_zone = '+00:00'"]);
+  if (empty($cfg['db'])) throw new ApiError('failed-precondition', 'The server isn\'t set up yet (no database settings).', 500);
+  $isMy = str_starts_with($cfg['db']['dsn'], 'mysql:');
+  $db = new PDO($cfg['db']['dsn'], $cfg['db']['user'], $cfg['db']['pass'], [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
+    + ($isMy ? [PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8mb4, time_zone = '+00:00'"] : []));
   $raw = file_get_contents('php://input');
   if (strlen($raw) > 6_000_000) throw new ApiError('invalid-argument', 'Request too large', 413);
   $in = $raw === '' ? new stdClass : Store::decode($raw);

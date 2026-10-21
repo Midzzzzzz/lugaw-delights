@@ -1,0 +1,8 @@
+.git
+tests
+tools
+qr
+*.log
+firebase.json
+server/config.php
+server/.schema-ok

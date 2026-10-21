@@ -1,5 +1,5 @@
 <?php
-// The shop's data in MySQL: one row per document (collection + id + JSON), every change numbered
+// The shop's data in PostgreSQL (Render) or MySQL: one row per document (collection + id + JSON), every change numbered
 // so screens can ask "what changed since number N?". Every read and write is checked against
 // firestore.rules (Rules.php), the same way Firebase checked it.
 
@@ -8,9 +8,42 @@ final class ApiError extends Exception {
 }
 
 final class Store {
-  public function __construct(private PDO $db, private Rules $rules, private ?stdClass $auth, private bool $bypass = false) {}
+  private bool $pg;
+  public function __construct(private PDO $db, private Rules $rules, private ?stdClass $auth, private bool $bypass = false) { $this->pg = self::isPg($db); }
 
+  // SQL for a top-level field of the stored JSON: as text, a timestamp's milliseconds, a number, or "is there"
+  private function jText(string $f): string { return $this->pg ? "(data::jsonb ->> '$f')" : "JSON_VALUE(data, '$.\"$f\"')"; }
+  private function jTs(string $f): string { return $this->pg ? "((data::jsonb -> '$f') ->> '__t')::bigint" : "CAST(JSON_VALUE(data, '$.\"$f\".__t') AS SIGNED)"; }
+  private function jNum(string $f): string {
+    return $this->pg ? "(CASE WHEN jsonb_typeof(data::jsonb -> '$f') = 'number' THEN (data::jsonb ->> '$f')::numeric END)"
+      : "(CASE WHEN JSON_TYPE(JSON_EXTRACT(data, '$.\"$f\"')) IN ('INTEGER', 'DOUBLE', 'DECIMAL') THEN JSON_VALUE(data, '$.\"$f\"') + 0 END)";
+  }
+  private function jKind(string $f): string { // Firebase's order of value kinds (see kind() below)
+    if ($this->pg) { $x = "(data::jsonb -> '$f')";
+      return "(CASE jsonb_typeof($x) WHEN 'null' THEN 0 WHEN 'boolean' THEN 1 WHEN 'number' THEN 2 WHEN 'string' THEN 4 WHEN 'array' THEN 6 ELSE (CASE WHEN ($x -> '__t') IS NOT NULL THEN 3 ELSE 7 END) END)"; }
+    $x = "JSON_EXTRACT(data, '$.\"$f\"')";
+    return "(CASE JSON_TYPE($x) WHEN 'NULL' THEN 0 WHEN 'BOOLEAN' THEN 1 WHEN 'INTEGER' THEN 2 WHEN 'DOUBLE' THEN 2 WHEN 'DECIMAL' THEN 2 WHEN 'STRING' THEN 4 WHEN 'ARRAY' THEN 6 ELSE (CASE WHEN JSON_EXTRACT($x, '$.__t') IS NOT NULL THEN 3 ELSE 7 END) END)";
+  }
+  private function jHas(string $f): string { return $this->pg ? "(data::jsonb -> '$f') IS NOT NULL" : "JSON_EXTRACT(data, '$.\"$f\"') IS NOT NULL"; }
+
+  public static function isPg(PDO $db): bool { return $db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'pgsql'; }
   public static function schema(PDO $db): void {
+    if (self::isPg($db)) { // PostgreSQL (Render)
+      $db->exec('CREATE TABLE IF NOT EXISTS docs (coll VARCHAR(64) NOT NULL, id VARCHAR(190) COLLATE "C" NOT NULL, data TEXT NOT NULL,
+        ver BIGINT NOT NULL, PRIMARY KEY (coll, id))');
+      $db->exec('CREATE INDEX IF NOT EXISTS docs_coll_ver ON docs (coll, ver)');
+      $db->exec('CREATE TABLE IF NOT EXISTS changes (ver BIGSERIAL PRIMARY KEY, coll VARCHAR(64) NOT NULL)');
+      $db->exec('CREATE TABLE IF NOT EXISTS users (uid VARCHAR(40) NOT NULL PRIMARY KEY, email VARCHAR(190) NULL UNIQUE,
+        pass VARCHAR(255) NULL, provider VARCHAR(20) NOT NULL, created BIGINT NOT NULL)');
+      $db->exec('CREATE TABLE IF NOT EXISTS sessions (token CHAR(64) NOT NULL PRIMARY KEY, uid VARCHAR(40) NOT NULL,
+        created BIGINT NOT NULL, seen BIGINT NOT NULL)');
+      $db->exec('CREATE INDEX IF NOT EXISTS sessions_uid ON sessions (uid)');
+      $db->exec('CREATE TABLE IF NOT EXISTS resets (token CHAR(64) NOT NULL PRIMARY KEY, uid VARCHAR(40) NOT NULL, expires BIGINT NOT NULL)');
+      $db->exec('CREATE TABLE IF NOT EXISTS hits (k VARCHAR(190) NOT NULL PRIMARY KEY, n INT NOT NULL, until BIGINT NOT NULL)');
+      $db->exec('CREATE TABLE IF NOT EXISTS meta (k VARCHAR(16) NOT NULL PRIMARY KEY, v BIGINT NOT NULL)');
+      $db->exec("INSERT INTO meta (k, v) VALUES ('write', 0) ON CONFLICT (k) DO NOTHING");
+      return;
+    }
     $db->exec("CREATE TABLE IF NOT EXISTS docs (coll VARCHAR(64) NOT NULL, id VARCHAR(190) NOT NULL, data LONGTEXT NOT NULL,
       ver BIGINT NOT NULL, PRIMARY KEY (coll, id), KEY coll_ver (coll, ver)) DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin");
     $db->exec("CREATE TABLE IF NOT EXISTS changes (ver BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY, coll VARCHAR(64) NOT NULL,
@@ -22,6 +55,8 @@ final class Store {
     $db->exec("CREATE TABLE IF NOT EXISTS resets (token CHAR(64) NOT NULL PRIMARY KEY, uid VARCHAR(40) NOT NULL,
       expires BIGINT NOT NULL) DEFAULT CHARSET=utf8mb4");
     $db->exec("CREATE TABLE IF NOT EXISTS hits (k VARCHAR(190) NOT NULL PRIMARY KEY, n INT NOT NULL, until BIGINT NOT NULL) DEFAULT CHARSET=utf8mb4");
+    $db->exec("CREATE TABLE IF NOT EXISTS meta (k VARCHAR(16) NOT NULL PRIMARY KEY, v BIGINT NOT NULL) DEFAULT CHARSET=utf8mb4");
+    $db->exec("INSERT IGNORE INTO meta (k, v) VALUES ('write', 0)");
   }
 
   public static function now(): int { return (int)floor(microtime(true) * 1000); }
@@ -63,17 +98,19 @@ final class Store {
     $sql = 'SELECT id, data, ver FROM docs WHERE coll = ?'; $args = [$coll]; $exact = true;
     foreach ($where as [$f, $op, $v]) {
       if (!preg_match('/^[A-Za-z0-9_]+$/', (string)$f)) throw new ApiError('invalid-argument', 'Bad field');
-      if ($op === '==' && is_string($v)) { $sql .= " AND JSON_VALUE(data, '$.\"$f\"') = ?"; $args[] = $v; }
+      if ($op === '==' && is_string($v)) { $sql .= " AND {$this->jText($f)} = ?"; $args[] = $v; }
       elseif ($op === 'in' && is_array($v) && $v && count(array_filter($v, 'is_string')) === count($v)) {
-        $sql .= " AND JSON_VALUE(data, '$.\"$f\"') IN (" . implode(',', array_fill(0, count($v), '?')) . ')'; array_push($args, ...$v); }
+        $sql .= " AND {$this->jText($f)} IN (" . implode(',', array_fill(0, count($v), '?')) . ')'; array_push($args, ...$v); }
       elseif (in_array($op, ['<', '<=', '>', '>='], true) && Rules::isTs($v)) {
-        $sql .= " AND CAST(JSON_VALUE(data, '$.\"$f\".__t') AS SIGNED) $op ?"; $args[] = $v->__t; }
+        $sql .= " AND {$this->jTs($f)} $op ?"; $args[] = $v->__t; }
       else $exact = false;
     }
     if ($order && $exact && $limit !== null && count($order) === 1) {
       [$f, $dir] = $order[0]; $dir = $dir === 'desc' ? 'DESC' : 'ASC';
       if (preg_match('/^[A-Za-z0-9_]+$/', (string)$f)) {
-        $sql .= " AND JSON_EXTRACT(data, '$.\"$f\"') IS NOT NULL ORDER BY CAST(JSON_VALUE(data, '$.\"$f\".__t') AS SIGNED) $dir, JSON_VALUE(data, '$.\"$f\"') $dir, id LIMIT " . ($limit + 0);
+        // the database picks the first N; PHP below sorts them exactly as Firebase does
+        $str = $this->pg ? "{$this->jText($f)} COLLATE \"C\"" : $this->jText($f);
+        $sql .= " AND {$this->jHas($f)} ORDER BY {$this->jKind($f)} $dir, {$this->jNum($f)} $dir, {$this->jTs($f)} $dir, $str $dir, id LIMIT " . ($limit + 0);
       }
     }
     $st = $this->db->prepare($sql); $st->execute($args);
@@ -136,6 +173,8 @@ final class Store {
     $time = self::now();
     $this->db->beginTransaction();
     try {
+      // one save at a time, so change numbers are finished in order (live updates never skip one)
+      $this->db->query("SELECT v FROM meta WHERE k = 'write' FOR UPDATE");
       $before = []; $after = []; $plan = [];
       foreach ($writes as $w) {
         [$coll, $id] = self::split((string)$w->path); $key = "$coll/$id";
@@ -176,10 +215,12 @@ final class Store {
       }
       $ver = 0;
       foreach ($plan as $key => [$coll, $id]) {
-        $this->db->prepare('INSERT INTO changes (coll) VALUES (?)')->execute([$coll]);
-        $ver = (int)$this->db->lastInsertId();
+        if ($this->pg) { $q = $this->db->prepare('INSERT INTO changes (coll) VALUES (?) RETURNING ver'); $q->execute([$coll]); $ver = (int)$q->fetchColumn(); }
+        else { $this->db->prepare('INSERT INTO changes (coll) VALUES (?)')->execute([$coll]); $ver = (int)$this->db->lastInsertId(); }
         if ($after[$key] === null) $this->db->prepare('DELETE FROM docs WHERE coll = ? AND id = ?')->execute([$coll, $id]);
-        else $this->db->prepare('INSERT INTO docs (coll, id, data, ver) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data), ver = VALUES(ver)')
+        else $this->db->prepare('INSERT INTO docs (coll, id, data, ver) VALUES (?, ?, ?, ?) ' . ($this->pg
+            ? 'ON CONFLICT (coll, id) DO UPDATE SET data = EXCLUDED.data, ver = EXCLUDED.ver'
+            : 'ON DUPLICATE KEY UPDATE data = VALUES(data), ver = VALUES(ver)'))
           ->execute([$coll, $id, self::encode($after[$key]), $ver]);
       }
       $this->db->commit();

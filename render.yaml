@@ -1,0 +1,31 @@
+# Render Blueprint: the website + API (Docker) and its PostgreSQL database, both in Singapore
+# (closest to the Philippines). In Render: New > Blueprint > pick this GitHub repository.
+services:
+  - type: web
+    name: lugaw-delights
+    runtime: docker
+    plan: starter
+    region: singapore
+    healthCheckPath: /api/index.php
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: lugaw-db
+          property: connectionString
+      - key: SITE_URL
+        value: https://lugawdelights.com
+      - key: MAIL_FROM
+        value: no-reply@lugawdelights.com
+      - key: ORIGINS
+        value: https://lugawdelights.com,https://www.lugawdelights.com
+      - key: BEHIND_PROXY
+        value: "1"
+      - key: RESEND_API_KEY
+        sync: false
+
+databases:
+  - name: lugaw-db
+    plan: basic-256mb
+    region: singapore
+    databaseName: lugaw
+    postgresMajorVersion: "16"
