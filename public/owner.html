@@ -667,7 +667,12 @@ function renderTeam(){
     <div class="kv"><b>Mobile</b><span><a class="num" href="${esc(telLink(p.phone))}">${esc(p.phone)}</a><br>${phoneBadge(p.phone)}</span><b>Email</b><span>${esc(p.email)}</span><b>Username</b><span>${unames[p.id]?`<b>${esc(unames[p.id])}</b>`:`<span class="muted">none yet</span>`}</span>${extra}
       <b>Applied</b><span>${p.createdAt?.toDate?.().toLocaleDateString("en-PH")||"—"}</span></div>
     <div class="btnrow">${(ACTS[p.status]||[]).map(([s,l,c])=>`<button class="${c}" data-kind="${kind}" data-who="${esc(p.id)}" data-st="${s}">${l}</button>`).join("")}
+      <button class="btn ghost small" data-nm="${esc(p.id)}" data-nmkind="${kind}">Edit name</button>
       ${p.email?`<button class="btn ghost small" data-pw="${esc(p.id)}">Username &amp; password</button>`:""}</div>
+    ${nmOpen===p.id?`<form class="stack" data-nmform="${esc(p.id)}" data-nmkind="${kind}" style="margin-top:8px" novalidate>
+      <label class="f">Name shown on orders, shifts and screens<input data-nminput value="${esc(nmDraft)}" maxlength="80" autocomplete="off" style="font-size:1.1rem"></label>
+      <div class="btnrow"><button class="btn small" type="submit">Save name</button><button class="btn ghost small" type="button" data-nmcancel>Cancel</button></div>
+      ${nmMsg?`<p class="err" style="margin:0">${esc(nmMsg)}</p>`:""}</form>`:""}
     ${pwOpen===p.id?`<form class="stack" data-pwform="${esc(p.id)}" style="margin-top:8px" novalidate>
       <label class="f">Username for ${esc(p.name)}<input data-pwuser value="${esc(pwUser)}" autocomplete="off" autocapitalize="none" spellcheck="false" style="font-size:1.1rem"></label>
       <label class="f">New password <span class="muted">(leave empty to keep the current one)</span><input data-pwinput value="${esc(pwDraft)}" autocomplete="off" style="font-size:1.1rem"></label>
@@ -690,6 +695,8 @@ function renderTeam(){
 // The owner gives a staff member a username and/or a new password (shown here while typing, so
 // it can be passed on). Passwords are stored scrambled: an old one can't be looked up, only replaced.
 let pwOpen=null, pwDraft="", pwUser="", pwMsg="", pwOk=false, unames=null;
+// The owner renames a staff member (e.g. a shared kitchen account). Records saved earlier keep the old name.
+let nmOpen=null, nmDraft="", nmMsg="";
 const suggestPw=()=>["lugaw","goto","arroz","tokwa","itlog","kalamansi","luya","bawang"][Math.floor(Math.random()*8)]+"-"+(1000+Math.floor(Math.random()*9000));
 $("#view").addEventListener("click",e=>{
   if(tab!=="team") return;
@@ -700,8 +707,22 @@ $("#view").addEventListener("click",e=>{
     return renderTeam(); }
   if(e.target.closest("[data-pwsuggest]")){ pwDraft=suggestPw(); return renderTeam(); }
   if(e.target.closest("[data-pwcancel]")){ pwOpen=null; return renderTeam(); }
+  const n=e.target.closest("[data-nm]");
+  if(n){ const id=n.dataset.nm; nmOpen=nmOpen===id?null:id; nmMsg="";
+    nmDraft=[...sellers,...kitchen,...riders].find(p=>p.id===id)?.name||""; return renderTeam(); }
+  if(e.target.closest("[data-nmcancel]")){ nmOpen=null; return renderTeam(); }
 });
-$("#view").addEventListener("input",e=>{ if(e.target.matches("[data-pwinput]")) pwDraft=e.target.value; if(e.target.matches("[data-pwuser]")) pwUser=e.target.value; });
+$("#view").addEventListener("input",e=>{ if(e.target.matches("[data-nminput]")) nmDraft=e.target.value; if(e.target.matches("[data-pwinput]")) pwDraft=e.target.value; if(e.target.matches("[data-pwuser]")) pwUser=e.target.value; });
+$("#view").addEventListener("submit",async e=>{
+  const nf=e.target.closest("[data-nmform]"); if(!nf) return;
+  e.preventDefault();
+  const name=nmDraft.replace(/\s+/g," ").trim();
+  if(!name){ nmMsg="Type a name."; return renderTeam(); }
+  nf.querySelector("button[type=submit]").disabled=true;
+  try{ await saved(updateDoc(doc(db,nf.dataset.nmkind,nf.dataset.nmform),{name})); nmOpen=null; nmMsg=""; }
+  catch(x){ nmMsg="Not saved: "+friendlyError(x); }
+  renderTeam();
+});
 $("#view").addEventListener("submit",async e=>{
   const f=e.target.closest("[data-pwform]"); if(!f) return;
   e.preventDefault();
