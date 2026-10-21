@@ -131,6 +131,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndP
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, runTransaction, serverTimestamp } from "./fb/firestore.js";
 import { CONTRACT_VERSION, riderContract, agreementHTML } from "./contract.js";
 import { auth, db, isConfigured, SHOP, phoneKey, hasPayout, payoutText, readPayout, shopAmount, peso, esc, STATUS, statusLabel, fmtTime, todayKey, mapsLink, itemsHTML, compressPhoto, PROOF_KINDS, friendlyError, setupNotice, enableSound, chime } from "./common.js";
+import { notify, setupAlerts } from "./common.js";
 
 const $=s=>document.querySelector(s);
 $("#shopPhone").textContent=SHOP.phone;
@@ -337,6 +338,7 @@ $("#online").onchange=async e=>{
   try{ await updateDoc(doc(db,"riders",me.uid),{online:e.target.checked}); }catch(x){ e.target.checked=!e.target.checked; }
 };
 $("#soundBtn").onclick=()=>{ if(enableSound()){ chime(); $("#soundNote").innerHTML=`<span class="muted">Order alerts are on. Keep this page open.</span>`; } };
+setupAlerts(); if(inApp) $("#soundNote").innerHTML=`<span class="muted">Order alerts are on. You'll get a notification when a delivery is waiting.</span>`;
 
 // My orders come from a few small queries (active, delivered today, not yet
 // settled with the shop) so the page never loads a rider's whole history.
@@ -358,9 +360,10 @@ function startWork(){
   workSubs.push(onSnapshot(query(collection(db,"orders"),where("mode","==","Delivery"),where("riderUid","==",null),where("status","in",["new","preparing","ready"])), s=>{
     openOrders=s.docs.map(d=>({id:d.id,...d.data()})).filter(o=>!o.riderUid)
       .sort((a,b)=>(a.createdAt?.seconds||0)-(b.createdAt?.seconds||0));
-    const fresh=openOrders.some(o=>!seenOpen.has(o.id));
+    const fresh=openOrders.filter(o=>!seenOpen.has(o.id));
     openOrders.forEach(o=>seenOpen.add(o.id));
-    if(fresh && !firstOpenLoad && rider?.online) chime();
+    if(fresh.length && !firstOpenLoad && rider?.online)
+      notify(fresh.length>1?`${fresh.length} new deliveries`:"New delivery", fresh.length>1?"Open the app to accept one.":`Earn ${peso(fresh[0].deliveryFee)} · ${fresh[0].code||""}`);
     firstOpenLoad=false; render();
   }, e=>{ $("#open").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; }));
 }

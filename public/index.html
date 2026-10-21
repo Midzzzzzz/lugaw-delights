@@ -108,6 +108,8 @@ aside h2{font-size:1.4rem;color:var(--brand)}
 import { onAuthStateChanged, signInAnonymously } from "./fb/auth.js";
 import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp } from "./fb/firestore.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, shortItem, servingsLeft, MAX_LINES, MAX_QTY, REPORT_REASONS, phoneKey, DELIVERY_ZONES, ZONES, zoneLabel, peso, esc, STATUS, FLOW, stepLabel, calcTotals, boxRow, itemsHTML, fmtTime, orderCode, friendlyError, setupNotice } from "./common.js";
+import { notify, setupAlerts, statusLabel } from "./common.js";
+setupAlerts();
 
 const $ = s => document.querySelector(s);
 const cart = {};
@@ -253,7 +255,11 @@ const live={}, unsubs={};
 function watchMyOrders(){
   myOrderIds().forEach(id=>{
     if(unsubs[id]) return;
-    unsubs[id]=onSnapshot(doc(db,"orders",id), s=>{ if(s.exists()){ live[id]={id,...s.data()}; } else delete live[id]; renderTrack(); },
+    unsubs[id]=onSnapshot(doc(db,"orders",id), s=>{
+      if(s.exists()){ const was=live[id]?.status; live[id]={id,...s.data()};
+        if(was && was!==live[id].status) notify(`Order ${orderCode(id)}: ${statusLabel(live[id])}`, live[id].status==="picked_up"?"Your rider is on the way.":""); }
+      else delete live[id];
+      renderTrack(); },
       ()=>{ delete live[id]; renderTrack(); });
   });
 }

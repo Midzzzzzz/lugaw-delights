@@ -353,6 +353,58 @@ export function chime() {
   });
 }
 
+// ---------- Order alerts ----------
+// One alert for a new order (or, for customers, their order moving on): a banner at the top of
+// the screen, the chime and a buzz. In the Android apps alerts are on from the start, and when
+// the app is in the background the alert also goes to the phone's notification bar.
+export const inApp = () => typeof window !== "undefined" && !!window.Capacitor?.isNativePlatform?.();
+const notifier = () => inApp() ? window.Capacitor.Plugins?.LocalNotifications : null;
+let alertsReady = false, alertId = 1;
+export async function setupAlerts() {
+  if (alertsReady || typeof document === "undefined") return;
+  alertsReady = true;
+  // Sound needs one tap first in a browser (and sometimes on a phone): any tap turns it on
+  document.addEventListener("pointerdown", () => { enableSound(); }, { once: true });
+  if (!inApp()) return;
+  enableSound();
+  const n = notifier(); if (!n) return;
+  try {
+    let p = await n.checkPermissions();
+    if (p.display !== "granted") p = await n.requestPermissions();
+    await n.createChannel?.({ id: "orders", name: "Orders", description: "New orders and order updates", importance: 5, visibility: 1, vibration: true });
+  } catch (_) {}
+}
+export function notify(title, body = "") {
+  chime();
+  try { navigator.vibrate?.([250, 120, 250]); } catch (_) {}
+  showAlert(title, body);
+  const n = notifier();
+  if (n && document.visibilityState === "hidden")
+    n.schedule({ notifications: [{ id: (Date.now() % 1e8) + alertId++, title, body, channelId: "orders" }] }).catch(() => {});
+}
+function showAlert(title, body) {
+  if (typeof document === "undefined") return;
+  let box = document.getElementById("alerts");
+  if (!box) {
+    box = document.createElement("div"); box.id = "alerts"; box.setAttribute("role", "status"); box.setAttribute("aria-live", "assertive");
+    box.style.cssText = "position:fixed;left:8px;right:8px;top:max(8px,env(safe-area-inset-top));z-index:200;display:grid;gap:6px;pointer-events:none";
+    document.body.append(box);
+  }
+  const b = document.createElement("button"); b.type = "button";
+  b.style.cssText = "pointer-events:auto;text-align:left;border:0;border-radius:14px;padding:12px 14px;background:var(--brand,#e0284f);color:var(--on-brand,#fff);box-shadow:0 6px 20px rgba(0,0,0,.28);font:inherit;width:100%;max-width:520px;margin:0 auto;cursor:pointer";
+  b.innerHTML = `<b style="display:block;font-size:1.05rem">${esc(title)}</b>${body ? `<span style="display:block">${esc(body)}</span>` : ""}<span style="display:block;font-size:.75rem;opacity:.85;margin-top:2px">Tap to close</span>`;
+  b.onclick = () => b.remove();
+  box.prepend(b);
+  while (box.children.length > 3) box.lastChild.remove();
+  setTimeout(() => b.remove(), 20000);
+}
+// "Delivery · 2× Plain Lugaw, 1× Coke" for an alert
+export function orderSummary(o) {
+  const items = (o.items || []).map(i => `${i.qty}× ${i.name}`).join(", ");
+  const s = [o.mode, items].filter(Boolean).join(" · ");
+  return s.length > 90 ? s.slice(0, 89) + "…" : s;
+}
+
 // A save the server hasn't confirmed after a while counts as not saved
 export const saved = (p, ms = 20000) => Promise.race([p, new Promise((_, no) => setTimeout(() => no({ code: "save-timeout" }), ms))]);
 

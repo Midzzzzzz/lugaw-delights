@@ -152,6 +152,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndP
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes } from "./escpos.js";
 import { shiftSummary } from "./common.js";
+import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 
 const $=s=>document.querySelector(s);
@@ -256,6 +257,7 @@ $("#loginForm").onsubmit=async e=>{
   finally{ registering=false; }
 };
 $("#soundBtn").onclick=()=>{ if(enableSound()){ chime(); $("#soundBtn").textContent="Alerts on"; $("#soundBtn").disabled=true; } };
+setupAlerts(); if(inApp()){ $("#soundBtn").textContent="Alerts on"; $("#soundBtn").disabled=true; }
 
 // Orders come from three queries: the latest 300 (today's lists and totals), every
 // order still in progress, and every delivery not yet settled with its rider. So an
@@ -302,7 +304,8 @@ function merge(){
   orders=[...m.values()].sort((a,b)=>t(b)-t(a));
   if(lists.active){
     const ids=new Set(orders.filter(needsStore).map(o=>o.id));
-    if(known && [...ids].some(id=>!known.has(id))) chime();
+    const fresh=known?orders.filter(o=>ids.has(o.id)&&!known.has(o.id)):[];
+    if(fresh.length) notify(fresh.length>1?`${fresh.length} new orders`:`New order ${orderCode(fresh[0].id)}`, fresh.length>1?fresh.map(o=>orderCode(o.id)).join(", "):orderSummary(fresh[0]));
     known=ids;
   }
   updateStock(); if(stockCount && !$("#dinePanel").hidden) renderDine(); // keep "N left" current

@@ -116,11 +116,13 @@ import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
 import { findShifts } from "./pastshifts.js";
 import { saved } from "./common.js";
+import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
 const $=s=>document.querySelector(s);
 let ledger=[], ledgerErr="", agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], kitchen=[], riders=[], contacts={}, open=null, teamErr="";
 let range="today", tab="sales", filter="all", search="";
+setupAlerts();
 const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
 $("#setup").innerHTML=setupNotice();
 
@@ -191,6 +193,13 @@ function start(){
   }, e=>{ shiftsErr="Couldn't load shifts: "+friendlyError(e)+""; if(tab==="shifts") render(); }));
   // The owner's menu (settings/menu) and inventory counts
   // Saved menu changes (recipes, prices) count right away, without a refresh
+  // Alert for every order placed from now on (whatever date range is on screen)
+  let alertSeen=null;
+  subs.push(onSnapshot(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(new Date(Date.now()-60000)))), s=>{
+    const ids=s.docs.map(d=>d.id), fresh=alertSeen?s.docs.filter(d=>!alertSeen.has(d.id)).map(d=>({id:d.id,...d.data()})):[];
+    alertSeen=new Set([...(alertSeen||[]),...ids]);
+    if(fresh.length) notify(fresh.length>1?`${fresh.length} new orders`:`New order ${orderCode(fresh[0].id)}`, fresh.length>1?"":orderSummary(fresh[0]));
+  }, ()=>{}));
   subs.push(onSnapshot(doc(db,"settings","menu"), s=>{
     menuDoc=s.exists()?s.data():null; if(menuDoc) applyMenu(menuDoc.sections);
     if(invDoc) publishStock(ingredientsLeft(trackerCount(invDoc),invOrders));

@@ -74,6 +74,7 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { auth, db, isConfigured, applyMenu, ingredientsLeft, trackerCount, belowStandard, esc, itemsHTML, phoneKey, friendlyError, setupNotice, enableSound, chime } from "./common.js";
+import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 
 const $=s=>document.querySelector(s);
 // This device is used in the kitchen: the seller app opens this page by itself next time
@@ -156,6 +157,7 @@ $("#loginForm").onsubmit=async e=>{
   finally{ registering=false; }
 };
 $("#soundBtn").onclick=()=>{ if(enableSound()){ chime(); $("#soundBtn").textContent="Alerts on"; $("#soundBtn").disabled=true; } };
+setupAlerts(); if(inApp()){ $("#soundBtn").textContent="Alerts on"; $("#soundBtn").disabled=true; }
 
 // ---------- Kitchen board ----------
 // Orders being cooked, oldest first. Items added to a dine-in order bring it back with "Items added".
@@ -166,7 +168,8 @@ function start(){
   const stopTickets=onSnapshot(query(collection(db,"orders"),where("status","==","preparing")), s=>{
     orders=s.docs.map(d=>({id:d.id,...d.data()}));
     const keys=new Set(orders.map(key));
-    if(known && [...keys].some(k=>!known.has(k))) chime(); // a new ticket, or items added
+    const fresh=known?orders.filter(o=>!known.has(key(o))):[]; // a new ticket, or items added
+    if(fresh.length) notify(fresh.length>1?`${fresh.length} new tickets`:((fresh[0].addedAt?"Items added":"New ticket")+(fresh[0].code?` · ${fresh[0].code}`:"")), fresh.length>1?"":orderSummary(fresh[0]));
     known=keys; render();
   }, e=>{ $("#kBoard").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; });
   stopOrders=()=>{ stopTickets(); stopRefill(); };
@@ -187,7 +190,7 @@ function watchRefill(){
   const b=onSnapshot(doc(db,"settings","inventory"), s=>{
     inv=s.exists()?s.data({serverTimestamps:"estimate"}):null;
     const asked=inv?.refillDue?(inv.refillAskedAt?.toMillis?.()||1):0;
-    if(asked && refillAsked!==null && asked!==refillAsked) chime(); // a seller just closed their shift
+    if(asked && refillAsked!==null && asked!==refillAsked) notify("Refill needed","A seller closed their shift. Check the refill list."); // a seller just closed their shift
     refillAsked=asked;
     const since=inv?.since?.toMillis?.()??null;
     if(since!==invSince){ invSince=since; stopInvOrders?.(); stopInvOrders=null; invOrders=[];
