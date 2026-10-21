@@ -29,7 +29,7 @@ function place(uid, mode, { pin, withPin = true } = {}) {
   return { id, done: b.commit() };
 }
 console.log("Placing orders");
-await t("delivery order without a PIN refused", () => assertFails(place("a1", "Delivery", { withPin: false }).done));
+await t("delivery order without a PIN allowed (codes are optional now)", () => assertSucceeds(place("a1", "Delivery", { withPin: false }).done));
 await t("delivery order marked hasPin but missing its PIN refused", () => { const db = as("a0", "anonymous"), b = writeBatch(db);
   b.set(doc(db, "orders/x0"), { code: "LD-X", customerUid: "a0", mode: "Delivery", address: "St", notes: "", payment: "Cash", items: [{ id: "L01", name: "P", price: 39, qty: 2 }], zone: "lb-anos", zoneName: "Anos, Los Baños", subtotal: 78, deliveryFee: 40, total: 118, status: "new", riderUid: null, createdAt: serverTimestamp(), hasPin: true });
   b.set(doc(db, "contacts/x0"), { name: "J", phone: "09170001111", customerUid: "a0", createdAt: serverTimestamp() });

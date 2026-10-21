@@ -535,7 +535,7 @@ $("#form").addEventListener("submit", async e=>{
   // are saved together (see firestore.rules).
   const ref=doc(collection(db,"orders")), batch=writeBatch(db);
   // delivery orders get a 4-digit code the rider must enter to finish the delivery
-  const pin = mode()==="Delivery" ? newPin() : null;
+  const pin = null; // no delivery code: the rider just taps Delivered (owner's choice, Oct 21 2026; newPin() still exists)
   batch.set(ref,{
     code:orderCode(ref.id), customerUid:user.uid, mode:mode(),
     address: mode()==="Delivery"?`${address}, Brgy. ${z.name}, ${z.town}, Laguna`:"", notes, payment:pay(), items,

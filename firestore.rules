@@ -540,9 +540,10 @@ service cloud.firestore {
         && newOrder(request.resource.data)
         && deliveryOk(request.resource.data)
         && existsAfter(/databases/$(database)/documents/contacts/$(orderId))
-        // every new delivery order carries a PIN, and says so (hasPin) so the rider app knows to ask for it
-        && (request.resource.data.mode != 'Delivery'
-            || (request.resource.data.get('hasPin', false) == true && existsAfter(/databases/$(database)/documents/pins/$(orderId))))
+        // A delivery code (PIN) is optional: since Oct 21 2026 the rider just taps Delivered. An order
+        // that says it has one (hasPin) must carry it, so the rider app asks for the right code.
+        && (request.resource.data.get('hasPin', false) != true
+            || existsAfter(/databases/$(database)/documents/pins/$(orderId)))
         && getAfter(/databases/$(database)/documents/customers/$(uid())).data.lastOrderAt == request.time
         && getAfter(/databases/$(database)/documents/customers/$(uid())).data.lastOrderId == orderId)
         || (isStaff() && dineIn(request.resource.data))
