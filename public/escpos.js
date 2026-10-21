@@ -52,7 +52,21 @@ export const toBase64 = arr => { let s = ""; for (let i = 0; i < arr.length; i +
 
 export function openDrawerBytes() { return bytes(CMD.init, CMD.drawer); }
 
-// The receipt for an order. shop: { name, pickupAddress, phone }. extra: { customer, mobile,
+// A black-and-white picture (the logo) as printer dots: logo = { width, height, bits }, width a
+// multiple of 8, bits one byte per dot row by row (1 = black). GS v 0 = print raster image.
+export function rasterBytes(logo) {
+  if (!logo?.width || !logo?.height || !logo?.bits) return [];
+  const per = logo.width / 8, out = [GS, 0x76, 0x30, 0, per & 0xff, per >> 8, logo.height & 0xff, logo.height >> 8];
+  for (let y = 0; y < logo.height; y++)
+    for (let x = 0; x < per; x++) {
+      let b = 0;
+      for (let k = 0; k < 8; k++) if (logo.bits[y * logo.width + x * 8 + k]) b |= 0x80 >> k;
+      out.push(b);
+    }
+  return out;
+}
+
+// The receipt for an order. shop: { name, pickupAddress, phone, logo? (see rasterBytes) }. extra: { customer, mobile,
 // itemName(id) -> name, lines (merged order lines), cashFirst, adjust, balance, notPaid }
 export function receiptBytes(o, shop, extra = {}) {
   const L = [], line = s => L.push(s), rule = () => line("-".repeat(WIDTH));
@@ -95,7 +109,7 @@ export function receiptBytes(o, shop, extra = {}) {
 
   const nl = arr => arr.map(s => s + "\n");
   return bytes(
-    CMD.init, CMD.center, CMD.boldOn, CMD.big, nl(wrap(shop.name, WIDTH / 2)), CMD.normal, CMD.boldOff,
+    CMD.init, CMD.center, shop.logo ? [rasterBytes(shop.logo), "\n"] : [], CMD.boldOn, CMD.big, nl(wrap(shop.name, WIDTH / 2)), CMD.normal, CMD.boldOff,
     nl(wrap(shop.pickupAddress || "")), shop.phone ? ascii(shop.phone) + "\n" : "", CMD.left,
     nl(body), CMD.boldOn, nl(total), CMD.boldOff, nl(pay), CMD.boldOn, nl(change), CMD.boldOff, nl(after), nl(tail),
     CMD.center, "Salamat po! Come again.\n", "Order slip only.\nNot an official receipt.\n", CMD.left, CMD.feed(4)

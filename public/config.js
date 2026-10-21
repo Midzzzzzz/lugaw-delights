@@ -15,6 +15,9 @@ export const SHOP = {
   hours: "24 hours",
   phone: "0932 474 8114",               // shown to customers and riders
   pickupAddress: "Tabi ng old Caltex / tapat ng Novo, Hi-way, Brgy. Batong Malake, Los Baños, Laguna",
+  // printed at the top of receipts (the shop's address and number above are for customers and riders)
+  receiptAddress: "Hi-way, Brgy. Batong Malake, Los Baños, Laguna",
+  receiptPhone: "0947 867 1193",
   boxFee: 10,                            // take-out box, per piece, for menu sections marked box: true
   deliveryNote: "We deliver within Los Baños and Bay, Laguna. The fee depends on your barangay.",
   gcashName: "Ruel Calica",

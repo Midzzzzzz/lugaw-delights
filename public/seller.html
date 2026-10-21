@@ -846,6 +846,21 @@ $("#board").addEventListener("input",e=>{
 
 // ---------- Receipt ----------
 // Narrow layout for 58/80 mm receipt printers; prints fine on a normal printer too.
+// The logo for receipts, made once when the page opens: a picture embedded in the receipt page
+// (so it also prints from the app), and black-and-white dots for the Bluetooth printer
+// (384 dots = the width of 58 mm paper, logo centred, 200 dots tall).
+let receiptLogo=null, receiptLogoDots=null;
+(()=>{ const img=new Image(); img.onload=()=>{ try{
+  const c=document.createElement("canvas"); c.width=img.naturalWidth; c.height=img.naturalHeight; c.getContext("2d").drawImage(img,0,0);
+  receiptLogo=c.toDataURL("image/jpeg",0.85);
+  const W=384, H=200, d=document.createElement("canvas"); d.width=W; d.height=H;
+  const g=d.getContext("2d"); g.fillStyle="#fff"; g.fillRect(0,0,W,H); g.drawImage(img,(W-H)/2,0,H,H);
+  const px=g.getImageData(0,0,W,H).data, bits=new Uint8Array(W*H);
+  for(let i=0;i<W*H;i++) bits[i]=(0.299*px[i*4]+0.587*px[i*4+1]+0.114*px[i*4+2])<200?1:0;
+  receiptLogoDots={width:W,height:H,bits};
+}catch(_){} }; img.src="logo.jpg"; })();
+// Shop details as printed on receipts
+const receiptShop=()=>({ name:SHOP.name, pickupAddress:SHOP.receiptAddress||SHOP.pickupAddress, phone:SHOP.receiptPhone||SHOP.phone, logo:receiptLogoDots });
 function receiptHTML(o){
   const c=o.mode==="Dine-in"?null:contacts[o.id], when=o.createdAt?.toDate?.()||new Date();
   const row=(l,r,cls="")=>`<tr class="${cls}"><td>${l}</td><td class="r">${r}</td></tr>`;
@@ -869,7 +884,7 @@ hr{border:0;border-top:1px dashed #000;margin:6px 0}.big td{font-weight:bold;fon
 .noprint{display:flex;gap:8px;justify-content:center;margin-top:14px}.noprint button{font:inherit;padding:8px 14px}
 @media print{.noprint{display:none}}
 </style></head><body>
-<div class="c"><h1>${esc(SHOP.name)}</h1><div>${esc(SHOP.pickupAddress)}</div><div>${esc(SHOP.phone)}</div></div><hr>
+<div class="c"><img src="${receiptLogo||"logo.jpg"}" alt="" style="width:30mm;height:30mm;object-fit:contain"><h1>${esc(SHOP.name)}</h1><div>${esc(receiptShop().pickupAddress)}</div><div>${esc(receiptShop().phone)}</div></div><hr>
 <table>${row("Order",esc(o.code))}${row("Date",when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}${row("Type",esc(o.mode))}${who}</table><hr>
 <table>${lines}</table><hr>
 <table>${row("Subtotal",peso(o.subtotal))}${o.deliveryFee?row("Delivery fee",peso(o.deliveryFee)):""}${o.boxFee?row("Take-out boxes",peso(o.boxFee)):""}${row("TOTAL",peso(o.total),"big")}
@@ -900,7 +915,7 @@ const printer=()=>BT?getPref("lugaw-printer",null):null;
 let printerMsg="";
 function receiptOf(o){
   const c=o.mode==="Dine-in"?null:contacts[o.id], first=o.paidTotal??o.total, adj=(o.settledTotal??first)-first;
-  return receiptBytes(o,SHOP,{ customer:c?.name, mobile:c?.phone, lines:mergedLines(o.items),
+  return receiptBytes(o,receiptShop(),{ customer:c?.name, mobile:c?.phone, lines:mergedLines(o.items),
     itemName:it=>ITEMS[it?.id]?.name||it?.name||"Item", cashFirst:first, adjust:adj,
     balance:hasPayment(o)?balanceOf(o):0, notPaid:o.mode==="Dine-in"&&o.status!=="cancelled"&&!hasPayment(o) });
 }
@@ -948,7 +963,7 @@ if(BT){
     if(a==="forget"){ setPref("lugaw-printer",null); return renderPrinter(); }
     if(a==="drawer"){ b.disabled=true; await openDrawer(); b.disabled=false; return; }
     if(a==="test"){ b.disabled=true; b.textContent="Printing…";
-      const ok=await btPrint(receiptBytes({code:"TEST",mode:"Dine-in",payment:"Cash",items:[{name:"Plain Lugaw",price:39,qty:1}],subtotal:39,total:39,cashGiven:50},SHOP));
+      const ok=await btPrint(receiptBytes({code:"TEST",mode:"Dine-in",payment:"Cash",items:[{name:"Plain Lugaw",price:39,qty:1}],subtotal:39,total:39,cashGiven:50},receiptShop()));
       b.disabled=false; b.textContent=ok?"Printed ✓":"Test print"; }
   });
   renderPrinter();
