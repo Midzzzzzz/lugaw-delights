@@ -12,3 +12,7 @@ Thumbs.db
 
 # The app downloads (public/apps/*.apk) are built from lugaw-mobile; rebuild them rather than storing them in Git
 public/apps/*.apk
+
+# Local server settings (database password)
+server/config.php
+server/.schema-ok
