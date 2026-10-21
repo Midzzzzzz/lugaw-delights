@@ -164,14 +164,14 @@ function start(){
     // newest first: by date, then by when it was recorded
     const t=e=>e.createdAt?.toMillis?.()??Infinity;
     ledger=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.date===b.date?t(b)-t(a):(a.date<b.date?1:-1)); ledgerErr=""; if(tab==="savings") render();
-  }, e=>{ ledgerErr="Couldn't load savings: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; if(tab==="savings") render(); }));
-  subs.push(onSnapshot(collection(db,"sellers"), s=>{ sellers=s.docs.map(d=>({id:d.id,...d.data()})); teamErr=""; render(); }, e=>{ teamErr="Couldn't load sellers: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; render(); }));
+  }, e=>{ ledgerErr="Couldn't load savings: "+friendlyError(e)+""; if(tab==="savings") render(); }));
+  subs.push(onSnapshot(collection(db,"sellers"), s=>{ sellers=s.docs.map(d=>({id:d.id,...d.data()})); teamErr=""; render(); }, e=>{ teamErr="Couldn't load sellers: "+friendlyError(e)+""; render(); }));
   subs.push(onSnapshot(collection(db,"kitchen"), s=>{ kitchen=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   subs.push(onSnapshot(collection(db,"riders"), s=>{ riders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   // Signed rider agreements, by rider id
   subs.push(onSnapshot(collection(db,"agreements"), s=>{ agreements={}; s.docs.forEach(d=>agreements[d.id]=d.data()); render(); }, ()=>{}));
   subs.push(onSnapshot(query(collection(db,"reports"),orderBy("createdAt","desc"),limit(200)), s=>{ reports=s.docs.map(d=>({id:d.id,...d.data()})); reportsErr=""; render(); },
-    e=>{ reportsErr="Couldn't load reports: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; render(); }));
+    e=>{ reportsErr="Couldn't load reports: "+friendlyError(e)+""; render(); }));
   // Don't redraw the settings tab while the owner is typing in it
   const editing=()=>tab==="settings" && document.activeElement?.closest?.("#view") && /INPUT|SELECT/.test(document.activeElement.tagName);
   subs.push(onSnapshot(doc(db,"settings","store"), s=>{ store=s.exists()?s.data():{}; if(tab==="settings" && !editing()) render(); }, ()=>{}));
@@ -188,7 +188,7 @@ function start(){
   // Cashier shifts, newest first
   subs.push(onSnapshot(query(collection(db,"shifts"),orderBy("openedAt","desc"),limit(90)), s=>{
     allShifts=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})); shiftsErr=""; render();
-  }, e=>{ shiftsErr="Couldn't load shifts: "+friendlyError(e)+" If you just updated the app, publish the new security rules in Firebase."; if(tab==="shifts") render(); }));
+  }, e=>{ shiftsErr="Couldn't load shifts: "+friendlyError(e)+""; if(tab==="shifts") render(); }));
   // The owner's menu (settings/menu) and inventory counts
   // Saved menu changes (recipes, prices) count right away, without a refresh
   subs.push(onSnapshot(doc(db,"settings","menu"), s=>{
@@ -830,6 +830,8 @@ $("#view").addEventListener("click",async e=>{
   if(a==="iadd"){ const rows=document.querySelectorAll(".mitem"); rows[rows.length-1]?.querySelector('input[data-f="name"]')?.focus(); }
   if(a==="sadd") document.querySelector('.mhead input[data-f="name"]')?.select();
 });
+// Refreshing or leaving with menu changes that weren't saved asks first
+addEventListener("beforeunload",e=>{ if((menuDraft&&menuDirty)||ingMsg==="Not saved yet."){ e.preventDefault(); e.returnValue=""; } });
 async function saveMenu(b){
   const m=menuDraft, bad=[];
   m.forEach(c=>{ if(!String(c.name).trim()) bad.push("a category has no name");
@@ -954,7 +956,7 @@ $("#view").addEventListener("click",async e=>{
       if(invDoc) batch.update(doc(db,"settings","inventory"),{par,base,since:serverTimestamp(),...(counted?{countedAt:serverTimestamp()}:{})});
       else batch.set(doc(db,"settings","inventory"),{par,base,since:serverTimestamp(),refillDue:false});
       await saved(batch.commit()); ingDraft=null; ingMsg=counted?"Saved. On hand now matches your count.":"Saved.";
-    }catch(x){ ingMsg="Couldn't save: "+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase."; b.disabled=false; }
+    }catch(x){ ingMsg="Couldn't save: "+friendlyError(x)+""; b.disabled=false; }
     return render(true);
   }
 });
@@ -1012,7 +1014,7 @@ $("#view").addEventListener("click",async e=>{
         manual:true,addedBy:uid,addedAt:serverTimestamp(),...(salePay==="Cash"?{cashGiven:t.total}:{paid:true}),paidTotal:t.total}));
       const [a,z]=rangeDates();
       saleOpen=false; delMsg=`Sale of ${peso(t.total)} saved for ${when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})}.`+(when<a||when>=z?" Pick that date above to see it.":"");
-    }catch(x){ saleMsg="Couldn't save: "+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase."; b.disabled=false; }
+    }catch(x){ saleMsg="Couldn't save: "+friendlyError(x)+""; b.disabled=false; }
     render(true);
   }
 });
@@ -1116,7 +1118,7 @@ $("#view").addEventListener("click",async e=>{
     const first=p.todo[0].when, last=p.todo[p.todo.length-1].when;
     delMsg=`Imported ${plural(saved,"receipt")} from Loyverse (${first.toLocaleDateString("en-PH",{month:"short",day:"numeric"})} to ${last.toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"})}). Pick those dates above to see them.`;
     lvPlan=null;
-  }catch(x){ lvMsg=(saved?`Imported ${saved} before an error: `:"Couldn't import: ")+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase. Importing the file again skips what's already in."; }
+  }catch(x){ lvMsg=(saved?`Imported ${saved} before an error: `:"Couldn't import: ")+friendlyError(x)+" Importing the file again skips what's already in."; }
   lvBusy=false; render(true);
 });
 
@@ -1209,7 +1211,7 @@ $("#view").addEventListener("click",async e=>{
         openedBy:uid,openedByName:"Recorded from orders",startCash:0,moves:[],summary:x.summary}));
       await batch.commit();
       pastMsg=""; pastOpen=false; pastFound=null;
-    }catch(x){ pastMsg="Couldn't save: "+friendlyError(x)+" If you just updated the app, publish the new security rules in Firebase."; }
+    }catch(x){ pastMsg="Couldn't save: "+friendlyError(x)+""; }
     pastBusy=false; return render(true);
   }
 });
