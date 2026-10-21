@@ -105,8 +105,8 @@ aside h2{font-size:1.4rem;color:var(--brand)}
 <a class="bar" id="bar" href="#orderBox"><span id="barCount"></span><span id="barTotal"></span></a>
 
 <script type="module">
-import { onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { onAuthStateChanged, signInAnonymously } from "./fb/auth.js";
+import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp } from "./fb/firestore.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, shortItem, servingsLeft, MAX_LINES, MAX_QTY, REPORT_REASONS, phoneKey, DELIVERY_ZONES, ZONES, zoneLabel, peso, esc, STATUS, FLOW, stepLabel, calcTotals, boxRow, itemsHTML, fmtTime, orderCode, friendlyError, setupNotice } from "./common.js";
 
 const $ = s => document.querySelector(s);

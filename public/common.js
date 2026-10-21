@@ -1,19 +1,15 @@
 // Shared setup and helpers for all three pages. You don't need to edit this file.
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
-import { getAuth, connectAuthEmulator } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, connectFirestoreEmulator, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
-import { firebaseConfig, SHOP, MENU as START_MENU, DELIVERY_ZONES } from "./config.js";
+import { initializeApp } from "./fb/app.js";
+import { getAuth, connectAuthEmulator } from "./fb/auth.js";
+import { getFirestore, connectFirestoreEmulator, doc, getDoc } from "./fb/firestore.js";
+import { SERVER, SHOP, MENU as START_MENU, DELIVERY_ZONES } from "./config.js";
 
 export { SHOP, DELIVERY_ZONES };
 
-// Test mode: on localhost with no Firebase config pasted in, talk to the local
-// Firebase emulators instead (see "Testing on your computer" in the setup guide).
-const hasKeys = !String(firebaseConfig.apiKey).startsWith("PASTE");
-export const testMode = !hasKeys && ["localhost", "127.0.0.1"].includes(location.hostname);
-export const isConfigured = hasKeys || testMode;
-const cfg = testMode
-  ? { apiKey: "demo-key", authDomain: "demo-lugaw.firebaseapp.com", projectId: "demo-lugaw", appId: "demo" }
-  : firebaseConfig;
+// The shop's own server (PHP + MySQL): the api/ folder next to the pages, or SERVER.apiBase in the apps
+export const testMode = false;
+export const isConfigured = true;
+const cfg = SERVER.apiBase ? { apiBase: SERVER.apiBase } : {};
 
 // Each kind of page keeps its own sign-in (<meta name="app-role">): customer,
 // rider, seller and owner. Signing in on one never signs you in on another, and
@@ -22,10 +18,6 @@ const role = document.querySelector('meta[name="app-role"]')?.content;
 export const app = isConfigured ? initializeApp(cfg, role || "[DEFAULT]") : null;
 export const auth = app ? getAuth(app) : null;
 export const db = app ? getFirestore(app) : null;
-if (testMode) {
-  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
-  connectFirestoreEmulator(db, "127.0.0.1", 8080);
-}
 
 // ---------- Menu ----------
 // The owner edits the menu on owner.html; it's saved in settings/menu. Until the owner first
@@ -361,30 +353,28 @@ export function chime() {
   });
 }
 
-// A save Firebase hasn't confirmed after a while: when it refuses because the free daily limit
-// is used up, it doesn't fail, it keeps retrying in the background, so the page would look saved.
+// A save the server hasn't confirmed after a while counts as not saved
 export const saved = (p, ms = 20000) => Promise.race([p, new Promise((_, no) => setTimeout(() => no({ code: "save-timeout" }), ms))]);
 
 export function friendlyError(e) {
   const c = (e && e.code) || "";
-  if (c.includes("resource-exhausted")) return "Firebase's free daily limit is used up, so changes can't be saved until it resets (3 PM Philippine time). Check Firebase console → Firestore → Usage.";
-  if (c === "save-timeout") return "Not saved: Firebase isn't accepting changes right now. If this keeps happening, the free daily limit may be used up (Firebase console → Firestore → Usage; it resets at 3 PM Philippine time). Your change will be lost when you refresh.";
+  if (c === "save-timeout") return "Not saved: the server didn't answer. Check the internet connection and try again. Your change will be lost when you refresh.";
+  if (c.includes("too-many-requests")) return "Too many tries. Wait a few minutes and try again.";
+  if (c.includes("expired-action-code")) return "This link has expired. Ask for a new one.";
+  if (c === "aborted") return "Someone else changed this at the same moment. Please try again.";
+  if (c === "not-found") return "That was deleted or doesn't exist any more.";
+  if (c === "internal") return "The server had a problem. Please try again.";
   if (c.includes("invalid-credential") || c.includes("wrong-password") || c.includes("user-not-found")) return "Wrong email or password.";
   if (c.includes("email-already-in-use")) return "That email already has an account. Sign in instead.";
   if (c.includes("weak-password")) return "Use a password with at least 6 characters.";
   if (c.includes("invalid-email")) return "That email address doesn't look right.";
   if (c.includes("network") || c.includes("unavailable")) return "No internet connection. Check your signal and try again.";
   if (c.includes("permission-denied")) return "That action isn't allowed for this account.";
-  if (c.includes("operation-not-allowed")) return "This sign-in method is turned off in Firebase. See the setup guide, step 3.";
   return (e && e.message) || "Something went wrong. Please try again.";
 }
 
 // Banner for the top of each page: not connected yet, or running on the test emulators
 export function setupNotice() {
-  if (testMode) return `<div class="notice warn"><b>Test mode.</b> This page is using the Firebase emulators on this computer.
-    Nothing here is real or visible to anyone else. Test data: <a href="http://127.0.0.1:4000/firestore" target="_blank" rel="noopener">emulator dashboard</a>.</div>`;
-  if (!isConfigured) return `<div class="notice warn"><b>Almost there.</b> This app isn't connected to Firebase yet.
-    Open <code>config.js</code> and paste your Firebase config (setup guide, step 5).</div>`;
   return "";
 }
 

@@ -3,15 +3,10 @@
 //  This is the only file you need to edit. See SETUP-GUIDE.md.
 // =====================================================================
 
-// 1) Paste your Firebase web app config here (Firebase console →
-//    Project settings → Your apps → SDK setup and configuration → Config).
-export const firebaseConfig = {
-  apiKey: "AIzaSyA3j3pQRnKhmXWpDKWL5cU10iJcIGl0EFE",
-  authDomain: "lugaw-delights.firebaseapp.com",
-  projectId: "lugaw-delights",
-  storageBucket: "lugaw-delights.firebasestorage.app",
-  messagingSenderId: "943478712137",
-  appId: "1:943478712137:web:9de220045db55b02c39c98"
+// 1) Where the shop's server is. The website uses its own api/ folder (leave apiBase empty);
+//    the Android apps are given the full address when they're built (lugaw-mobile/sync-from-website.mjs).
+export const SERVER = {
+  apiBase: ""
 };
 
 // 2) Your shop details.

@@ -127,8 +127,8 @@
 </div>
 
 <script type="module">
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, EmailAuthProvider, reauthenticateWithCredential } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, EmailAuthProvider, reauthenticateWithCredential } from "./fb/auth.js";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, runTransaction, serverTimestamp } from "./fb/firestore.js";
 import { CONTRACT_VERSION, riderContract, agreementHTML } from "./contract.js";
 import { auth, db, isConfigured, SHOP, phoneKey, hasPayout, payoutText, readPayout, shopAmount, peso, esc, STATUS, statusLabel, fmtTime, todayKey, mapsLink, itemsHTML, compressPhoto, PROOF_KINDS, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 

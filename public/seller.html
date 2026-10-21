@@ -148,8 +148,8 @@
 </div>
 
 <script type="module">
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes } from "./escpos.js";
 import { shiftSummary } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";

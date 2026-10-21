@@ -71,8 +71,8 @@
 </div>
 
 <script type="module">
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { auth, db, isConfigured, applyMenu, ingredientsLeft, trackerCount, belowStandard, esc, itemsHTML, phoneKey, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 
 const $=s=>document.querySelector(s);

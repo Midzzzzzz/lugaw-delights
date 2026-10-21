@@ -43,7 +43,8 @@ export function decode(v) {
 
 // Where the API is: the page's own site (api/index.php), or the full address in the apps
 export function apiUrl(app) {
-  const base = app?.options?.apiBase || (typeof location !== "undefined" ? new URL("api/index.php", location.href).href : "http://127.0.0.1:8095/api/index.php");
+  const here = typeof document !== "undefined" ? document.baseURI : (typeof location !== "undefined" ? location.href : null);
+  const base = app?.options?.apiBase || (here ? new URL("api/index.php", here).href : "http://127.0.0.1:8095/api/index.php");
   return base;
 }
 

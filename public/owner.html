@@ -110,8 +110,8 @@ table.inv input{width:90px;text-align:right;padding:5px 8px}
 </div>
 
 <script type="module">
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
+import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
 import { findShifts } from "./pastshifts.js";
