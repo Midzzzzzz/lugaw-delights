@@ -21,7 +21,7 @@ export const SHOP = {
   gcashNumber: "0932 474 8114",
   // Pay-now QR (InstaPay / QR Ph: works from GCash, Maya and bank apps). A picture in this folder;
   // leave payQr empty to offer cash on delivery only.
-  payQr: "",
+  payQr: "pay-qr.jpg",
   payQrName: "Armida Contreras (MariBank)"
 };
 

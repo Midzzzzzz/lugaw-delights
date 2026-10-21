@@ -356,7 +356,7 @@ function payStep(o){
   return `<div class="paystep" role="dialog" aria-modal="true" aria-labelledby="ps-title-${id}"><div class="card">
     <h2 id="ps-title-${id}" style="color:var(--brand)">Pay ${peso(o.total)} ${SHOP.payQr?"by QR":"with GCash"}</h2>
     <p class="muted" style="margin:0">Order <b class="num">${esc(o.code)}</b>. The shop starts cooking once you pay.</p>
-    ${SHOP.payQr?`<img src="${esc(SHOP.payQr)}" alt="QR code to pay Lugaw Delights" style="width:100%;max-width:300px;justify-self:center;border-radius:12px;background:#fff">
+    ${SHOP.payQr?`<img src="${esc(SHOP.payQr)}" alt="QR code to pay Lugaw Delights" style="width:100%;max-width:360px;justify-self:center;border-radius:12px;background:#fff">
     <p class="muted" style="margin:0;text-align:center;font-size:.85rem">Pays to ${esc(SHOP.payQrName||SHOP.name)}</p>
     <a class="btn small" href="${esc(SHOP.payQr)}" download="lugaw-delights-pay-qr" style="justify-self:center">Save QR code</a>
     <ol class="paysteps">
