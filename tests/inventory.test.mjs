@@ -53,7 +53,8 @@ await new Promise(r => setTimeout(r, 2200));
 await t("seller publishes what's left of each ingredient", () => assertSucceeds(setDoc(doc(s1, "settings/stock"), { ...stock, left: { egg: 3, i_B02: 4 } })));
 await t("what's left must be a map", () => assertFails(setDoc(doc(s1, "settings/stock"), { ...stock, left: [3, 4] })));
 await t("sold-out list must be a list", () => assertFails(setDoc(doc(s1, "settings/stock"), { soldOut: "L02", updatedAt: serverTimestamp() })));
-await t("kitchen can't publish the sold-out list", () => assertFails(setDoc(doc(k1, "settings/stock"), stock)));
+await new Promise(r => setTimeout(r, 2200));
+await t("kitchen publishes the sold-out list after a refill", () => assertSucceeds(setDoc(doc(k1, "settings/stock"), { ...stock, left: { egg: 30 } })));
 await t("customer can't publish the sold-out list", () => assertFails(setDoc(doc(cust, "settings/stock"), stock)));
 await t("owner can clear it", () => assertSucceeds(setDoc(doc(owner, "settings/stock"), { soldOut: [], updatedAt: serverTimestamp() })));
 

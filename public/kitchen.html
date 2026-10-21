@@ -85,6 +85,7 @@
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
+import { soldOutFrom } from "./common.js";
 import { auth, db, isConfigured, applyMenu, ingredientsLeft, trackerCount, belowStandard, esc, itemsHTML, phoneKey, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 
@@ -270,6 +271,8 @@ $("#refill").addEventListener("click",async e=>{
     if(got.length) batch.set(doc(collection(db,"refills")),{at:serverTimestamp(),by:me.uid,byName:name,bought,before,after});
     await batch.commit();
     got.forEach(r=>{ delete refillDraft.got[r.g]; delete refillDraft.buy[r.g]; }); // the rest keep what was typed
+    // Customers see refilled items back on sale right away (the seller screen keeps it up to date after that)
+    setDoc(doc(db,"settings","stock"),{ soldOut:soldOutFrom(after), left:after, updatedAt:serverTimestamp() }).catch(()=>{});
   }catch(x){ refillMsg="Couldn't save: "+friendlyError(x); b.disabled=false; }
   renderRefill();
 });

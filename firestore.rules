@@ -80,8 +80,9 @@ service cloud.firestore {
         || (isSeller() && id == 'store'
           && (resource == null ? request.resource.data.keys().hasOnly(['open']) : changed().hasOnly(['open'])))
         // Items sold out because an ingredient ran low: worked out on the seller dashboard from
-        // the inventory count and the orders, published here for the customer page
-        || (isSeller() && id == 'stock'
+        // the inventory count and the orders, published here for the customer page. The kitchen
+        // publishes it too right after a refill, so refilled items are back on sale at once.
+        || ((isSeller() || isKitchen()) && id == 'stock'
           && request.resource.data.keys().hasOnly(['soldOut', 'left', 'updatedAt'])
           && request.resource.data.soldOut is list && request.resource.data.soldOut.size() <= 300
           && (!('left' in request.resource.data) || (request.resource.data.left is map && request.resource.data.left.size() <= 300))
