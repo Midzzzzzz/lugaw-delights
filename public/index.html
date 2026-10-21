@@ -170,6 +170,8 @@ $("#menu").addEventListener("click", e=>{
 });
 
 const mode=()=>"Delivery"; // customers order delivery only
+// In the Android app a download link does nothing, so the QR is saved with a screenshot there
+const appView=!!window.Capacitor?.isNativePlatform?.();
 // Cash on delivery, or pay now by scanning the shop's QR (saved as "GCash" on the order)
 const pay=()=>SHOP.payQr && document.querySelector('input[name="pay"]:checked')?.value==="GCash" ? "GCash" : "Cash";
 const cartItems=()=>Object.entries(cart).map(([id,qty])=>({id,name:ITEMS[id].name,price:ITEMS[id].price,qty}));
@@ -184,7 +186,7 @@ function renderCart(){
     <div class="grand"><span>Total</span><span>${peso(t.total)}</span></div></div>`
     : `<p class="empty">Your bowl is empty. Tap <b>Add</b> on anything from the menu to start your order.</p>`;
   $("#submit").disabled = !items.length || !storeOpen || !isConfigured;
-  $("#submit").textContent = storeOpen ? "Place order" : "Closed right now";
+  $("#submit").textContent = !storeOpen ? "Closed right now" : pay()==="GCash" ? "Place order & pay by QR" : "Place order";
   $("#bar").classList.toggle("show", items.length>0);
   $("#barCount").textContent=`View order · ${count} item${count>1?"s":""}`;
   $("#barTotal").textContent=peso(t.total);
@@ -196,7 +198,7 @@ function renderPayNote(){
   $("#cashLabel").hidden = !!SHOP.payQr; $("#payChoice").hidden = !SHOP.payQr;
   $("#qrNote").hidden = pay()!=="GCash";
 }
-document.querySelectorAll('input[name="pay"]').forEach(r=>r.addEventListener("change",renderPayNote));
+document.querySelectorAll('input[name="pay"]').forEach(r=>r.addEventListener("change",()=>{ renderPayNote(); renderCart(); }));
 // Barangay list: only barangays the owner delivers to, each with its fee
 function renderZones(){
   const keep=zone();
@@ -358,10 +360,10 @@ function payStep(o){
     <p class="muted" style="margin:0">Order <b class="num">${esc(o.code)}</b>. The shop starts cooking once you pay.</p>
     ${SHOP.payQr?`<img src="${esc(SHOP.payQr)}" alt="QR code to pay Lugaw Delights" style="width:100%;max-width:360px;justify-self:center;border-radius:12px;background:#fff">
     <p class="muted" style="margin:0;text-align:center;font-size:.85rem">Pays to ${esc(SHOP.payQrName||SHOP.name)}</p>
-    <a class="btn small" href="${esc(SHOP.payQr)}" download="lugaw-delights-pay-qr" style="justify-self:center">Save QR code</a>
+    ${appView?"":`<a class="btn small" href="${esc(SHOP.payQr)}" download="lugaw-delights-pay-qr" style="justify-self:center">Save QR code</a>`}
     <ol class="paysteps">
-      <li>Tap <b>Save QR code</b> (or take a screenshot).</li>
-      <li>Open <b>GCash</b>, <b>Maya</b> or your <b>bank app</b>, tap <b>Scan QR</b>, then <b>Upload QR</b> / <b>Gallery</b> and choose the saved picture.
+      <li>${appView?"<b>Take a screenshot</b> of this QR code.":"Tap <b>Save QR code</b> (or take a screenshot)."}</li>
+      <li>Open <b>GCash</b>, <b>Maya</b> or your <b>bank app</b>, tap <b>Scan QR</b>, then <b>Upload QR</b> / <b>Gallery</b> and choose the ${appView?"screenshot":"saved picture"}.
         On another phone, just scan the code on this screen.</li>
       <li>Pay exactly <b class="num">${peso(o.total)}</b>. ${copy(String(o.total),"amount")} If there's a message box, type your order code <b class="num">${esc(o.code)}</b>.</li>
       <li>Take a <b>screenshot</b> of your payment receipt and upload it here:</li>
