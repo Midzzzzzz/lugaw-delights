@@ -150,7 +150,8 @@
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
-import { receiptBytes, openDrawerBytes, toBase64, shiftBytes } from "./escpos.js";
+import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
+import { prepMinutes } from "./common.js";
 import { shiftSummary } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -292,6 +293,7 @@ function start(){
     updateStock(); if(!$("#dinePanel").hidden) renderDine();
   }, ()=>{}));
   subs.push(()=>{ stopCountOrders?.(); stopCountOrders=null; countSince=null; });
+  subs.push(onSnapshot(doc(db,"settings","ingredients"), s=>{ ingredients=s.exists()?s.data().list||[]:[]; }, ()=>{}));
   // Menu changes the owner saves (recipes, prices) count right away, without a refresh
   subs.push(onSnapshot(doc(db,"settings","menu"), s=>{ if(s.exists()){ applyMenu(s.data().sections); updateStock(); if(!$("#dinePanel").hidden) renderDine(); } }, ()=>{}));
   // The sold-out list as last published (by this or another seller, or the owner)
@@ -343,7 +345,22 @@ let dineCat="all", gcashNow=false;
 // Inventory: the owner's open count holds the beginning amount of each ingredient; every order
 // since then uses its items' recipes. stockLeft(id): servings of an item still possible
 // (null when nothing it uses is counted). 0 = sold out.
-let stockCount=null, leftNow=null, countOrders=[], invDoc=null;
+let stockCount=null, leftNow=null, countOrders=[], invDoc=null, ingredients=[];
+// What's below standard stock right now, with names, for the refill printout
+const refillRowsNow=()=>invDoc?belowStandard(invDoc,leftNow).map(r=>{ const g=ingredients.find(x=>x.id===r.g);
+  return { name:g?.name||"Ingredient", unit:g?.unit||"", onHand:r.onHand, par:r.par, need:r.need }; }):null;
+// The refill list in a print window (when there's no Bluetooth printer)
+function printRefillPage(rows){
+  const w=window.open("","_blank","width=420,height=640"); if(!w) return false;
+  const q=v=>Math.round((Number(v)||0)*100)/100;
+  w.document.open(); w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>To refill</title><style>
+    body{font-family:ui-monospace,Consolas,monospace;font-size:13px;width:72mm;margin:8px auto;color:#000}h1{font-size:18px;text-align:center;margin:0}
+    td{padding:2px 0;vertical-align:top}.r{text-align:right;white-space:nowrap;padding-left:8px}hr{border:0;border-top:1px dashed #000}@media print{button{display:none}}</style></head><body>
+    <h1>TO REFILL</h1><div style="text-align:center">${esc(new Date().toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}</div><hr>
+    ${rows.length?`<table style="width:100%">${rows.map(r=>`<tr><td><b>${esc(r.name)}</b><br><small>on hand ${q(r.onHand)} of ${q(r.par)}</small></td><td class="r">need ${q(r.need)} ${esc(r.unit)}</td></tr>`).join("")}</table>`:"<p>Everything is at its standard stock. Nothing to refill.</p>"}
+    <hr><div style="text-align:center">For the kitchen</div><p style="text-align:center"><button onclick="print()">Print</button></p>
+    <script>addEventListener("load",()=>setTimeout(print,300))<\/script></body></html>`); w.document.close(); return true;
+}
 // counted with its take-out box when the seller has "Box" picked for this round
 const stockLeft=id=>servingsLeft(id,leftNow,dinePack()==="box");
 // Work out what's left and publish it for the customer page: the sold-out items, and how much
@@ -710,7 +727,7 @@ function orderCard(o){
     ${o.unconfirmedAt&&o.status==="new"?`<div class="flag">Rider ${esc(o.unconfirmedByName||"")} couldn't confirm this customer by phone (${fmtTime(o.unconfirmedAt)}). Call the customer; if it's a fake order, cancel it.</div>`:""}
     ${o.manual||priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
     ${!dineIn && c && ["new","preparing"].includes(o.status) && phoneConfirmed(c.phone)===false?`<div class="flag">New number. Call ${esc(c.phone)} to check the order is real before cooking.</div>`:""}
-    <div class="kv"><b>Time</b><span>${fmtTime(o.createdAt)} · ${esc(o.mode)}</span>
+    <div class="kv"><b>Time</b><span>${fmtTime(o.createdAt)} · ${esc(o.mode)}</span>${prepMinutes(o)!=null?`<b>Prepared in</b><span>${prepMinutes(o)} min</span>`:""}
       ${dineIn?(o.table?`<b>Table/Customer</b><span style="font-size:1.1rem;font-weight:800">${esc(o.table)}</span>`:"")
         :`<b>Customer</b><span>${c?`${esc(c.name)} · <a class="num" href="${esc(telLink(c.phone))}">${esc(c.phone)}</a><br>${phoneBadge(c.phone)}`:`<span class="muted">Loading…</span>`}</span>`}
       ${del?`<b>Address</b><span>${esc(o.address)} · <a href="${mapsLink(o.address)}" target="_blank" rel="noopener">Map</a></span>`:""}
@@ -1014,6 +1031,7 @@ function renderShift(){
       ${shiftTable(s)}${lastClosed.refillCount!=null?`<p class="muted" style="margin:8px 0 0;font-size:.88rem">${lastClosed.refillCount?`The kitchen was asked to refill ${plural(lastClosed.refillCount,"ingredient")} below standard stock.`:"Everything is at its standard stock, but the kitchen was told the shift ended."}</p>`
         :`<p class="flag" style="margin:8px 0 0">The owner hasn't set the standard stock yet (Owner dashboard → Inventory), so the kitchen got no refill list.</p>`}
       <div class="btnrow" style="margin-top:8px">${printer()?`<button class="btn ghost small" data-sh="print">Print shift report</button>`:""}
+      ${lastClosed.refillRows?`<button class="btn ghost small" data-sh="printrefill">Print refill list</button>`:""}
       <button class="btn small" data-sh="done">Done</button></div>`;
     return;
   }
@@ -1087,6 +1105,7 @@ $("#shiftCard").addEventListener("click",async e=>{
   if(a==="in"||a==="out"||a==="closeform"){ shiftForm=a==="closeform"?"close":a; shiftDraft={}; return done(); }
   if(a==="cancel"){ shiftForm=""; shiftDraft={}; return done(); }
   if(a==="done"){ lastClosed=null; return done(); }
+  if(a==="printrefill" && lastClosed?.refillRows){ if(printer()) btPrint(refillBytes(lastClosed.refillRows)); else printRefillPage(lastClosed.refillRows); return; }
   if(a==="print"){ const sh=lastClosed||shift; btPrint(shiftBytes(lastClosed?lastClosed.summary:shiftNow(),sh,SHOP)); return; }
   if(a==="open"){
     const n=Math.floor(Number(shiftDraft.start));
@@ -1121,10 +1140,12 @@ $("#shiftCard").addEventListener("click",async e=>{
       const batch=writeBatch(db); // the shift, the store and the inventory count close together
       batch.update(doc(db,"shifts",shift.id),{closedAt:serverTimestamp(),closedBy:me.uid,closedByName:myName,countedCash:n,summary:s});
       batch.set(doc(db,"settings","store"),{open:false},{merge:true});
-      const refill=endCount(batch);
+      const refill=endCount(batch), refillRows=refillRowsNow();
       await batch.commit();
-      lastClosed={...shift,closedAt:new Date(),closedByName:myName,summary:s,refillCount:refill}; shiftForm=""; shiftDraft={};
-      if(printer()) btPrint(shiftBytes(s,lastClosed,SHOP));
+      lastClosed={...shift,closedAt:new Date(),closedByName:myName,summary:s,refillCount:refill,refillRows}; shiftForm=""; shiftDraft={};
+      // shift report, then the kitchen's refill list (printed one after the other)
+      if(printer()) btPrint([...shiftBytes(s,lastClosed,SHOP),...(refillRows?refillBytes(refillRows):[])]);
+      else if(refillRows) printRefillPage(refillRows);
     }catch(x){ shiftMsg=friendlyError(x); b.disabled=false; }
     return done();
   }

@@ -120,6 +120,17 @@ export function receiptBytes(o, shop, extra = {}) {
   );
 }
 
+// What the kitchen needs to refill, printed when a shift closes. rows: [{ name, unit, onHand, par, need }]
+export function refillBytes(rows, when = new Date()) {
+  const L = [], n = v => String(Math.round((Number(v) || 0) * 100) / 100);
+  rows.forEach(r => { leftRight(r.name, "need " + n(r.need) + " " + (r.unit || "")).forEach(x => L.push(x)); L.push("  on hand " + n(r.onHand) + " of " + n(r.par)); });
+  const nl = a => a.map(x => x + "\n");
+  return bytes(CMD.init, CMD.center, CMD.boldOn, CMD.big, "TO REFILL\n", CMD.normal, CMD.boldOff,
+    when.toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + "\n", CMD.left,
+    "-".repeat(WIDTH) + "\n", rows.length ? nl(L) : "Everything is at its standard\nstock. Nothing to refill.\n",
+    "-".repeat(WIDTH) + "\n", CMD.center, "For the kitchen\n", CMD.left, CMD.feed(4));
+}
+
 // Shift report: s = shiftSummary(...), shift = the shift record
 export function shiftBytes(s, shift, shop) {
   const L = [], lr = (l, r) => leftRight(l, r).forEach(x => L.push(x)), rule = () => L.push("-".repeat(WIDTH));

@@ -353,6 +353,16 @@ export function chime() {
   });
 }
 
+// Minutes the kitchen took: from when the order (or the items added to it) went to the kitchen
+// until the kitchen marked it served / food ready / ready for pickup. null when unknown.
+export function prepMinutes(o) {
+  if (!o || o.manual) return null;
+  const end = (o.mode === "Dine-in" ? o.completedAt : o.mode === "Delivery" ? o.readyAt : o.ready_pickupAt)?.toMillis?.();
+  const start = (o.addedAt || o.preparingAt || o.createdAt)?.toMillis?.();
+  if (!end || !start || end < start) return null;
+  return Math.max(0, Math.round((end - start) / 60000));
+}
+
 // ---------- Order alerts ----------
 // One alert for a new order (or, for customers, their order moving on): a banner at the top of
 // the screen, the chime and a buzz. In the Android apps alerts are on from the start, and when
