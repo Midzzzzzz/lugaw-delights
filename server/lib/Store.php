@@ -77,6 +77,15 @@ final class Store {
   public static function decode(string $json) { return json_decode($json, false, 512, JSON_BIGINT_AS_STRING); }
   public static function encode($v): string { return json_encode($v, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION); }
 
+  // Documents the rules look up (get / exists), remembered for the rest of this request: checking
+  // a list of 300 orders asks "is this an approved seller?" 300 times, and on the hosted database
+  // every question is a round trip. Documents written in this request are never taken from here.
+  private array $memo = [];
+  private function lookup(string $c, string $i): ?stdClass {
+    $k = "$c/$i";
+    if (!array_key_exists($k, $this->memo)) $this->memo[$k] = $this->row($c, $i)['data'] ?? null;
+    return $this->memo[$k];
+  }
   private function row(string $coll, string $id, bool $lock = false): ?array {
     $q = $this->db->prepare('SELECT data, ver FROM docs WHERE coll = ? AND id = ?' . ($lock ? ' FOR UPDATE' : ''));
     $q->execute([$coll, $id]); $r = $q->fetch(PDO::FETCH_ASSOC);
@@ -91,7 +100,7 @@ final class Store {
   // ---------- reading ----------
   public function get(string $path): array {
     [$coll, $id] = self::split($path);
-    $this->rules->getDoc = fn($c, $i) => $this->row($c, $i)['data'] ?? null;
+    $this->rules->getDoc = fn($c, $i) => $this->lookup($c, $i);
     $r = $this->row($coll, $id);
     $this->check('get', $coll, $id, $r['data'] ?? null, null, self::now());
     return $r ? ['exists' => true, 'data' => $r['data'], 'ver' => $r['ver']] : ['exists' => false, 'ver' => 0];
@@ -136,7 +145,7 @@ final class Store {
     } else usort($rows, fn($a, $b) => strcmp($a['id'], $b['id']));
     if ($limit !== null) $rows = array_slice($rows, 0, $limit);
     if (!$this->bypass) {
-      $this->rules->getDoc = fn($c, $i) => $this->row($c, $i)['data'] ?? null;
+      $this->rules->getDoc = fn($c, $i) => $this->lookup($c, $i);
       $t = self::now();
       foreach ($rows as $r) $this->check('list', $coll, $r['id'], $r['data'], null, $t);
     }
@@ -194,7 +203,7 @@ final class Store {
           case 'update':
             if ($cur === null) { // like Firebase: the rules decide first (usually "denied"), then "not found"
               if (!$this->bypass) {
-                $this->rules->getDoc = fn($c, $i) => $this->row($c, $i)['data'] ?? null;
+                $this->rules->getDoc = fn($c, $i) => $this->lookup($c, $i);
                 $this->check('update', $coll, $id, null, $this->apply(new stdClass, $w->data, false, $time), $time);
               }
               throw new ApiError('not-found', "No document to update: $key", 404);
@@ -211,7 +220,7 @@ final class Store {
           $k = "$c/$i";
           if ($isAfter && array_key_exists($k, $after)) return $after[$k];
           if (!$isAfter && array_key_exists($k, $before)) return $before[$k]['data'] ?? null;
-          return $this->row($c, $i)['data'] ?? null;
+          return $this->lookup($c, $i);
         };
         foreach ($plan as $key => [$coll, $id]) {
           $old = $before[$key]['data'] ?? null; $new = $after[$key];
