@@ -350,16 +350,21 @@ let stockCount=null, leftNow=null, countOrders=[], invDoc=null, ingredients=[];
 const refillRowsNow=()=>invDoc?belowStandard(invDoc,leftNow).map(r=>{ const g=ingredients.find(x=>x.id===r.g);
   return { name:g?.name||"Ingredient", unit:g?.unit||"", onHand:r.onHand, par:r.par, need:r.need }; }):null;
 // The refill list in a print window (when there's no Bluetooth printer)
-function printRefillPage(rows){
-  const w=window.open("","_blank","width=420,height=640"); if(!w) return false;
+function refillPageHTML(rows){
   const q=v=>Math.round((Number(v)||0)*100)/100;
-  w.document.open(); w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>To refill</title><style>
+  return `<!doctype html><html><head><meta charset="utf-8"><title>To refill</title><style>
     body{font-family:ui-monospace,Consolas,monospace;font-size:13px;width:72mm;margin:8px auto;color:#000}h1{font-size:18px;text-align:center;margin:0}
     td{padding:2px 0;vertical-align:top}.r{text-align:right;white-space:nowrap;padding-left:8px}hr{border:0;border-top:1px dashed #000}@media print{button{display:none}}</style></head><body>
     <h1>TO REFILL</h1><div style="text-align:center">${esc(new Date().toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}</div><hr>
     ${rows.length?`<table style="width:100%">${rows.map(r=>`<tr><td><b>${esc(r.name)}</b><br><small>on hand ${q(r.onHand)} of ${q(r.par)}</small></td><td class="r">need ${q(r.need)} ${esc(r.unit)}</td></tr>`).join("")}</table>`:"<p>Everything is at its standard stock. Nothing to refill.</p>"}
     <hr><div style="text-align:center">For the kitchen</div><p style="text-align:center"><button onclick="print()">Print</button></p>
-    <script>addEventListener("load",()=>setTimeout(print,300))<\/script></body></html>`); w.document.close(); return true;
+    <script>addEventListener("load",()=>setTimeout(print,300))<\/script></body></html>`;
+}
+function printRefillPage(rows){
+  const w=window.open("","_blank","width=420,height=640");
+  if(!w) return false; // pop-up blocked
+  w.document.open(); w.document.write(refillPageHTML(rows)); w.document.close();
+  return true;
 }
 // counted with its take-out box when the seller has "Box" picked for this round
 const stockLeft=id=>servingsLeft(id,leftNow,dinePack()==="box");
