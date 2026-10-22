@@ -506,7 +506,7 @@ if (typeof document !== "undefined") document.addEventListener("click", async e 
   b.disabled = true; b.textContent = "Loading…";
   try {
     const s = await getDoc(doc(db, "payshots", b.dataset.payshot)), p = s.exists() ? s.data().photo : "";
-    if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(p || "")) { b.textContent = "No screenshot found"; return; }
+    if (!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(p || "")) { b.textContent = "Screenshot no longer kept (deleted 30 days after it was sent)"; return; }
     const when = s.data().sentAt?.toDate?.().toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short" }) || "";
     b.outerHTML = `<figure style="margin:0;display:grid;gap:4px;justify-items:start"><button type="button" data-proof-full style="padding:0;border:0;background:none;cursor:zoom-in"><img src="${p}" alt="Payment screenshot" style="width:160px;max-height:320px;object-fit:contain;border-radius:10px;border:2px solid var(--line)"></button><figcaption style="font-size:.8rem;color:var(--muted)">Payment screenshot${when ? " · " + esc(when) : ""}. Tap to enlarge.</figcaption></figure>`;
   } catch (x) { b.disabled = false; b.textContent = "Couldn't load. Tap to try again"; }

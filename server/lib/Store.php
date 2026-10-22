@@ -43,6 +43,13 @@ final class Store {
       $db->exec('CREATE TABLE IF NOT EXISTS meta (k VARCHAR(16) NOT NULL PRIMARY KEY, v BIGINT NOT NULL)');
       $db->exec("INSERT INTO meta (k, v) VALUES ('write', 0) ON CONFLICT (k) DO NOTHING");
       self::addUsernames($db);
+      // The screens ask for orders by status, mode, rider, delivery day, settled and time: without
+      // these, every question reads every order ever placed (slower as the shop grows)
+      foreach (['status', 'mode', 'deliveredDate', 'customerUid'] as $f)
+        $db->exec("CREATE INDEX IF NOT EXISTS docs_t_$f ON docs (coll, (data::jsonb ->> '$f'))");
+      foreach (['riderUid', 'settled', 'closedAt'] as $f)
+        $db->exec("CREATE INDEX IF NOT EXISTS docs_j_$f ON docs (coll, (data::jsonb -> '$f'))");
+      $db->exec("CREATE INDEX IF NOT EXISTS docs_created ON docs (coll, (((data::jsonb -> 'createdAt') ->> '__t')::bigint))");
       return;
     }
     $db->exec("CREATE TABLE IF NOT EXISTS docs (coll VARCHAR(64) NOT NULL, id VARCHAR(190) NOT NULL, data LONGTEXT NOT NULL,
@@ -115,6 +122,12 @@ final class Store {
     foreach ($where as [$f, $op, $v]) {
       if (!preg_match('/^[A-Za-z0-9_]+$/', (string)$f)) throw new ApiError('invalid-argument', 'Bad field');
       if ($op === '==' && is_string($v)) { $sql .= " AND {$this->jText($f)} = ?"; $args[] = $v; }
+      // true / false / null (e.g. settled == false, riderUid == null): the exact JSON value. PHP checks
+      // every row again below, so the database only has to narrow the list down.
+      elseif ($op === '==' && (is_bool($v) || $v === null || ($this->pg && (is_int($v) || is_float($v))))) {
+        if ($this->pg) { $sql .= " AND (data::jsonb -> '$f') = ?::jsonb"; $args[] = json_encode($v); }
+        else { $sql .= " AND JSON_EXTRACT(data, '$.\"$f\"') = ?"; $args[] = json_encode($v); }
+      }
       elseif ($op === 'in' && is_array($v) && $v && count(array_filter($v, 'is_string')) === count($v)) {
         $sql .= " AND {$this->jText($f)} IN (" . implode(',', array_fill(0, count($v), '?')) . ')'; array_push($args, ...$v); }
       elseif (in_array($op, ['<', '<=', '>', '>='], true) && Rules::isTs($v)) {
@@ -125,8 +138,12 @@ final class Store {
       [$f, $dir] = $order[0]; $dir = $dir === 'desc' ? 'DESC' : 'ASC';
       if (preg_match('/^[A-Za-z0-9_]+$/', (string)$f)) {
         // the database picks the first N; PHP below sorts them exactly as Firebase does
-        $str = $this->pg ? "{$this->jText($f)} COLLATE \"C\"" : $this->jText($f);
-        $sql .= " AND {$this->jHas($f)} ORDER BY {$this->jKind($f)} $dir, {$this->jNum($f)} $dir, {$this->jTs($f)} $dir, $str $dir, id LIMIT " . ($limit + 0);
+        if ($f === 'createdAt') // always a time: sort on it alone, so the database can use its index
+          $sql .= " AND {$this->jTs($f)} IS NOT NULL ORDER BY {$this->jTs($f)} $dir, id $dir LIMIT " . ($limit + 0);
+        else {
+          $str = $this->pg ? "{$this->jText($f)} COLLATE \"C\"" : $this->jText($f);
+          $sql .= " AND {$this->jHas($f)} ORDER BY {$this->jKind($f)} $dir, {$this->jNum($f)} $dir, {$this->jTs($f)} $dir, $str $dir, id LIMIT " . ($limit + 0);
+        }
       }
     }
     $st = $this->db->prepare($sql); $st->execute($args);
@@ -240,7 +257,7 @@ final class Store {
           ->execute([$coll, $id, self::encode($after[$key]), $ver]);
       }
       $this->db->commit();
-      if ($ver && $ver % 500 === 0) $this->db->exec('DELETE FROM changes WHERE ver < ' . ($ver - 20000)); // keep the change list short
+      if ($ver && $ver % 500 === 0) $this->cleanup($ver); // now and then, keep the database small
       return $ver;
     } catch (Throwable $e) { $this->db->rollBack(); throw $e; }
   }
@@ -274,6 +291,16 @@ final class Store {
     }
     if (is_array($v)) return array_map(fn($x) => $this->resolve($x, $time), $v);
     return $v;
+  }
+
+  // Housekeeping: the change list only needs the recent past, and a payment screenshot (100-200 KB)
+  // is only needed until the shop has checked it, so it's removed 30 days after it was sent.
+  public const PAYSHOT_DAYS = 30;
+  public function cleanup(int $ver, ?int $now = null): int {
+    $this->db->exec('DELETE FROM changes WHERE ver < ' . ($ver - 20000));
+    $q = $this->db->prepare("DELETE FROM docs WHERE coll = 'payshots' AND {$this->jTs('sentAt')} < ?");
+    $q->execute([($now ?? self::now()) - self::PAYSHOT_DAYS * 86400000]);
+    return $q->rowCount();
   }
 
   // ---------- live updates: what changed since version N ----------
