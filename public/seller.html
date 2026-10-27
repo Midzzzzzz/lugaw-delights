@@ -151,7 +151,7 @@ import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, bel
 const $=s=>document.querySelector(s);
 // A device set up for the kitchen (kitchen.html remembers it) opens the kitchen page instead
 try{ if(localStorage.getItem("lugaw-device")==="kitchen") location.replace("kitchen.html"); }catch(_){}
-let subs=[], lists={}, orders=[], riders=[], contacts={}, asked=new Set(), tab="new", known=null;
+let subs=[], lists={}, orders=[], riders=[], contacts={}, asked=new Set(), tab="delivery", known=null;
 let me=null, myName="", myProfile=null, watchSeller=null, registering=false;
 const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
 $("#setup").innerHTML=setupNotice();
@@ -600,11 +600,12 @@ const unpaidDine=o=>o.mode==="Dine-in"&&o.status!=="cancelled"&&balanceOf(o)!==0
 // move to Done today. New, Kitchen and Ready for pickup are pickup and dine-in orders.
 const isDel=o=>o.mode==="Delivery";
 const delActive=o=>isDel(o)&&ACTIVE.includes(o.status);
+// New and Ready for pickup are for customer pickup orders (switched off): shown only when they hold an order
 const TABS=[
-  ["new","New",o=>needsStore(o)&&!isDel(o)],
+  ["new","New",o=>needsStore(o)&&!isDel(o),"hideEmpty"],
   ["delivery","Delivery",delActive],
   ["kitchen","Kitchen",o=>o.status==="preparing"&&!isDel(o)],
-  ["out","Ready for pickup",o=>o.status==="ready_pickup"],
+  ["out","Ready for pickup",o=>o.status==="ready_pickup","hideEmpty"],
   ["done","Done today",o=>["delivered","completed"].includes(o.status)&&isToday(o.createdAt)],
   ["unpaid","Unpaid",unpaidDine],
   ["settle","Settle with riders",unsettled],
@@ -680,7 +681,9 @@ function render(force){
   if(force!==true && typingOnBoard()){ renderWaiting=true; return; }
   renderProfile();
   // (No sales totals on the counter screen: the owner sees them on the owner dashboard.)
-  $("#tabs").innerHTML=TABS.map(([id,label,f])=>{
+  const shown=TABS.filter(([id,,f,hide])=>!hide || orders.some(f));
+  if(!shown.some(t=>t[0]===tab)) tab="delivery"; // its tab went away (e.g. the last pickup order was handed over)
+  $("#tabs").innerHTML=shown.map(([id,label,f])=>{
     const n=orders.filter(f).length;
     return `<button class="${tab===id?"on":""}" data-tab="${id}">${label}${n?`<span class="count">${n}</span>`:""}</button>`;
   }).join("");
