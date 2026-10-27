@@ -120,10 +120,16 @@ export function receiptBytes(o, shop, extra = {}) {
   );
 }
 
-// What the kitchen needs to refill, printed when a shift closes. rows: [{ name, unit, onHand, par, need }]
+// What the kitchen needs to refill, printed when a shift closes. rows: [{ name, unit, onHand, par, need, price? }]
 export function refillBytes(rows, when = new Date()) {
   const L = [], n = v => String(Math.round((Number(v) || 0) * 100) / 100);
-  rows.forEach(r => leftRight(r.name, (n(r.need) + " " + (r.unit || "")).trim()).forEach(x => L.push(x))); // item and how much to get
+  // item, how much to get and what it costs (when the owner set a price per unit)
+  const cost = r => Math.round(r.need * r.price * 100) / 100;
+  rows.forEach(r => {
+    leftRight(r.name, r.price != null ? money(cost(r)) : (n(r.need) + " " + (r.unit || "")).trim()).forEach(x => L.push(x));
+    if (r.price != null) L.push(("  " + n(r.need) + " " + (r.unit || "")).trimEnd() + " @ " + money(r.price));
+  });
+  if (rows.some(r => r.price != null)) { L.push("-".repeat(WIDTH)); leftRight("TOTAL", money(rows.reduce((t, r) => t + (r.price != null ? cost(r) : 0), 0))).forEach(x => L.push(x)); }
   const nl = a => a.map(x => x + "\n");
   return bytes(CMD.init, CMD.center, CMD.boldOn, CMD.big, "TO REFILL\n", CMD.normal, CMD.boldOff,
     when.toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + "\n", CMD.left,

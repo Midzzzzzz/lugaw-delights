@@ -85,7 +85,7 @@
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
-import { soldOutFrom, orderType } from "./common.js";
+import { soldOutFrom, orderType, peso } from "./common.js";
 import { auth, db, isConfigured, applyMenu, ingredientsLeft, trackerCount, belowStandard, esc, itemsHTML, phoneKey, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 
@@ -194,7 +194,7 @@ function start(){
 // deleted order puts its ingredients back). When a seller closes their shift, the kitchen is
 // asked to refill: buy or prepare what's below standard, tick it, and tap "All refilled".
 let inv=null, ingredients=[], invOrders=[], stopInvOrders=null, invSince=null, refillDraft={got:{},buy:{}}, refillMsg="", refillAsked=null;
-const ingName=g=>ingredients.find(x=>x.id===g)?.name||g, ingUnit=g=>ingredients.find(x=>x.id===g)?.unit||"";
+const ingName=g=>ingredients.find(x=>x.id===g)?.name||g, ingUnit=g=>ingredients.find(x=>x.id===g)?.unit||"", ingPrice=g=>ingredients.find(x=>x.id===g)?.price;
 const qty=n=>String(Math.round(n*100)/100);
 const onHand=()=>ingredientsLeft(trackerCount(inv),invOrders)||{};
 function watchRefill(){
@@ -245,7 +245,7 @@ function renderRefill(){
       Bring each one back to its standard stock: buy or prepare it, tick it, and change the amount if you got a different amount.</p>
     ${list.length?list.map(r=>{ const v=d.buy[r.g]??r.need; return `<div class="rf${d.got[r.g]?" got":""}">
       <input type="checkbox" data-got="${esc(r.g)}"${d.got[r.g]?" checked":""} aria-label="Got ${esc(ingName(r.g))}">
-      <div><div class="rname">${esc(ingName(r.g))}</div><div class="rneed">On hand ${qty(r.onHand)} of ${qty(r.par)} ${esc(ingUnit(r.g))} · need ${qty(r.need)}</div></div>
+      <div><div class="rname">${esc(ingName(r.g))}</div><div class="rneed">On hand ${qty(r.onHand)} of ${qty(r.par)} ${esc(ingUnit(r.g))} · need ${qty(r.need)}${ingPrice(r.g)!=null?` · about ${peso(Math.round(r.need*ingPrice(r.g)*100)/100)}`:""}</div></div>
       <label class="rbuy">Got <input type="number" inputmode="decimal" min="0" step="any" data-buy="${esc(r.g)}" value="${esc(v)}" aria-label="Amount of ${esc(ingName(r.g))} bought"> ${esc(ingUnit(r.g))}</label></div>`; }).join("")
       :`<p class="empty">Everything is at its standard stock. Nothing to buy.</p>`}
     ${refillMsg?`<p class="err">${esc(refillMsg)}</p>`:""}

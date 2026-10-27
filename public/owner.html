@@ -797,7 +797,7 @@ $("#view").addEventListener("click",async e=>{
 // for every order, and the item shows as sold out by itself when an ingredient runs short.
 // Item ids are never reused, so older orders keep pointing at the right item.
 let menuDoc=null, menuDraft=null, menuRetired=[], menuDirty=false, menuMsg="", menuCat=0, openRecipe=null;
-let ingDoc=null; // settings/ingredients: { list: [{ id, name, unit }] }
+let ingDoc=null; // settings/ingredients: { list: [{ id, name, unit, price? }] } (price: pesos per unit, for the refill list)
 const ingList=()=>ingDoc?.list||[];
 const ingName=id=>ingList().find(g=>g.id===id)?.name||"Removed ingredient";
 const ingUnit=id=>ingList().find(g=>g.id===id)?.unit||"";
@@ -1011,18 +1011,19 @@ function renderInventory(){
   const out=invDoc?soldOutFrom(left,false).map(id=>ITEMS[id]?.name).filter(Boolean):[];
   $("#view").innerHTML=`<section class="card" style="margin-top:12px">
     <h2 style="color:var(--brand-deep)">Inventory</h2>
-    <p class="muted" style="font-size:.88rem;margin:4px 0 10px">Set this up once: each ingredient and its <b>standard stock</b>, how much you want on hand. <b>On hand</b> goes down by itself as orders come in (and back up if an order is deleted). When you count the real stock, type it in <b>On hand</b> and tap <b>Save inventory</b>.
+    <p class="muted" style="font-size:.88rem;margin:4px 0 10px">Set this up once: each ingredient, its <b>price per unit</b> (so the refill list shows what to spend) and its <b>standard stock</b>, how much you want on hand. <b>On hand</b> goes down by itself as orders come in (and back up if an order is deleted). When you count the real stock, type it in <b>On hand</b> and tap <b>Save inventory</b>.
       When a seller closes their shift, the kitchen is asked to refill everything below standard. Set what each menu item uses in the <b>Menu</b> tab (<b>Ingredients</b>).</p>
     ${invErr?`<div class="flag">${esc(invErr)}</div>`:""}${status}
-    <div class="tablewrap"><table class="inv"><thead><tr><th>Ingredient</th><th>Unit</th><th class="n">Standard stock</th><th class="n">On hand</th><th class="n">To refill</th><th></th></tr></thead><tbody>
+    <div class="tablewrap"><table class="inv"><thead><tr><th>Ingredient</th><th>Unit</th><th class="n">Price per unit (₱)</th><th class="n">Standard stock</th><th class="n">On hand</th><th class="n">To refill</th><th></th></tr></thead><tbody>
     ${l.map((g,i)=>{ const par=Number(invDoc?.par?.[g.id]), has=invDoc && g.id in (invDoc.par||{}), oh=has?(left[g.id]??invDoc.base?.[g.id]??0):null, need=has?Math.max(0,par-oh):null;
       return `<tr class="${has&&oh<=0?"out":has&&oh<par*0.2?"low":""}"><td><input data-ing="${i}" data-f="name" value="${esc(g.name)}" maxlength="60" placeholder="e.g. Egg" aria-label="Ingredient name" style="width:100%;text-align:left"></td>
         <td><select data-ing="${i}" data-f="unit" aria-label="Unit" style="width:auto">${[...new Set([...UNITS,g.unit||"pcs"])].map(u=>`<option${u===(g.unit||"pcs")?" selected":""}>${esc(u)}</option>`).join("")}</select></td>
+        <td class="n"><input type="number" inputmode="decimal" min="0" step="any" data-ing="${i}" data-f="price" value="${esc(g.price??"")}" placeholder="optional" aria-label="Price per ${esc(g.unit||"pcs")} of ${esc(g.name)}"></td>
         <td class="n"><input type="number" inputmode="decimal" min="0" step="any" data-ing="${i}" data-f="par" value="${esc(g.par)}" aria-label="Standard stock of ${esc(g.name)}"></td>
         <td class="n"><input type="number" inputmode="decimal" min="0" step="any" data-ing="${i}" data-f="oh" value="${esc(g.oh??(has?fmtQ(oh):""))}" placeholder="${has?"":"same as standard"}" aria-label="On hand of ${esc(g.name)} (real count)"${g.oh!=null?' style="border-color:var(--brand)"':""}></td>
         <td class="n">${need?`<b>${fmtQ(need)}</b>`:has?"0":"—"}</td>
         <td><button class="btn ghost small" data-iact="ingdel" data-i="${i}" aria-label="Remove ${esc(g.name)}">✕</button></td></tr>`; }).join("")
-      ||`<tr><td colspan="6" class="muted">No ingredients yet. Tap + Add ingredient.</td></tr>`}</tbody></table></div>
+      ||`<tr><td colspan="7" class="muted">No ingredients yet. Tap + Add ingredient.</td></tr>`}</tbody></table></div>
     <div class="btnrow" style="margin-top:10px"><button class="btn ghost small" data-iact="ingadd">+ Add ingredient</button>
       <button class="btn" data-iact="save">Save inventory</button><span class="muted" style="font-size:.88rem">${esc(ingMsg)}</span></div>
     ${invDoc?`<p style="margin:10px 0 0;font-size:.9rem"><b>Sold out now:</b> ${out.length?esc(out.join(", ")):"nothing"}</p>`:""}
@@ -1035,6 +1036,7 @@ function renderInventory(){
 $("#view").addEventListener("input",e=>{ if(tab!=="inventory") return;
   const g=e.target.closest("[data-ing]"); if(g){ const f=g.dataset.f, d=ingDraft[+g.dataset.ing];
     if(f==="oh") d.oh=g.value===""?null:Math.max(0,Number(g.value)); // the owner's real count
+    else if(f==="price") d.price=g.value===""?null:Math.max(0,Number(g.value));
     else d[f]=f==="par"?(g.value===""?"":Math.max(0,Number(g.value))):g.value;
     ingMsg="Not saved yet."; } });
 $("#view").addEventListener("change",e=>{ const g=e.target.closest("select[data-ing]"); if(g && tab==="inventory"){ ingDraft[+g.dataset.ing].unit=g.value; ingMsg="Not saved yet."; } });
@@ -1044,7 +1046,7 @@ $("#view").addEventListener("click",async e=>{
   if(a==="ingadd"){ ingDraft.push({id:"g"+Date.now().toString(36),name:"",unit:"pcs",par:""}); ingMsg="Not saved yet."; render(true); const r=document.querySelectorAll('[data-ing][data-f="name"]'); r[r.length-1]?.focus(); return; }
   if(a==="ingdel"){ if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Remove?"; return; } ingDraft.splice(+b.dataset.i,1); ingMsg="Not saved yet."; return render(true); }
   if(a==="save"){
-    const list=ingDraft.map(g=>({id:g.id,name:String(g.name).trim(),unit:g.unit||"pcs"}));
+    const list=ingDraft.map(g=>({id:g.id,name:String(g.name).trim(),unit:g.unit||"pcs",...(g.price!=null&&g.price!==""?{price:Math.round(Number(g.price)*100)/100}:{})}));
     if(list.some(g=>!g.name)){ ingMsg="Every ingredient needs a name."; return render(true); }
     const par={}; ingDraft.forEach(g=>{ if(g.par!=="" && g.par!=null) par[g.id]=Number(g.par); });
     // On hand from now on: the owner's real count where typed, otherwise what's worked out now

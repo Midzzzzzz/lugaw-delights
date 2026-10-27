@@ -345,7 +345,7 @@ let dineCat="all", gcashNow=false;
 let stockCount=null, leftNow=null, countOrders=[], invDoc=null, ingredients=[];
 // What's below standard stock right now, with names, for the refill printout
 const refillRowsNow=()=>invDoc?belowStandard(invDoc,leftNow).map(r=>{ const g=ingredients.find(x=>x.id===r.g);
-  return { name:g?.name||"Ingredient", unit:g?.unit||"", onHand:r.onHand, par:r.par, need:r.need }; }):null;
+  return { name:g?.name||"Ingredient", unit:g?.unit||"", onHand:r.onHand, par:r.par, need:r.need, ...(g?.price!=null?{price:g.price}:{}) }; }):null;
 // The refill list in a print window (when there's no Bluetooth printer)
 function refillPageHTML(rows){
   const q=v=>Math.round((Number(v)||0)*100)/100;
@@ -353,7 +353,8 @@ function refillPageHTML(rows){
     body{font-family:ui-monospace,Consolas,monospace;font-size:13px;width:72mm;margin:8px auto;color:#000}h1{font-size:18px;text-align:center;margin:0}
     td{padding:2px 0;vertical-align:top}.r{text-align:right;white-space:nowrap;padding-left:8px}hr{border:0;border-top:1px dashed #000}@media print{button{display:none}}</style></head><body>
     <h1>TO REFILL</h1><div style="text-align:center">${esc(new Date().toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}</div><hr>
-    ${rows.length?`<table style="width:100%">${rows.map(r=>`<tr><td>${esc(r.name)}</td><td class="r">${q(r.need)} ${esc(r.unit)}</td></tr>`).join("")}</table>`:"<p>Everything is at its standard stock. Nothing to refill.</p>"}
+    ${rows.length?`<table style="width:100%">${rows.map(r=>`<tr><td>${esc(r.name)}<br><small>${q(r.need)} ${esc(r.unit)}${r.price!=null?` @ ${peso(r.price)}`:""}</small></td><td class="r">${r.price!=null?peso(Math.round(r.need*r.price*100)/100):""}</td></tr>`).join("")}
+      ${rows.some(r=>r.price!=null)?`<tr><td><b>TOTAL</b></td><td class="r"><b>${peso(Math.round(rows.reduce((t,r)=>t+(r.price!=null?r.need*r.price:0),0)*100)/100)}</b></td></tr>`:""}</table>`:"<p>Everything is at its standard stock. Nothing to refill.</p>"}
     <hr><div style="text-align:center">For the kitchen</div><p style="text-align:center"><button onclick="print()">Print</button></p>
     <script>addEventListener("load",()=>setTimeout(print,300))<\/script></body></html>`;
 }
