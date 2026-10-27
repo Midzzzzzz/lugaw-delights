@@ -134,14 +134,6 @@
       </div>
     </div>
     <button class="btn big" type="button" id="dineBar" hidden></button>
-    <div class="stats">
-      <div class="stat"><b id="sOrders">0</b><span>Orders today</span></div>
-      <div class="stat"><b id="sSales">₱0</b><span>Sales today</span></div>
-      <div class="stat"><b id="sFees">₱0</b><span>Rider fees today</span></div>
-      <div class="stat"><b id="sUnpaid">₱0</b><span>Unpaid dine-in</span></div>
-      <div class="stat"><b id="sCash">₱0</b><span>Cash riders still owe</span></div>
-      <div class="stat"><b id="sOwed">₱0</b><span>Fees you owe riders</span></div>
-    </div>
     <div class="tabs" id="tabs"></div>
     <div class="grid-cards" id="board"></div>
   </div>
@@ -687,17 +679,7 @@ function render(force){
   renderShift();
   if(force!==true && typingOnBoard()){ renderWaiting=true; return; }
   renderProfile();
-  const today=orders.filter(o=>isToday(o.createdAt)&&o.status!=="cancelled");
-  const done=today.filter(o=>["delivered","completed"].includes(o.status));
-  const owed=orders.filter(unsettled);
-  $("#sOrders").textContent=today.length;
-  $("#sUnpaid").textContent=peso(orders.filter(unpaidDine).reduce((s,o)=>s+Math.max(0,balanceOf(o)),0));
-  $("#sSales").textContent=peso(done.reduce((s,o)=>s+shopAmount(o),0));
-  $("#sFees").textContent=peso(done.reduce((s,o)=>s+(o.deliveryFee||0),0));
-  // Cash orders: the rider keeps the fee and hands over the food money.
-  // GCash orders: the shop got everything, so it owes the rider the fee.
-  $("#sCash").textContent=peso(owed.filter(o=>o.payment==="Cash").reduce((s,o)=>s+shopAmount(o),0));
-  $("#sOwed").textContent=peso(owed.filter(o=>o.payment==="GCash").reduce((s,o)=>s+(o.deliveryFee||0),0));
+  // (No sales totals on the counter screen: the owner sees them on the owner dashboard.)
   $("#tabs").innerHTML=TABS.map(([id,label,f])=>{
     const n=orders.filter(f).length;
     return `<button class="${tab===id?"on":""}" data-tab="${id}">${label}${n?`<span class="count">${n}</span>`:""}</button>`;
