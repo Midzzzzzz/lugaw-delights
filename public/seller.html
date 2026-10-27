@@ -1076,8 +1076,7 @@ function renderShift(){
       <div id="closeDiff" style="font-weight:800">${diffText(diff)}</div>
       <div class="btnrow"><button class="btn" data-sh="close"${n==null?" disabled":""}>Close shift</button><button class="btn ghost small" data-sh="cancel">Cancel</button></div></div>`;
   }
-  box.innerHTML=`<div class="shift-head"><b>Shift open</b><span class="muted" style="font-size:.88rem">since ${since?since.toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}):"just now"} · ${esc(shift.openedByName||"")}</span>
-      <span class="shift-nums"><span>${plural(s.orders,"order")}</span><span>Sales <b>${peso(s.sales)}</b></span><span>Cash in drawer <b>${peso(s.expected)}</b></span></span></div>
+  box.innerHTML=`<div class="shift-head"><b>Shift open</b><span class="muted" style="font-size:.88rem">since ${since?since.toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}):"just now"} · ${esc(shift.openedByName||"")}</span></div>
     ${shiftForm==="details"?shiftTable(s):""}
     ${form||`<div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-sh="details">${shiftForm==="details"?"Hide details":"Details"}</button>
       <button class="btn ghost small" data-sh="in">Pay in</button><button class="btn ghost small" data-sh="out">Pay out</button>
