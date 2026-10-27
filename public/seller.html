@@ -111,7 +111,7 @@
         <div id="dineMenuWrap"><div class="cats" id="dineCats"></div><div class="tiles" id="dineMenu"></div></div>
         <form class="stack" id="dineForm" novalidate>
           <div id="dineCart"></div>
-          <div class="group"><span>Next items: eating here or take-out?</span>
+          <div class="group"><span>Eating here or take-out? <small class="muted" style="font-weight:400">Tap right after an item to pack it; the next items follow.</small></span>
             <div class="seg" style="grid-template-columns:repeat(3,1fr)">
               <input type="radio" name="dpack" id="d-pack-no" value="" checked><label for="d-pack-no">No, eating here</label>
               <input type="radio" name="dpack" id="d-pack-box" value="box"><label for="d-pack-box" id="d-pack-box-label">Box</label>
@@ -496,10 +496,13 @@ function renderDineTotals(){
   dineBar(items, t.total, items.length>0);
 }
 $("#d-given").addEventListener("input",renderDineTotals);
-document.querySelectorAll('input[name="dpack"]').forEach(r=>r.addEventListener("change",renderDine)); // "N left" changes with boxes
+// Choosing a packing packs the item tapped last, and the items tapped after it
+document.querySelectorAll('input[name="dpack"]').forEach(r=>r.addEventListener("change",()=>{
+  if(lastKey && dine[lastKey]) changePack(lastKey,dinePack()); else renderDine(); // "N left" changes with boxes
+}));
 $("#d-pack-box-label").textContent=`Box (+${peso(SHOP.boxFee)} each)`;
 document.querySelectorAll('input[name="dpay"]').forEach(r=>r.addEventListener("change",renderDineTotals));
-function closeDine(){ Object.keys(dine).forEach(k=>delete dine[k]); dineCat="all"; gcashNow=false; $("#d-given").value=""; $("#d-cash").checked=true; $("#d-pack-no").checked=true; dineErr(); $("#dinePanel").hidden=true; $("#dineBar").hidden=true; setAdding(null); }
+function closeDine(){ lastKey=null; Object.keys(dine).forEach(k=>delete dine[k]); dineCat="all"; gcashNow=false; $("#d-given").value=""; $("#d-cash").checked=true; $("#d-pack-no").checked=true; dineErr(); $("#dinePanel").hidden=true; $("#dineBar").hidden=true; setAdding(null); }
 // Switch the panel between a new dine-in order and adding to an existing one
 function setAdding(o){
   addingTo=o;
@@ -508,7 +511,7 @@ function setAdding(o){
   $("#dinePayWrap").hidden=!!o;
 }
 function openAddItems(o){
-  Object.keys(dine).forEach(k=>delete dine[k]); dineErr(); setAdding(o);
+  lastKey=null; Object.keys(dine).forEach(k=>delete dine[k]); dineErr(); setAdding(o);
   $("#dinePanel").hidden=false; renderDine(); $("#dinePanel").scrollIntoView({behavior:"smooth",block:"start"});
 }
 $("#dineBtn").onclick=()=>{
@@ -522,15 +525,19 @@ function changeQty(key,d){
   const used=(addingTo?.items?.length||0)+Object.keys(dine).length;
   if(!dine[key] && used>=MAX_LINES) return dineErr(`Up to ${MAX_LINES} lines per order. Start a new dine-in order for more.`);
   dineErr(); if(q>0) dine[key]=Math.min(q,MAX_QTY); else delete dine[key];
+  if(d>0) lastKey=key; else if(!dine[key] && lastKey===key) lastKey=null;
   renderDine();
 }
+// The item tapped last: choosing Box / Plastic / Eating here right after tapping it packs that item
+let lastKey=null;
 // Tapping a line's packing label moves it to the next packing (eating here -> box -> plastic)
-function changePack(key){
-  const [id,pack]=dsplit(key), next=PACKS.at((PACKS.indexOf(pack)+1)%PACKS.length), to=dkey(id,next), q=dine[key]||0;
-  if(!q) return;
+function changePack(key,toPack){
+  const [id,pack]=dsplit(key), next=toPack??PACKS.at((PACKS.indexOf(pack)+1)%PACKS.length), to=dkey(id,next), q=dine[key]||0;
+  if(!q || to===key) return;
   const moved={...dine}; delete moved[key]; moved[to]=Math.min(MAX_QTY,(moved[to]||0)+q);
   const before={...dine}; Object.keys(dine).forEach(k=>delete dine[k]); Object.assign(dine,moved);
   const p=stockProblem(); if(p){ Object.keys(dine).forEach(k=>delete dine[k]); Object.assign(dine,before); return dineErr(p); } // a box may run out
+  if(lastKey===key) lastKey=to;
   dineErr(); renderDine();
 }
 $("#dinePanel").addEventListener("click",e=>{
