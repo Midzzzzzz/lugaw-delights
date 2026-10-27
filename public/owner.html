@@ -115,7 +115,7 @@ import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot,
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
 import { findShifts } from "./pastshifts.js";
-import { saved, prepMinutes } from "./common.js";
+import { saved, prepMinutes, orderType } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
@@ -355,7 +355,7 @@ function renderOrders(){
     <div class="tablewrap"><table class="orders"><thead><tr><th><input type="checkbox" data-pickall aria-label="Select all shown orders"${shown.length&&shown.every(o=>picked.has(o.id))?" checked":""}></th><th>Time</th><th>Code</th><th>Type</th><th>Seller</th><th>Rider</th><th>Status</th><th class="n">Total</th></tr></thead>
     <tbody>${shown.map(o=>`<tr class="row" data-open="${esc(o.id)}">
       <td><input type="checkbox" data-pick="${esc(o.id)}" aria-label="Select ${esc(o.code)}"${picked.has(o.id)?" checked":""}></td><td>${o.createdAt?.toDate?.().toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"just now"}</td>
-      <td><b>${esc(o.code)}</b></td><td>${esc(o.mode)}${o.table?` · ${esc(o.table)}`:""}</td>
+      <td><b>${esc(o.code)}</b></td><td>${esc(orderType(o))}${o.table?` · ${esc(o.table)}`:""}</td>
       <td>${o.sellerUid||o.sellerName?esc(sellerName(o)):`<span class="muted">—</span>`}</td>
       <td>${o.riderUid?esc(riderName(o)):`<span class="muted">—</span>`}</td>
       <td><span class="pill ${esc(STATUS[o.status]?.tone||"off")}">${esc(statusLabel(o))}</span>${o.manual?` <span class="pill">${o.source==="loyverse"?"From Loyverse":"Added by owner"}</span>`:""}</td>

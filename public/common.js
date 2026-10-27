@@ -353,6 +353,14 @@ export function chime() {
   });
 }
 
+// How an order is shown: counter orders (mode "Dine-in") read Take-out when every item is packed
+// to go, and "Dine-in + take-out" when some are; online orders show their mode (Delivery, Pickup)
+export function orderType(o) {
+  if (o?.mode !== "Dine-in") return o?.mode || "";
+  const items = o.items || [], out = items.filter(it => it?.pack).length;
+  return !out ? "Dine-in" : out === items.length ? "Take-out" : "Dine-in + take-out";
+}
+
 // Minutes the kitchen took: from when the order (or the items added to it) went to the kitchen
 // until the kitchen marked it served / food ready / ready for pickup. null when unknown.
 export function prepMinutes(o) {

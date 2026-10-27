@@ -76,7 +76,7 @@ export function receiptBytes(o, shop, extra = {}) {
   rule();
   lr("Order", o.code || "");
   lr("Date", when.toLocaleString("en-PH", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }));
-  lr("Type", o.mode || "");
+  lr("Type", extra.type || o.mode || "");
   if (o.table) lr("Table", o.table);
   if (extra.customer) lr("Customer", extra.customer);
   if (extra.mobile) lr("Mobile", extra.mobile);

@@ -96,7 +96,7 @@
     <div class="card toolbar">
       <span class="pill" id="storeLabel" style="font-size:.9rem;padding:5px 12px">Store…</span>
       <div class="btnrow">
-        <button class="btn small" id="dineBtn">+ Dine-in order</button>
+        <button class="btn small" id="dineBtn">+ Order</button>
         <button class="btn small" id="soundBtn">Turn on order alerts</button>
         <button class="btn ghost small" id="printerBtn" hidden>Printer</button>
         <button class="btn ghost small" id="drawerBtn" hidden>Open drawer</button>
@@ -105,7 +105,7 @@
     <div class="card" id="printerPanel" hidden style="margin-top:12px"></div>
     <div class="card" id="shiftCard" style="margin-top:12px"></div>
     <div class="card" id="dinePanel" hidden style="margin-top:12px">
-      <div class="dine-head"><h2 style="color:var(--brand)" id="dineTitle">Dine-in order</h2>
+      <div class="dine-head"><h2 style="color:var(--brand)" id="dineTitle">New order</h2>
         <button class="btn ghost small" type="button" id="dineClose">Cancel</button></div>
       <div class="dine-grid">
         <div id="dineMenuWrap"><div class="cats" id="dineCats"></div><div class="tiles" id="dineMenu"></div></div>
@@ -151,7 +151,7 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
-import { prepMinutes } from "./common.js";
+import { prepMinutes, orderType } from "./common.js";
 import { shiftSummary } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -506,7 +506,7 @@ function closeDine(){ lastKey=null; Object.keys(dine).forEach(k=>delete dine[k])
 // Switch the panel between a new dine-in order and adding to an existing one
 function setAdding(o){
   addingTo=o;
-  $("#dineTitle").textContent=o?`Change ${o.code}${o.table?" · "+o.table:""}`:"Dine-in order";
+  $("#dineTitle").textContent=o?`Change ${o.code}${o.table?" · "+o.table:""}`:"New order";
   editLines=o?(o.items||[]).map(it=>({...it})):[];
   $("#dinePayWrap").hidden=!!o;
 }
@@ -523,7 +523,7 @@ function changeQty(key,d){
   // not enough ingredients left for another one (counting the whole order)
   if(d>0){ const p=stockProblem({id,qty:d,pack}); if(p) return dineErr(p); }
   const used=(addingTo?.items?.length||0)+Object.keys(dine).length;
-  if(!dine[key] && used>=MAX_LINES) return dineErr(`Up to ${MAX_LINES} lines per order. Start a new dine-in order for more.`);
+  if(!dine[key] && used>=MAX_LINES) return dineErr(`Up to ${MAX_LINES} lines per order. Start a new order for more.`);
   dineErr(); if(q>0) dine[key]=Math.min(q,MAX_QTY); else delete dine[key];
   if(d>0) lastKey=key; else if(!dine[key] && lastKey===key) lastKey=null;
   renderDine();
@@ -555,7 +555,7 @@ $("#dineForm").onsubmit=async e=>{
   if(addingTo){
     // Added items are appended as a new round so the kitchen sees what's new
     const o=orders.find(x=>x.id===addingTo.id)||addingTo;
-    if(!["preparing","completed"].includes(o.status)) return dineErr("This order is already closed. Start a new dine-in order.");
+    if(!["preparing","completed"].includes(o.status)) return dineErr("This order is already closed. Start a new order.");
     if((o.items||[]).length!==editLines.length) return dineErr("This order changed on another screen. Close this panel and try again.");
     const round=Math.max(1,...(o.items||[]).map(it=>it.round||1))+1;
     const removedNow=[], at=Date.now();
@@ -756,7 +756,7 @@ function orderCard(o){
     ${o.unconfirmedAt&&o.status==="new"?`<div class="flag">Rider ${esc(o.unconfirmedByName||"")} couldn't confirm this customer by phone (${fmtTime(o.unconfirmedAt)}). Call the customer; if it's a fake order, cancel it.</div>`:""}
     ${o.manual||priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
     ${!dineIn && c && ["new","preparing"].includes(o.status) && phoneConfirmed(c.phone)===false?`<div class="flag">New number. Call ${esc(c.phone)} to check the order is real before cooking.</div>`:""}
-    <div class="kv"><b>Time</b><span>${fmtTime(o.createdAt)} · ${esc(o.mode)}</span>${prepMinutes(o)!=null?`<b>Prepared in</b><span>${prepMinutes(o)} min</span>`:""}
+    <div class="kv"><b>Time</b><span>${fmtTime(o.createdAt)} · ${esc(orderType(o))}</span>${prepMinutes(o)!=null?`<b>Prepared in</b><span>${prepMinutes(o)} min</span>`:""}
       ${dineIn?(o.table?`<b>Table/Customer</b><span style="font-size:1.1rem;font-weight:800">${esc(o.table)}</span>`:"")
         :`<b>Customer</b><span>${c?`${esc(c.name)} · <a class="num" href="${esc(telLink(c.phone))}">${esc(c.phone)}</a><br>${phoneBadge(c.phone)}`:`<span class="muted">Loading…</span>`}</span>`}
       ${del?`<b>Address</b><span>${esc(o.address)} · <a href="${mapsLink(o.address)}" target="_blank" rel="noopener">Map</a></span>`:""}
@@ -941,7 +941,7 @@ hr{border:0;border-top:1px dashed #000;margin:6px 0}.big td{font-weight:bold;fon
 @media print{.noprint{display:none}}
 </style></head><body>
 <div class="c"><img src="${receiptLogo||"logo.jpg"}" alt="" style="width:30mm;height:30mm;object-fit:contain"><h1>${esc(SHOP.name)}</h1><div>${esc(receiptShop().pickupAddress)}</div><div>${esc(receiptShop().phone)}</div></div><hr>
-<table>${row("Order",esc(o.code))}${row("Date",when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}${row("Type",esc(o.mode))}${who}</table><hr>
+<table>${row("Order",esc(o.code))}${row("Date",when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}${row("Type",esc(orderType(o)))}${who}</table><hr>
 <table>${lines}</table><hr>
 <table>${row("Subtotal",peso(o.subtotal))}${o.deliveryFee?row("Delivery fee",peso(o.deliveryFee)):""}${o.boxFee?row("Take-out boxes",peso(o.boxFee)):""}${row("TOTAL",peso(o.total),"big")}
 ${fin?row("Payment",esc(fin.payText)):row("Payment",esc(o.payment)+(o.mode==="Dine-in"&&o.status!=="cancelled"&&!hasPayment(o)?" · NOT PAID":""))}${o.gcashRef?row("GCash Ref",esc(o.gcashRef)):""}${change}</table>
@@ -972,7 +972,7 @@ const printer=()=>BT?getPref("lugaw-printer",null):null;
 let printerMsg="";
 function receiptOf(o){
   const c=o.mode==="Dine-in"?null:contacts[o.id], first=o.paidTotal??o.total, adj=(o.settledTotal??first)-first;
-  return receiptBytes(o,receiptShop(),{ customer:c?.name, mobile:c?.phone, lines:mergedLines(o.items),
+  return receiptBytes(o,receiptShop(),{ type:orderType(o), customer:c?.name, mobile:c?.phone, lines:mergedLines(o.items),
     itemName:it=>ITEMS[it?.id]?.name||it?.name||"Item", cashFirst:first, adjust:adj,
     balance:hasPayment(o)?balanceOf(o):0, notPaid:o.mode==="Dine-in"&&o.status!=="cancelled"&&!hasPayment(o), finished:finishedInfo(o) });
 }
@@ -1085,7 +1085,7 @@ function renderShift(){
     const c=shiftDraft.counted, n=c===""||c==null?null:Math.floor(Number(c)), diff=n==null?null:n-s.expected;
     form=`<div class="shift-form"><b>Close shift: count the cash in the drawer</b>
       <p class="muted" style="margin:0;font-size:.85rem">${invDoc?"The kitchen will be asked to refill what's below standard stock.":"The owner hasn't set the standard stock yet, so the kitchen won't get a refill list."}</p>
-      ${s.unpaidCount?`<p class="flag" style="margin:0">${plural(s.unpaidCount,"dine-in order")} not paid yet (${peso(s.unpaid)}). Collect them before closing, or they stay unpaid.</p>`:""}
+      ${s.unpaidCount?`<p class="flag" style="margin:0">${plural(s.unpaidCount,"counter order")} not paid yet (${peso(s.unpaid)}). Collect them before closing, or they stay unpaid.</p>`:""}
       <div class="btnrow"><input type="number" inputmode="numeric" min="0" step="1" id="countedCash" value="${esc(c??"")}" placeholder="Cash counted" aria-label="Cash counted" style="max-width:170px">
         <button type="button" class="btn ghost small" data-sh="exact">Exactly ${peso(s.expected)}</button></div>
       <div id="closeDiff" style="font-weight:800">${diffText(diff)}</div>

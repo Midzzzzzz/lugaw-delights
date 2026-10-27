@@ -85,7 +85,7 @@
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
-import { soldOutFrom } from "./common.js";
+import { soldOutFrom, orderType } from "./common.js";
 import { auth, db, isConfigured, applyMenu, ingredientsLeft, trackerCount, belowStandard, esc, itemsHTML, phoneKey, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 
@@ -285,7 +285,7 @@ function render(){
     const [set,label]=dineIn?["completed","Served"]:del?["ready","Food ready"]:["ready_pickup","Ready for pickup"];
     return `<div class="kt${o.addedAt?" added":""}${min>=15?" late":""}">
       <div class="khead"><span class="kcode">${esc(o.code)}</span><span class="kwait">${min} min</span></div>
-      <div class="chips"><span class="pill ${del?"work":dineIn?"go":"brand"}">${esc(o.mode)}</span>${o.addedAt?`<span class="pill new">Items added</span>`:""}${o.table?`<span class="pill">${esc(o.table)}</span>`:""}</div>
+      <div class="chips"><span class="pill ${del||orderType(o)!=="Dine-in"?"work":dineIn?"go":"brand"}">${esc(orderType(o))}</span>${o.addedAt?`<span class="pill new">Items added</span>`:""}${o.table?`<span class="pill">${esc(o.table)}</span>`:""}</div>
       ${itemsHTML(o,false)}
       ${o.notes?`<div class="knotes">${esc(o.notes)}</div>`:""}
       <button class="btn big ok" data-set="${set}" data-id="${esc(o.id)}">${label}</button></div>`;
