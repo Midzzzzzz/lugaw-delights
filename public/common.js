@@ -316,14 +316,20 @@ export function fmtTime(ts) {
   const d = toDate(ts);
   return d ? d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" }) : "just now";
 }
+// Business days start at SHOP.dayStartHour (5 AM by default), not midnight: an order at 12:30 AM
+// belongs to the day the late shift started. businessDate(d) = that day, at midnight.
+export const DAY_START = () => Number(SHOP.dayStartHour ?? 5);
+export function businessDate(d) {
+  const x = new Date(d.getTime() - DAY_START() * 3600000);
+  return new Date(x.getFullYear(), x.getMonth(), x.getDate());
+}
 export function isToday(ts) {
   const d = toDate(ts); if (!d) return true;
-  const n = new Date();
-  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+  return businessDate(d).getTime() === businessDate(new Date()).getTime();
 }
 // Today's date on this phone as "2026-09-30"
 export function todayKey() {
-  const n = new Date();
+  const n = businessDate(new Date());
   return n.getFullYear() + "-" + String(n.getMonth() + 1).padStart(2, "0") + "-" + String(n.getDate()).padStart(2, "0");
 }
 export function mapsLink(address) {

@@ -115,7 +115,7 @@ import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot,
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
 import { findShifts } from "./pastshifts.js";
-import { saved, prepMinutes, orderType } from "./common.js";
+import { saved, prepMinutes, orderType, businessDate, DAY_START } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
@@ -219,16 +219,18 @@ function start(){
 // ---------- Date range ----------
 const RANGES=[["today","Today"],["yesterday","Yesterday"],["week","Last 7 days"],["month","This month"],["custom","Custom"]];
 const addDays=(d,n)=>{ const x=new Date(d); x.setDate(x.getDate()+n); return x; };
-const dayStart=d=>{ const x=new Date(d); x.setHours(0,0,0,0); return x; };
+// Start of the business day that d falls in (e.g. Oct 10, 5:00 AM for Oct 11, 12:30 AM)
+const dayStart=d=>{ const x=businessDate(d); x.setHours(DAY_START()); return x; };
+const dayAt=s=>{ const x=new Date(s+"T00:00"); x.setHours(DAY_START()); return x; }; // a picked date's business day
 const ymd=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 function rangeDates(){
   const t=dayStart(new Date());
   if(range==="yesterday") return [addDays(t,-1),t];
   if(range==="week") return [addDays(t,-6),addDays(t,1)];
-  if(range==="month") return [new Date(t.getFullYear(),t.getMonth(),1),addDays(t,1)];
+  if(range==="month") return [new Date(t.getFullYear(),t.getMonth(),1,DAY_START()),addDays(t,1)];
   if(range==="custom"){
     const f=$("#from")?.value, to=$("#to")?.value;
-    if(f && to){ const a=dayStart(new Date(f+"T00:00")), b=addDays(dayStart(new Date(to+"T00:00")),1); if(b>a) return [a,b]; }
+    if(f && to){ const a=dayAt(f), b=addDays(dayAt(to),1); if(b>a) return [a,b]; }
   }
   return [t,addDays(t,1)];
 }
@@ -319,9 +321,9 @@ function renderSales(done){
   if(oneDay){ done.forEach(o=>{ const h=o.createdAt?.toDate?.().getHours(); if(h!=null) buckets.set(h,(buckets.get(h)||0)+food(o)); }); }
   else {
     for(let d=new Date(a); d<b; d=addDays(d,1)) buckets.set(ymd(d),0); // every day shows, even with no sales
-    done.forEach(o=>{ const d=o.createdAt?.toDate?.(); if(d){ const k=ymd(d); buckets.set(k,(buckets.get(k)||0)+food(o)); } });
+    done.forEach(o=>{ const d=o.createdAt?.toDate?.(); if(d){ const k=ymd(businessDate(d)); buckets.set(k,(buckets.get(k)||0)+food(o)); } });
   }
-  let time=[...buckets.entries()].map(([k,v])=>({label:oneDay?new Date(2000,0,1,k).toLocaleTimeString("en-PH",{hour:"numeric"}):new Date(k+"T00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"}),value:v,k}));
+  let time=[...buckets.entries()].map(([k,v])=>({label:oneDay?new Date(2000,0,1,k).toLocaleTimeString("en-PH",{hour:"numeric"}):new Date(k+"T00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"}),value:v,k:oneDay?(k-DAY_START()+24)%24:k})); // a day's hours run from opening (5 AM) to 4 AM
   time.sort((x,y)=>x.k<y.k?-1:x.k>y.k?1:0);
   if(oneDay) time=time.filter(r=>r.value>0);
   const money=r=>peso(r.value);

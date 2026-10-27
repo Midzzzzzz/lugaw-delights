@@ -17,6 +17,9 @@ export const SHOP = {
   pickupAddress: "Tabi ng old Caltex / tapat ng Novo, Hi-way, Brgy. Batong Malake, Los Baños, Laguna",
   // printed at the top of receipts (the shop's address and number above are for customers and riders)
   receiptAddress: "Hi-way, Brgy. Batong Malake, Los Baños, Laguna",
+  // A business day starts at this hour (5 = 5:00 AM) and ends just before it the next morning, so
+  // sales after midnight count for the day the late shift started (reports, "today" lists)
+  dayStartHour: 5,
   boxFee: 10,                            // take-out box, per piece, for menu sections marked box: true
   deliveryNote: "We deliver within Los Baños and Bay, Laguna. The fee depends on your barangay.",
   gcashName: "Ruel Calica",
