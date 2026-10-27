@@ -356,7 +356,7 @@ function refillPageHTML(rows){
     body{font-family:ui-monospace,Consolas,monospace;font-size:13px;width:72mm;margin:8px auto;color:#000}h1{font-size:18px;text-align:center;margin:0}
     td{padding:2px 0;vertical-align:top}.r{text-align:right;white-space:nowrap;padding-left:8px}hr{border:0;border-top:1px dashed #000}@media print{button{display:none}}</style></head><body>
     <h1>TO REFILL</h1><div style="text-align:center">${esc(new Date().toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}</div><hr>
-    ${rows.length?`<table style="width:100%">${rows.map(r=>`<tr><td><b>${esc(r.name)}</b><br><small>on hand ${q(r.onHand)} of ${q(r.par)}</small></td><td class="r">need ${q(r.need)} ${esc(r.unit)}</td></tr>`).join("")}</table>`:"<p>Everything is at its standard stock. Nothing to refill.</p>"}
+    ${rows.length?`<table style="width:100%">${rows.map(r=>`<tr><td>${esc(r.name)}</td><td class="r">${q(r.need)} ${esc(r.unit)}</td></tr>`).join("")}</table>`:"<p>Everything is at its standard stock. Nothing to refill.</p>"}
     <hr><div style="text-align:center">For the kitchen</div><p style="text-align:center"><button onclick="print()">Print</button></p>
     <script>addEventListener("load",()=>setTimeout(print,300))<\/script></body></html>`;
 }
