@@ -111,7 +111,7 @@
         <div id="dineMenuWrap"><div class="cats" id="dineCats"></div><div class="tiles" id="dineMenu"></div></div>
         <form class="stack" id="dineForm" novalidate>
           <div id="dineCart"></div>
-          <div class="group"><span>Take-out?</span>
+          <div class="group"><span>Next items: eating here or take-out?</span>
             <div class="seg" style="grid-template-columns:repeat(3,1fr)">
               <input type="radio" name="dpack" id="d-pack-no" value="" checked><label for="d-pack-no">No, eating here</label>
               <input type="radio" name="dpack" id="d-pack-box" value="box"><label for="d-pack-box" id="d-pack-box-label">Box</label>
@@ -333,9 +333,14 @@ function syncStore(){
 
 // ---------- Dine-in orders (recorded at the counter) ----------
 const dine={};
-// Items in the dine-in panel; take-out items carry how they're packed (box or plastic)
+// Items in the dine-in panel, one line per item AND packing: "" eating here, "box" or "plastic"
+// for take-out. One order can mix them (the soup eaten here, two bowls boxed to go); only the
+// boxed lines pay the box fee. The choice above the cart sets the packing of the next tapped item.
 const dinePack=()=>document.querySelector('input[name="dpack"]:checked')?.value||"";
-const dineItems=()=>Object.entries(dine).map(([id,qty])=>({id,name:ITEMS[id].name,price:ITEMS[id].price,qty,...(dinePack()?{pack:dinePack()}:{})}));
+const dkey=(id,pack)=>id+"|"+(pack||""), dsplit=k=>{ const i=k.indexOf("|"); return [k.slice(0,i),k.slice(i+1)]; };
+const dineLines=()=>Object.entries(dine).map(([k,qty])=>{ const [id,pack]=dsplit(k); return {key:k,id,name:ITEMS[id].name,price:ITEMS[id].price,qty,...(pack?{pack}:{})}; });
+const dineItems=()=>dineLines().map(({key,...it})=>it); // what's saved on the order
+const dineQty=id=>Object.entries(dine).reduce((n,[k,q])=>n+(dsplit(k)[0]===id?q:0),0);
 // When adding to an existing dine-in order: that order (otherwise null)
 let addingTo=null;
 const dineErr=m=>{ $("#d-err").textContent=m||""; $("#d-err").hidden=!m; };
@@ -394,9 +399,9 @@ function schedulePublish(){
 // quantity raised on an order being changed. Returns an error message, or "" when it fits.
 function stockProblem(extra){
   const pack=dinePack()?{pack:dinePack()}:{};
-  const lines=[...Object.entries(dine).map(([id,qty])=>({id,qty,...pack}))];
+  const lines=dineItems().map(it=>({id:it.id,qty:it.qty,...(it.pack?{pack:it.pack}:{})}));
   if(addingTo) editLines.forEach((it,i)=>{ const more=it.qty-(addingTo.items[i]?.qty||0); if(more>0) lines.push({id:it.id,qty:more,pack:it.pack}); });
-  if(extra) lines.push({...extra,...pack});
+  if(extra) lines.push("pack" in extra ? extra : {...extra,...pack});
   const id=shortItem(lines,leftNow,"Dine-in"); if(!id) return "";
   const n=stockLeft(id);
   const shared=lines.some(l=>l.id!==id && Object.keys(ITEMS[l.id]?.recipe||{}).some(g=>g in (ITEMS[id]?.recipe||{})));
@@ -407,7 +412,7 @@ function renderDine(){
     .map(([id,l])=>`<button type="button" class="${dineCat===id?"on":""}" data-cat="${esc(id)}">${esc(l)}</button>`).join("");
   const cats=dineCat==="all"?MENU:MENU.filter(c=>c.id===dineCat);
   $("#dineMenu").innerHTML=cats.map(c=>(dineCat==="all"?`<h3>${esc(c.name)}</h3>`:"")+c.items.map(([id])=>{
-    const it=ITEMS[id], q=dine[id]||0;
+    const it=ITEMS[id], q=dineQty(id);
     const left=stockLeft(id);
     return `<button type="button" class="tile${q?" on":""}${left===0?" sold":""}" data-add="${id}"${left===0&&!q?" disabled":""} aria-label="Add ${esc(it.name)}, ${peso(it.price)}${q?`, ${q} in order`:""}${left!=null?(left?`, ${left} left`:", sold out"):""}">
       <span>${esc(it.name)}</span><span class="price">${peso(it.price)}${left!=null?` · <span class="left${left<=0?" out":left<=3?" low":""}">${left<=0?"sold out":left+" left"}</span>`:""}</span>${q?`<span class="qty" aria-hidden="true">${q}</span>`:""}</button>`;
@@ -420,8 +425,10 @@ function cashChoices(total){
   return [...new Set([total,up(50),up(100),up(500),up(1000),200,500,1000].filter(n=>n>=total))].sort((a,b)=>a-b).slice(0,5);
 }
 const cashLabel=(n,i)=>i?peso(n):`Exact ${peso(n)}`;
-const stepper=(id,q)=>`<span class="step"><button type="button" data-dd="-1" data-item="${id}" aria-label="One less">−</button><span>${q}</span><button type="button" data-dd="1" data-item="${id}" aria-label="One more"${q>=MAX_QTY?" disabled":""}>+</button></span>`;
-const ticketLine=it=>`<li><span>${esc(it.name)}<br><span class="muted" style="font-size:.82rem">${peso(it.price)}</span></span>${stepper(it.id,it.qty)}<span class="amt">${peso(it.price*it.qty)}</span></li>`;
+const stepper=(key,q)=>`<span class="step"><button type="button" data-dd="-1" data-item="${esc(key)}" aria-label="One less">−</button><span>${q}</span><button type="button" data-dd="1" data-item="${esc(key)}" aria-label="One more"${q>=MAX_QTY?" disabled":""}>+</button></span>`;
+const PACKS=["","box","plastic"], packName=p=>p==="box"?`Box +${peso(SHOP.boxFee)}`:p==="plastic"?"Take-out · plastic":"Eating here";
+const packChip=it=>`<button type="button" class="pill ${it.pack?"work":""}" data-pk="${esc(it.key)}" style="font-size:.72rem;border:0;cursor:pointer" title="Tap to change">${esc(packName(it.pack))}</button>`;
+const ticketLine=it=>`<li><span>${esc(it.name)} ${packChip(it)}<br><span class="muted" style="font-size:.82rem">${peso(it.price)}</span></span>${stepper(it.key,it.qty)}<span class="amt">${peso(it.price*it.qty)}</span></li>`;
 // Cash typed into "Cash received", or null when it's GCash or left blank
 function cashGiven(){
   const v=$("#d-given").value.trim();
@@ -432,14 +439,14 @@ const dinePay=()=>document.querySelector('input[name="dpay"]:checked').value;
 // editLines: a copy of the order's current lines whose quantities the seller can lower or raise.
 let editLines=[];
 const lineLabel=it=>esc(ITEMS[it.id]?.name||it.name)+(it.pack?` <span class="pill work" style="font-size:.7rem">Take-out · ${it.pack==="box"?"box":"plastic"}</span>`:"");
-function renderChangeCart(items){
-  const kept=editLines.filter(it=>it.qty>0), all=[...kept,...items], t=calcTotals(all,"Dine-in");
+function renderChangeCart(lines){
+  const items=lines.map(({key,...it})=>it), kept=editLines.filter(it=>it.qty>0), all=[...kept,...items], t=calcTotals(all,"Dine-in");
   const changed=items.length || editLines.some((it,i)=>it.qty!==addingTo.items[i].qty);
   $("#dineCart").innerHTML=`<b style="font-size:.9rem">Already ordered</b>
     <ul class="lines">${editLines.map((it,i)=>`<li style="${it.qty?"":"opacity:.5;text-decoration:line-through"}">
       <span class="step" style="display:inline-flex"><button type="button" data-el="${i}" data-ed="-1" aria-label="One less"${it.qty?"":" disabled"}>−</button><span>${it.qty}</span><button type="button" data-el="${i}" data-ed="1" aria-label="One more"${it.qty>=MAX_QTY?" disabled":""}>+</button></span>
       <span>${lineLabel(it)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
-    ${items.length?`<b style="font-size:.9rem">Adding</b><ul class="lines tl">${items.map(ticketLine).join("")}</ul>`:`<p class="muted" style="margin:0;font-size:.88rem">Tap the menu to add items.</p>`}
+    ${items.length?`<b style="font-size:.9rem">Adding</b><ul class="lines tl">${lines.map(ticketLine).join("")}</ul>`:`<p class="muted" style="margin:0;font-size:.88rem">Tap the menu to add items.</p>`}
     <div class="totals"><div><span>Was</span><span>${peso(addingTo.total)}</span></div>${boxRow(t)}<div class="grand"><span>New total</span><span>${peso(t.total)}</span></div>${afterPay(t.total)}</div>`;
   $("#dineSave").disabled=!changed || !all.length;
   dineBar(items, t.total, changed);
@@ -464,11 +471,11 @@ $("#dineBar").onclick=()=>$("#dineForm").scrollIntoView({behavior:"smooth",block
 $("#dineCart").addEventListener("click",e=>{
   const b=e.target.closest("[data-el]"); if(!b||!addingTo) return;
   const it=editLines[+b.dataset.el];
-  if(+b.dataset.ed>0){ const p=stockProblem({id:it.id,qty:1}); if(p) return dineErr(p); }
+  if(+b.dataset.ed>0){ const p=stockProblem({id:it.id,qty:1,pack:it.pack||""}); if(p) return dineErr(p); }
   dineErr(); it.qty=Math.max(0,Math.min(MAX_QTY,it.qty+ +b.dataset.ed)); renderDineTotals();
 });
 function renderDineTotals(){
-  const items=dineItems(), t=calcTotals(items,"Dine-in"), given=cashGiven();
+  const lines=dineLines(), items=dineItems(), t=calcTotals(items,"Dine-in"), given=cashGiven();
   $("#givenWrap").hidden=dinePay()!=="Cash" || !!addingTo;
   $("#gcashWrap").hidden=dinePay()!=="GCash" || !!addingTo;
   $("#gcashChips").innerHTML=`<button type="button" class="${gcashNow?"":"on"}" data-gcash-now="">Pay later</button>
@@ -480,9 +487,9 @@ function renderDineTotals(){
   const change = given===null ? "" : given>=t.total
     ? `<div><span>Cash received</span><span>${peso(given)}</span></div><div class="grand"><span>Change</span><span>${peso(given-t.total)}</span></div>`
     : `<div style="color:var(--brand-deep);font-weight:700"><span>Short by</span><span>${peso(t.total-given)}</span></div>`;
-  if(addingTo) return renderChangeCart(items);
+  if(addingTo) return renderChangeCart(lines);
   $("#dineCart").innerHTML=items.length
-    ? `<ul class="lines tl">${items.map(ticketLine).join("")}</ul>
+    ? `<ul class="lines tl">${lines.map(ticketLine).join("")}</ul>
        <div class="totals">${boxRow(t)}<div class="grand"><span>Total</span><span>${peso(t.total)}</span></div>${change}</div>`
     : `<p class="empty" style="margin:0">Tap the menu to add items.</p>`;
   $("#dineSave").disabled=!items.length;
@@ -508,20 +515,30 @@ $("#dineBtn").onclick=()=>{
   if(!shift){ shiftMsg="Open a shift first: count the cash in the drawer and tap Open shift."; renderShift(); $("#shiftCard").scrollIntoView({behavior:"smooth",block:"center"}); return; }
   if(addingTo) closeDine(); $("#dinePanel").hidden=false; renderDine(); $("#dinePanel").scrollIntoView({behavior:"smooth",block:"start"}); };
 $("#dineClose").onclick=closeDine;
-function changeQty(id,d){
-  const q=(dine[id]||0)+d;
+function changeQty(key,d){
+  const [id,pack]=dsplit(key), q=(dine[key]||0)+d;
   // not enough ingredients left for another one (counting the whole order)
-  if(d>0){ const p=stockProblem({id,qty:d}); if(p) return dineErr(p); }
+  if(d>0){ const p=stockProblem({id,qty:d,pack}); if(p) return dineErr(p); }
   const used=(addingTo?.items?.length||0)+Object.keys(dine).length;
-  if(!dine[id] && used>=MAX_LINES) return dineErr(`Up to ${MAX_LINES} lines per order. Start a new dine-in order for more.`);
-  dineErr(); if(q>0) dine[id]=Math.min(q,MAX_QTY); else delete dine[id];
+  if(!dine[key] && used>=MAX_LINES) return dineErr(`Up to ${MAX_LINES} lines per order. Start a new dine-in order for more.`);
+  dineErr(); if(q>0) dine[key]=Math.min(q,MAX_QTY); else delete dine[key];
   renderDine();
+}
+// Tapping a line's packing label moves it to the next packing (eating here -> box -> plastic)
+function changePack(key){
+  const [id,pack]=dsplit(key), next=PACKS.at((PACKS.indexOf(pack)+1)%PACKS.length), to=dkey(id,next), q=dine[key]||0;
+  if(!q) return;
+  const moved={...dine}; delete moved[key]; moved[to]=Math.min(MAX_QTY,(moved[to]||0)+q);
+  const before={...dine}; Object.keys(dine).forEach(k=>delete dine[k]); Object.assign(dine,moved);
+  const p=stockProblem(); if(p){ Object.keys(dine).forEach(k=>delete dine[k]); Object.assign(dine,before); return dineErr(p); } // a box may run out
+  dineErr(); renderDine();
 }
 $("#dinePanel").addEventListener("click",e=>{
   const c=e.target.closest("[data-cat]"); if(c){ dineCat=c.dataset.cat; renderDine(); return; }
   const g=e.target.closest("[data-gcash-now]"); if(g){ gcashNow=!!g.dataset.gcashNow; renderDineTotals(); return; }
   const m=e.target.closest("[data-cash]"); if(m){ $("#d-given").value=m.dataset.cash; renderDineTotals(); return; }
-  const a=e.target.closest("[data-add]"); if(a) return changeQty(a.dataset.add,1);
+  const pk=e.target.closest("[data-pk]"); if(pk) return changePack(pk.dataset.pk);
+  const a=e.target.closest("[data-add]"); if(a) return changeQty(dkey(a.dataset.add,dinePack()),1);
   const s=e.target.closest("[data-dd]"); if(s) changeQty(s.dataset.item,+s.dataset.dd);
 });
 $("#dineForm").onsubmit=async e=>{
