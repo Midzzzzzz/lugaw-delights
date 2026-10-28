@@ -28,6 +28,13 @@ await t("a sale dated in the future refused", () => assertFails(setDoc(doc(owner
 await t("a sale whose total doesn't add up refused", () => assertFails(setDoc(doc(owner, "orders/m4"), sale({ total: 10, cashGiven: 10, paidTotal: 10 }))));
 await t("a sale not marked as added by hand refused", () => assertFails(setDoc(doc(owner, "orders/m5"), sale({ manual: false }))));
 await t("a sale credited to someone else refused", () => assertFails(setDoc(doc(owner, "orders/m6"), sale({ sellerUid: "s1" }))));
+const fpSale = (o = {}) => (({ cashGiven, ...r }) => r)(sale({ payment: "Foodpanda", source: "foodpanda", paid: true, items: [{ id: "L01", name: "Plain Lugaw", price: 39, qty: 2, pack: "box" }], boxFee: 20, total: 98, paidTotal: 98, ...o }));
+await t("owner adds a Foodpanda order dated last week, with its order number", () => assertSucceeds(setDoc(doc(owner, "orders/fp7"), fpSale({ platformRef: "#fp-9" }))));
+await t("owner adds a Grab order dated last week", () => assertSucceeds(setDoc(doc(owner, "orders/fp8"), fpSale({ payment: "Grab", source: "grab" }))));
+await t("a Foodpanda sale saved as Grab refused", () => assertFails(setDoc(doc(owner, "orders/fp9"), fpSale({ payment: "Grab" }))));
+await t("a Foodpanda sale paid in cash refused", () => assertFails(setDoc(doc(owner, "orders/fp10"), { ...fpSale(), cashGiven: 98 })));
+await t("a cash sale with a platform order number refused", () => assertFails(setDoc(doc(owner, "orders/fp11"), sale({ platformRef: "#x" }))));
+await t("a seller can't add a past Foodpanda sale", () => assertFails(setDoc(doc(s1, "orders/fp12"), { ...fpSale(), customerUid: "s1", sellerUid: "s1", addedBy: "s1" })));
 await t("a past sale that's still being cooked refused", () => assertFails(setDoc(doc(owner, "orders/m7"), sale({ status: "preparing" }))));
 await t("imported Loyverse delivery receipt with its delivery fee", () => assertSucceeds(setDoc(doc(owner, "orders/loyverse-5-0061"),
   sale({ mode: "Delivery", deliveryFee: 45, boxFee: 10, total: 133, cashGiven: 133, paidTotal: 133, source: "loyverse", receipt: "5-0061" }))));
