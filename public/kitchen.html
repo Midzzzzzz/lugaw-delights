@@ -285,7 +285,7 @@ function render(){
     const [set,label]=dineIn?["completed","Served"]:del?["ready","Food ready"]:["ready_pickup","Ready for pickup"];
     return `<div class="kt${o.addedAt?" added":""}${min>=15?" late":""}">
       <div class="khead"><span class="kcode">${esc(o.code)}</span><span class="kwait">${min} min</span></div>
-      <div class="chips"><span class="pill ${del||orderType(o)!=="Dine-in"?"work":dineIn?"go":"brand"}">${esc(orderType(o))}</span>${o.addedAt?`<span class="pill new">Items added</span>`:""}${o.table?`<span class="pill">${esc(o.table)}</span>`:""}</div>
+      <div class="chips"><span class="pill ${del||orderType(o)!=="Dine-in"?"work":dineIn?"go":"brand"}">${esc(orderType(o))}</span>${o.addedAt?`<span class="pill new">Items added</span>`:""}${o.table?`<span class="pill">${esc(o.table)}</span>`:""}${o.platformRef?`<span class="pill">${esc(o.platformRef)}</span>`:""}</div>
       ${itemsHTML(o,false)}
       ${o.notes?`<div class="knotes">${esc(o.notes)}</div>`:""}
       <button class="btn big ok" data-set="${set}" data-id="${esc(o.id)}">${label}</button></div>`;

@@ -195,7 +195,7 @@ const ms = t => t?.toMillis?.() ?? (t instanceof Date ? t.getTime() : null);
 export function shiftSummary(shift, orders, now = Date.now()) {
   const from = ms(shift.openedAt) ?? now, to = ms(shift.closedAt) ?? now;
   const inShift = t => t != null && t >= from && t < to + 1;
-  const s = { orders: 0, sales: 0, cashSales: 0, gcashSales: 0, riderCash: 0, adjustIn: 0, adjustOut: 0, unpaid: 0, unpaidCount: 0, cancelled: 0,
+  const s = { orders: 0, sales: 0, cashSales: 0, gcashSales: 0, platformSales: 0, riderCash: 0, adjustIn: 0, adjustOut: 0, unpaid: 0, unpaidCount: 0, cancelled: 0,
     payIn: 0, payOut: 0, startCash: shift.startCash || 0 };
   orders.forEach(o => {
     if (o.manual) return;
@@ -208,6 +208,7 @@ export function shiftSummary(shift, orders, now = Date.now()) {
       return;
     }
     if (!inShift(made)) return;
+    if (o.source) { s.platformSales += o.total || 0; return; } // Foodpanda / Grab pay the shop later, not into the drawer
     // pickup orders are paid at the counter when they're collected
     if (o.mode === "Pickup") { if (o.status === "completed") { if (o.payment === "GCash") s.gcashSales += o.total || 0; else s.cashSales += o.total || 0; } return; }
     const paid = o.cashGiven != null || o.paid === true, first = o.paidTotal ?? o.total ?? 0;
@@ -364,8 +365,12 @@ export function chime() {
 export function orderType(o) {
   if (o?.mode !== "Dine-in") return o?.mode || "";
   const items = o.items || [], out = items.filter(it => it?.pack).length;
-  return !out ? "Dine-in" : out === items.length ? "Take-out" : "Dine-in + take-out";
+  const type = !out ? "Dine-in" : out === items.length ? "Take-out" : "Dine-in + take-out";
+  return platformName(o) ? `${platformName(o)} · ${type}` : type;
 }
+// Orders from Foodpanda and Grab, which the seller enters so the kitchen and the inventory see them
+export const PLATFORMS = { foodpanda: "Foodpanda", grab: "Grab" };
+export const platformName = o => PLATFORMS[o?.source] || "";
 
 // Minutes the kitchen took: from when the order (or the items added to it) went to the kitchen
 // until the kitchen marked it served / food ready / ready for pickup. null when unknown.

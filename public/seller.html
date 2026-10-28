@@ -118,12 +118,17 @@
               <input type="radio" name="dpack" id="d-pack-plastic" value="plastic"><label for="d-pack-plastic">Plastic (free)</label>
             </div>
           </div>
-          <div class="group" id="dinePayWrap"><span>Payment</span>
-            <div class="seg">
+          <div class="group" id="dinePayWrap"><span>Payment <small class="muted" style="font-weight:400">Foodpanda or Grab: an order from their tablet</small></span>
+            <div class="seg" style="grid-template-columns:repeat(4,1fr)">
               <input type="radio" name="dpay" id="d-cash" value="Cash" checked><label for="d-cash">Cash</label>
               <input type="radio" name="dpay" id="d-gc" value="GCash"><label for="d-gc">GCash</label>
+              <input type="radio" name="dpay" id="d-fp" value="foodpanda"><label for="d-fp">Foodpanda</label>
+              <input type="radio" name="dpay" id="d-grab" value="grab"><label for="d-grab">Grab</label>
             </div>
           </div>
+          <div class="group" id="platformWrap" hidden><span id="platformLabel">Order number</span>
+            <input id="d-pref" maxlength="30" autocomplete="off" placeholder="Optional, e.g. #a1b2-c3d4" aria-label="Order number on the platform">
+            <small class="muted">Already paid through the app: no cash is taken. It still goes to the kitchen and comes off the inventory.</small></div>
           <div class="group" id="givenWrap"><span>Cash received</span>
             <div class="quick" id="cashChips"></div>
             <input id="d-given" type="number" inputmode="numeric" min="0" step="1" placeholder="Other amount" aria-label="Other cash amount"></div>
@@ -143,7 +148,7 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
-import { prepMinutes, orderType } from "./common.js";
+import { prepMinutes, orderType, PLATFORMS } from "./common.js";
 import { shiftSummary } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -471,6 +476,8 @@ function renderDineTotals(){
   const lines=dineLines(), items=dineItems(), t=calcTotals(items,"Dine-in"), given=cashGiven();
   $("#givenWrap").hidden=dinePay()!=="Cash" || !!addingTo;
   $("#gcashWrap").hidden=dinePay()!=="GCash" || !!addingTo;
+  $("#platformWrap").hidden=!PLATFORMS[dinePay()] || !!addingTo;
+  $("#platformLabel").textContent=`${PLATFORMS[dinePay()]||""} order number`;
   $("#gcashChips").innerHTML=`<button type="button" class="${gcashNow?"":"on"}" data-gcash-now="">Pay later</button>
     <button type="button" class="${gcashNow?"on":""}" data-gcash-now="1">GCash received${items.length?` · ${peso(t.total)}`:""}</button>`;
   $("#dineSave").textContent=addingTo?"Save changes":items.length?`Send to kitchen · ${peso(t.total)}`:"Send to kitchen";
@@ -494,8 +501,12 @@ document.querySelectorAll('input[name="dpack"]').forEach(r=>r.addEventListener("
   if(lastKey && dine[lastKey]) changePack(lastKey,dinePack()); else renderDine(); // "N left" changes with boxes
 }));
 $("#d-pack-box-label").textContent=`Box (+${peso(SHOP.boxFee)} each)`;
-document.querySelectorAll('input[name="dpay"]').forEach(r=>r.addEventListener("change",renderDineTotals));
-function closeDine(){ lastKey=null; Object.keys(dine).forEach(k=>delete dine[k]); dineCat="all"; gcashNow=false; $("#d-given").value=""; $("#d-cash").checked=true; $("#d-pack-no").checked=true; dineErr(); $("#dinePanel").hidden=true; $("#dineBar").hidden=true; setAdding(null); }
+document.querySelectorAll('input[name="dpay"]').forEach(r=>r.addEventListener("change",()=>{
+  // Foodpanda and Grab orders go out packed: what's in the order so far and what's tapped next
+  if(PLATFORMS[dinePay()] && dinePack()===""){ $("#d-pack-box").checked=true; Object.keys(dine).filter(k=>dsplit(k)[1]==="").forEach(k=>changePack(k,"box")); }
+  renderDineTotals();
+}));
+function closeDine(){ lastKey=null; Object.keys(dine).forEach(k=>delete dine[k]); dineCat="all"; gcashNow=false; $("#d-given").value=""; $("#d-pref").value=""; $("#d-cash").checked=true; $("#d-pack-no").checked=true; dineErr(); $("#dinePanel").hidden=true; $("#dineBar").hidden=true; setAdding(null); }
 // Switch the panel between a new dine-in order and adding to an existing one
 function setAdding(o){
   addingTo=o;
@@ -572,14 +583,17 @@ $("#dineForm").onsubmit=async e=>{
   const t=calcTotals(items,"Dine-in"), ref=doc(collection(db,"orders")), given=cashGiven();
   if(given!==null && !(given>=t.total)) return dineErr(`Cash received is less than the ${peso(t.total)} total.`);
   $("#dineSave").disabled=true;
+  const src=PLATFORMS[dinePay()]?dinePay():null, pref=$("#d-pref").value.trim().slice(0,30);
   const order={ code:orderCode(ref.id), customerUid:me.uid, sellerUid:me.uid, sellerName:myName, mode:"Dine-in",
-    table:"", notes:"", payment:dinePay(), items,
+    table:"", notes:"", payment:src?PLATFORMS[src]:dinePay(), items,
     subtotal:t.subtotal, deliveryFee:0, boxFee:t.boxFee, total:t.total, status:"preparing", riderUid:null, createdAt:serverTimestamp() };
-  if(given!==null) Object.assign(order,{cashGiven:given,paidTotal:t.total});
+  // Foodpanda / Grab: paid through the platform, at menu prices
+  if(src) Object.assign(order,{source:src,paid:true,paidAt:serverTimestamp(),paidTotal:t.total,...(pref?{platformRef:pref}:{})});
+  else if(given!==null) Object.assign(order,{cashGiven:given,paidTotal:t.total});
   if(dinePay()==="GCash" && gcashNow) Object.assign(order,{paid:true,paidAt:serverTimestamp(),paidTotal:t.total});
   try{
     await setDoc(ref,order);
-    afterPayment({id:ref.id,...order,createdAt:null}, given!==null?"cash":order.paid?"gcash":"");
+    afterPayment({id:ref.id,...order,createdAt:null}, src?"":given!==null?"cash":order.paid?"gcash":"");
     closeDine(); tab="kitchen"; render();
   }catch(x){ dineErr(friendlyError(x)); $("#dineSave").disabled=false; }
 };
@@ -746,7 +760,7 @@ function orderCard(o){
       ${dineIn?(o.table?`<b>Table/Customer</b><span style="font-size:1.1rem;font-weight:800">${esc(o.table)}</span>`:"")
         :`<b>Customer</b><span>${c?`${esc(c.name)} · <a class="num" href="${esc(telLink(c.phone))}">${esc(c.phone)}</a><br>${phoneBadge(c.phone)}`:`<span class="muted">Loading…</span>`}</span>`}
       ${del?`<b>Address</b><span>${esc(o.address)} · <a href="${mapsLink(o.address)}" target="_blank" rel="noopener">Map</a></span>`:""}
-      <b>Payment</b><span>${o.payment==="GCash"?(dineIn?"GCash":gcashLine(o)):"Cash"}</span>
+      <b>Payment</b><span>${o.source?`${esc(o.payment)} (paid in the app)${o.platformRef?` · order <b class="num">${esc(o.platformRef)}</b>`:""}`:o.payment==="GCash"?(dineIn?"GCash":gcashLine(o)):"Cash"}</span>
       ${o.notes?`<b>Notes</b><span>${esc(o.notes)}</span>`:""}${o.sellerName?`<b>Seller</b><span>${esc(o.sellerName)}</span>`:""}${rider}${payAtPickup}${settle}
       ${o.cancelledBy?`<b>Cancelled by</b><span>${esc(o.cancelledBy)}${o.cancelReason?`: ${esc(o.cancelReason)}`:""}</span>`:""}</div>
     ${itemsHTML(o,true)}${removedHTML(o)}
@@ -781,7 +795,7 @@ function cashBlock(o){
     : due+cashInput(o);
   const first=o.paidTotal??o.total;
   const paid=o.payment!=="Cash"
-    ? `<div><span class="pill done">Paid</span> GCash ${peso(first)}${o.gcashRef?` · Ref <b class="num">${esc(o.gcashRef)}</b>`:""}</div>${refReused(o)}`
+    ? `<div><span class="pill done">Paid</span> ${o.source?esc(o.payment):"GCash"} ${peso(first)}${o.gcashRef?` · Ref <b class="num">${esc(o.gcashRef)}</b>`:""}</div>${refReused(o)}`
     : `<div class="totals"><div><span>Paid (cash)</span><span>${peso(o.cashGiven)}</span></div>
        <div class="grand"><span>Change</span><span>${peso(o.cashGiven-first)}</span></div></div>`;
   return paid+adjustLine(o)+balanceBlock(o);
@@ -909,7 +923,7 @@ function receiptHTML(o){
     const k=ITEMS[it?.id], qty=Number(it?.qty)||0, price=Number(it?.price)||0;
     return row(`${esc(qty)} × ${esc(k?k.name:"Item "+String(it?.id??""))}<br><small>@ ${peso(price)}</small>`, peso(price*qty));
   }).join("");
-  const who=o.mode==="Dine-in" ? (o.table?row("Table/Customer",esc(o.table)):"")
+  const who=o.mode==="Dine-in" ? (o.table?row("Table/Customer",esc(o.table)):"")+(o.platformRef?row(`${esc(o.payment)} order`,esc(o.platformRef)):"")
     : (c?row("Customer",esc(c.name))+row("Mobile",esc(c.phone)):"")+(o.mode==="Delivery"?`<tr><td colspan="2">Deliver to: ${esc(o.address)}</td></tr>`:"");
   const first=o.paidTotal??o.total, adj=(o.settledTotal??first)-first, bal=balanceOf(o);
   const change=(o.cashGiven!=null ? row("Cash",peso(o.cashGiven))+row("Change",peso(o.cashGiven-first),"big") : "")
@@ -1094,7 +1108,7 @@ const diffText=d=>d==null?"":d===0?`<span style="color:var(--ok)">Cash is exact<
 function shiftTable(s){
   const row=(l,v,b)=>`<div${b?' class="grand"':""}><span>${l}</span><span>${v}</span></div>`;
   return `<div class="totals" style="margin-top:8px;max-width:420px">
-    ${row("Orders",s.orders)}${row("Sales",peso(s.sales))}${row("GCash received",peso(s.gcashSales))}${s.unpaidCount?row(`Not paid yet (${s.unpaidCount})`,peso(s.unpaid)):""}${s.cancelled?row("Cancelled orders",s.cancelled):""}
+    ${row("Orders",s.orders)}${row("Sales",peso(s.sales))}${row("GCash received",peso(s.gcashSales))}${s.platformSales?row("Foodpanda / Grab",peso(s.platformSales)):""}${s.unpaidCount?row(`Not paid yet (${s.unpaidCount})`,peso(s.unpaid)):""}${s.cancelled?row("Cancelled orders",s.cancelled):""}
     <div style="border-top:1px dashed var(--line);margin:4px 0"></div>
     ${row("Starting cash",peso(s.startCash))}${row("Cash sales",peso(s.cashSales))}${s.riderCash?row("Cash from riders",peso(s.riderCash)):""}
     ${s.adjustIn?row("Extra collected",peso(s.adjustIn)):""}${s.adjustOut?row("Given back","−"+peso(s.adjustOut)):""}

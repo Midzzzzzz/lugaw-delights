@@ -6,13 +6,13 @@ const ms = t => t?.toMillis?.() ?? (t instanceof Date ? t.getTime() : (typeof t 
 
 // Totals for a past shift. No drawer was counted then, so "expected" is just the cash taken.
 export function pastSummary(orders) {
-  const s = { orders: 0, sales: 0, cashSales: 0, gcashSales: 0, cancelled: 0, deliveryFees: 0, startCash: 0, riderCash: 0,
+  const s = { orders: 0, sales: 0, cashSales: 0, gcashSales: 0, platformSales: 0, cancelled: 0, deliveryFees: 0, startCash: 0, riderCash: 0,
     adjustIn: 0, adjustOut: 0, payIn: 0, payOut: 0, unpaid: 0, unpaidCount: 0 };
   orders.forEach(o => {
     if (o.status === "cancelled") { s.cancelled++; return; }
     const shop = (o.total || 0) - (o.deliveryFee || 0);
     s.orders++; s.sales += shop; s.deliveryFees += o.deliveryFee || 0;
-    if (o.payment === "GCash") s.gcashSales += shop; else s.cashSales += shop;
+    if (o.source) s.platformSales += shop; else if (o.payment === "GCash") s.gcashSales += shop; else s.cashSales += shop;
   });
   s.expected = s.cashSales;
   return s;

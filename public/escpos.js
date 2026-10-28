@@ -142,6 +142,7 @@ export function shiftBytes(s, shift, shop) {
   if (shift.closedAt !== null && shift.closedAt !== undefined) { lr("Closed", t(shift.closedAt)); lr("by", shift.closedByName || ""); }
   rule();
   lr("Orders", String(s.orders)); lr("Sales", money(s.sales)); lr("GCash", money(s.gcashSales));
+  if (s.platformSales) lr("Foodpanda / Grab", money(s.platformSales));
   if (s.unpaidCount) lr(`Unpaid (${s.unpaidCount})`, money(s.unpaid));
   rule();
   lr("Starting cash", money(s.startCash)); lr("Cash sales", money(s.cashSales));

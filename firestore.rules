@@ -486,10 +486,19 @@ service cloud.firestore {
       // Dine-in order a seller (or the owner) records at the counter. Goes straight to
       // the kitchen, no delivery fee, no contact details, works even when online
       // ordering is closed. Credited to whoever records it.
+      // A Foodpanda or Grab order is recorded the same way (source), at menu prices, so the
+      // kitchen sees it and it comes off the inventory. The platform pays the shop later, so it's
+      // saved as paid by that platform (never cash in the drawer), with the platform's order number.
+      function platformOk(d) {
+        return !('source' in d) ? (d.payment in ['Cash', 'GCash'] && !('platformRef' in d))
+          : ((d.source == 'foodpanda' && d.payment == 'Foodpanda') || (d.source == 'grab' && d.payment == 'Grab'))
+            && d.get('paid', false) == true && !('cashGiven' in d) && !('gcashRef' in d)
+            && (!('platformRef' in d) || str(d.platformRef, 30));
+      }
       function dineIn(d) {
         return d.keys().hasOnly(
              ['code','customerUid','mode','table','notes','payment','cashGiven','paid','paidAt','gcashRef','paidTotal','sellerUid','sellerName',
-              'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt'])
+              'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt','source','platformRef'])
           && d.customerUid == uid()
           // paidTotal: the total the payment covered (changes after paying show a balance)
           && (!('paidTotal' in d) || ((('cashGiven' in d) || ('paid' in d)) && d.paidTotal == d.total))
@@ -497,12 +506,12 @@ service cloud.firestore {
           && d.mode == 'Dine-in'
           && (!('cashGiven' in d) || (amount(d.cashGiven) && d.cashGiven >= d.total))
           // paid by GCash at the counter: the seller taps "GCash received" (a Ref No. is optional)
-          && (!('paid' in d) || (d.paid == true && d.payment == 'GCash' && d.paidAt == request.time
+          && (!('paid' in d) || (d.paid == true && (d.payment == 'GCash' || ('source' in d)) && d.paidAt == request.time
                 && (!('gcashRef' in d) || (d.gcashRef is string && d.gcashRef.matches('[0-9A-Za-z]{6,20}')))))
           && (!('gcashRef' in d) || ('paid' in d))
           && d.status == 'preparing'
           && d.riderUid == null
-          && d.payment in ['Cash', 'GCash']
+          && platformOk(d)
           && okItems(d.items)
           && amount(d.subtotal) && d.subtotal > 0
           && d.deliveryFee == 0 && boxOk(d) && d.total == d.subtotal + d.get('boxFee', 0)
@@ -575,8 +584,10 @@ service cloud.firestore {
             && !(resource.data.status in ['new', 'assigned'] && request.resource.data.status == 'preparing'
                  && resource.data.payment == 'GCash' && resource.data.mode != 'Dine-in'
                  && !('gcashRef' in resource.data) && !('payShotAt' in resource.data))
-            // A paid order can't be cancelled (the sale stays on the books)
+            // A paid order can't be cancelled (the sale stays on the books). A Foodpanda or Grab
+            // order can: the platform may cancel it, and then the shop is never paid for it.
             && !(resource.data.mode == 'Dine-in' && request.resource.data.status == 'cancelled' && resource.data.status != 'cancelled'
+                 && !('source' in resource.data)
                  && (('cashGiven' in resource.data) || resource.data.get('paid', false) == true))
             // Payment is recorded once: cash received (covering the total) or GCash marked received
             && (!changed().hasAny(['cashGiven']) || (!('cashGiven' in resource.data)
@@ -596,7 +607,7 @@ service cloud.firestore {
             && (!changed().hasAny(['settledTotal']) || (resource.data.mode == 'Dine-in' && ('paidTotal' in resource.data)
                  && request.resource.data.settledTotal == resource.data.total))
             // (items, prices, box fees and the removal log only change through the dine-in change rule below)
-            && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','boxFee','total','payment','createdAt',
+            && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','boxFee','total','payment','createdAt','source','platformRef',
                                   'addedAt','removed','editedAt','editedBy','editedByName'])
             && (!changed().hasAny(['cancelReason']) || str(request.resource.data.cancelReason, 150))
             && (!changed().hasAny(['sellerUid','sellerName'])
