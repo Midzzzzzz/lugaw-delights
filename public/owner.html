@@ -115,7 +115,7 @@ import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot,
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
 import { findShifts } from "./pastshifts.js";
-import { saved, prepMinutes, orderType, businessDate, DAY_START, platformName, boxRow, SHOP } from "./common.js";
+import { saved, prepMinutes, orderType, businessDate, DAY_START, platformName, boxRow, SHOP, PLATFORMS } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
@@ -1071,45 +1071,60 @@ $("#view").addEventListener("click",async e=>{
 // as a finished, paid dine-in order on the date and time picked, so it counts in that day's sales.
 const pad2=n=>String(n).padStart(2,"0");
 const hm=d=>pad2(d.getHours())+":"+pad2(d.getMinutes());
-let saleOpen=false, saleLines={}, saleCat=0, salePay="Cash", saleDate="", saleTime="", saleNotes="", saleMsg="", saleRef="", salePack="box";
-// Paid by: Cash, GCash, or a Foodpanda / Grab order (packed to go, so the boxes come off the inventory too)
-const SALE_PAYS=["Cash","GCash","Foodpanda","Grab"], saleSrc=()=>({Foodpanda:"foodpanda",Grab:"grab"})[salePay]||null;
-const saleItems=()=>Object.entries(saleLines).filter(([,q])=>q>0).map(([id,qty])=>({id,name:ITEMS[id]?.name||id,price:ITEMS[id]?.price||0,qty,...(saleSrc()?{pack:salePack}:{})}));
+let saleOpen=false, saleLines={}, saleCat=0, salePay="Cash", saleDate="", saleTime="", saleNotes="", saleMsg="", saleRef="", salePack="box", saleType="dine", saleFee="";
+// Where the sale came from. Delivery adds a take-out box for each item that needs one (like an
+// order from the website); take-out, Foodpanda and Grab are packed in a box or plastic. Foodpanda
+// and Grab are paid by the platform; the rest by cash or GCash.
+const SALE_TYPES=[["dine","Dine-in"],["takeout","Take-out"],["delivery","Lugaw Delights delivery"],["foodpanda","Foodpanda"],["grab","Grab"]];
+const saleSrc=()=>PLATFORMS[saleType]?saleType:null, saleMode=()=>saleType==="delivery"?"Delivery":"Dine-in";
+const saleFeeNow=()=>saleType==="delivery"?Math.max(0,Math.floor(Number(saleFee)||0)):0;
+const salePacks=()=>["takeout","foodpanda","grab"].includes(saleType);
+const saleItems=()=>Object.entries(saleLines).filter(([,q])=>q>0).map(([id,qty])=>({id,name:ITEMS[id]?.name||id,price:ITEMS[id]?.price||0,qty,...(salePacks()?{pack:salePack}:{})}));
+const saleTotals=()=>calcTotals(saleItems(),saleMode(),saleFeeNow());
 const saleMenu=()=>savedMenu().filter(c=>(c.items||[]).length);
 function saleForm(){
   const cats=saleMenu(); if(saleCat>=cats.length) saleCat=0;
   const c=cats[saleCat], items=saleItems();
-  const t=calcTotals(items,"Dine-in");
+  const t=saleTotals();
   return `<section class="card" style="margin-top:12px"><h2 style="color:var(--brand-deep)">Add a sale</h2>
     <p class="muted" style="font-size:.88rem;margin:4px 0 8px">For a sale that wasn't recorded in the app, for example from an earlier day. It's saved as paid and counts in that day's sales.</p>
     <div class="toolbar"><label class="f" for="saleDate">Date<input type="date" id="saleDate" max="${ymd(new Date())}" value="${esc(saleDate)}"></label>
       <label class="f" for="saleTime">Time<input type="time" id="saleTime" value="${esc(saleTime)}"></label></div>
+    <div class="toolbar" style="margin-top:8px"><span class="muted" style="font-weight:700">Order type</span>
+      ${SALE_TYPES.map(([k,l])=>`<button class="chip ${saleType===k?"on":""}" data-stype="${k}">${l}</button>`).join("")}</div>
     <div class="cats2" style="margin-top:10px">${cats.map((s,i)=>`<button class="chip ${i===saleCat?"on":""}" data-scat="${i}">${esc(s.name)}</button>`).join("")}</div>
     <div class="srows">${(c?.items||[]).map(it=>{ const q=saleLines[it.id]||0; return `<div class="srow"><span>${esc(it.name)} <span class="muted">${peso(it.price)}</span></span>
       <span class="sstep"><button data-sq="${esc(it.id)}" data-d="-1" aria-label="One less"${q?"":" disabled"}>−</button><b>${q}</b><button data-sq="${esc(it.id)}" data-d="1" aria-label="One more">+</button></span></div>`; }).join("")}</div>
     ${items.length?`<ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${esc(it.name)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
-      <div class="totals">${boxRow(t)}<div class="grand"><span>Total</span><span>${peso(t.total)}</span></div></div>`:`<p class="muted" style="font-size:.88rem">Tap + on what was sold.</p>`}
-    <div class="toolbar" style="margin-top:8px"><span class="muted" style="font-weight:700">Paid by</span>
-      ${SALE_PAYS.map(p=>`<button class="chip ${salePay===p?"on":""}" data-spay="${p}">${p}</button>`).join("")}</div>
-    ${saleSrc()?`<div class="toolbar" style="margin-top:8px"><span class="muted" style="font-weight:700">Packed in</span>
-      ${[["box",`Box (+${peso(SHOP.boxFee)} each)`],["plastic","Plastic (free)"]].map(([k,l])=>`<button class="chip ${salePack===k?"on":""}" data-spack="${k}">${l}</button>`).join("")}</div>
-      <label class="f" for="saleRef" style="margin-top:8px">${esc(salePay)} order number (optional)<input id="saleRef" maxlength="30" value="${esc(saleRef)}" placeholder="e.g. #a1b2-c3d4"></label>`:""}
+      <div class="totals">${boxRow(t)}${t.deliveryFee?`<div><span>Delivery fee (rider)</span><span>${peso(t.deliveryFee)}</span></div>`:""}<div class="grand"><span>Total</span><span>${peso(t.total)}</span></div></div>`:`<p class="muted" style="font-size:.88rem">Tap + on what was sold.</p>`}
+    ${saleType==="delivery"?`<p class="muted" style="font-size:.85rem;margin:6px 0 0">A ${peso(SHOP.boxFee)} take-out box is added for each item that needs one.</p>
+      <label class="f" for="saleFee" style="margin-top:8px">Delivery fee paid to the rider (optional)<input id="saleFee" type="number" inputmode="numeric" min="0" step="1" value="${esc(saleFee)}" placeholder="0"></label>`:""}
+    ${salePacks()?`<div class="toolbar" style="margin-top:8px"><span class="muted" style="font-weight:700">Packed in</span>
+      ${[["box",`Box (+${peso(SHOP.boxFee)} each)`],["plastic","Plastic (free)"]].map(([k,l])=>`<button class="chip ${salePack===k?"on":""}" data-spack="${k}">${l}</button>`).join("")}</div>`:""}
+    ${saleSrc()?`<label class="f" for="saleRef" style="margin-top:8px">${esc(PLATFORMS[saleType])} order number (optional)<input id="saleRef" maxlength="30" value="${esc(saleRef)}" placeholder="e.g. #a1b2-c3d4"></label>
+      <p class="muted" style="font-size:.85rem;margin:6px 0 0">Paid through ${esc(PLATFORMS[saleType])}.</p>`
+      :`<div class="toolbar" style="margin-top:8px"><span class="muted" style="font-weight:700">Paid by</span>
+      ${["Cash","GCash"].map(p=>`<button class="chip ${salePay===p?"on":""}" data-spay="${p}">${p}</button>`).join("")}</div>`}
     <label class="f" for="saleNotes" style="margin-top:8px">Notes (optional)<input id="saleNotes" maxlength="300" value="${esc(saleNotes)}" placeholder="e.g. Recorded on paper"></label>
     <p class="err">${esc(saleMsg)}</p>
     <div class="btnrow"><button class="btn" data-ssave${items.length?"":" disabled"}>Save sale${items.length?` · ${peso(t.total)}`:""}</button>
       <button class="btn ghost small" data-scancel>Cancel</button></div></section>`;
 }
 $("#view").addEventListener("input",e=>{ if(tab!=="orders") return;
-  if(e.target.id==="saleDate") saleDate=e.target.value; else if(e.target.id==="saleTime") saleTime=e.target.value; else if(e.target.id==="saleNotes") saleNotes=e.target.value; else if(e.target.id==="saleRef") saleRef=e.target.value; });
+  if(e.target.id==="saleDate") saleDate=e.target.value; else if(e.target.id==="saleTime") saleTime=e.target.value; else if(e.target.id==="saleNotes") saleNotes=e.target.value; else if(e.target.id==="saleRef") saleRef=e.target.value;
+  else if(e.target.id==="saleFee"){ saleFee=e.target.value; const t=saleTotals(), s=document.querySelector("[data-ssave]"); if(s) s.textContent=`Save sale · ${peso(t.total)}`; } });
+// the delivery fee changes the total: show it once the owner leaves the box
+$("#view").addEventListener("change",e=>{ if(tab==="orders" && e.target.id==="saleFee") render(true); });
 $("#view").addEventListener("click",async e=>{
   if(tab!=="orders") return;
-  const b=e.target.closest("[data-sadd],[data-scat],[data-sq],[data-spay],[data-spack],[data-ssave],[data-scancel]"); if(!b) return;
+  const b=e.target.closest("[data-sadd],[data-scat],[data-sq],[data-spay],[data-spack],[data-stype],[data-ssave],[data-scancel]"); if(!b) return;
   saleMsg="";
-  if(b.dataset.sadd!==undefined){ const now=new Date(); saleOpen=true; saleLines={}; saleDate=ymd(now); saleTime=hm(now); saleNotes=""; salePay="Cash"; saleRef=""; salePack="box"; return render(true); }
+  if(b.dataset.sadd!==undefined){ const now=new Date(); saleOpen=true; saleLines={}; saleDate=ymd(now); saleTime=hm(now); saleNotes=""; salePay="Cash"; saleRef=""; salePack="box"; saleType="dine"; saleFee=""; return render(true); }
   if(b.dataset.scancel!==undefined){ saleOpen=false; return render(true); }
   if(b.dataset.scat){ saleCat=+b.dataset.scat; return render(true); }
   if(b.dataset.spay){ salePay=b.dataset.spay; return render(true); }
   if(b.dataset.spack){ salePack=b.dataset.spack; return render(true); }
+  if(b.dataset.stype){ saleType=b.dataset.stype; return render(true); }
   if(b.dataset.sq){ const id=b.dataset.sq; saleLines[id]=Math.max(0,Math.min(MAX_QTY,(saleLines[id]||0)+ +b.dataset.d)); return render(true); }
   if(b.dataset.ssave!==undefined){
     const when=new Date(`${saleDate}T${saleTime||"12:00"}`);
@@ -1118,12 +1133,12 @@ $("#view").addEventListener("click",async e=>{
     const items=saleItems(), src=saleSrc(), ref0=saleRef.trim().slice(0,30);
     if(!items.length) return;
     if(items.length>MAX_LINES){ saleMsg=`Up to ${MAX_LINES} different items per sale. Save the rest as another sale.`; return render(true); }
-    const t=calcTotals(items,"Dine-in"), ref=doc(collection(db,"orders")), uid=auth.currentUser.uid;
+    const t=saleTotals(), ref=doc(collection(db,"orders")), uid=auth.currentUser.uid, pay=src?PLATFORMS[src]:salePay;
     b.disabled=true;
     try{
-      await saved(setDoc(ref,{code:orderCode(ref.id),customerUid:uid,sellerUid:uid,sellerName:"Owner",mode:"Dine-in",table:"",notes:saleNotes.trim(),payment:salePay,items,
-        subtotal:t.subtotal,deliveryFee:0,boxFee:t.boxFee,total:t.total,status:"completed",riderUid:null,createdAt:Timestamp.fromDate(when),
-        manual:true,addedBy:uid,addedAt:serverTimestamp(),...(salePay==="Cash"?{cashGiven:t.total}:{paid:true}),paidTotal:t.total,
+      await saved(setDoc(ref,{code:orderCode(ref.id),customerUid:uid,sellerUid:uid,sellerName:"Owner",mode:saleMode(),table:"",notes:saleNotes.trim(),payment:pay,items,
+        subtotal:t.subtotal,deliveryFee:t.deliveryFee,boxFee:t.boxFee,total:t.total,status:"completed",riderUid:null,createdAt:Timestamp.fromDate(when),
+        manual:true,addedBy:uid,addedAt:serverTimestamp(),...(pay==="Cash"?{cashGiven:t.total}:{paid:true}),paidTotal:t.total,
         ...(src?{source:src,...(ref0?{platformRef:ref0}:{})}:{})}));
       const [a,z]=rangeDates();
       saleOpen=false; delMsg=`Sale of ${peso(t.total)} saved for ${when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})}.`+(when<a||when>=z?" Pick that date above to see it.":"");
