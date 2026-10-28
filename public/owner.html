@@ -1328,11 +1328,33 @@ $("#view").addEventListener("click",async e=>{
     pastBusy=false; return render(true);
   }
 });
+// The orders recorded during a shift: every order made between its opening and closing (now, if
+// still open), cancelled ones too. Sales the owner added by hand count only for a shift recorded
+// from the order timeline (past shifts were made from them).
+async function shiftOrders(x){
+  const from=x.openedAt?.toDate?.(), to=x.closedAt?.toDate?.()||new Date();
+  if(!from) return [];
+  const q=await getDocs(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(from)),where("createdAt","<=",Timestamp.fromDate(to))));
+  return q.docs.map(d=>({id:d.id,...d.data()})).filter(o=>x.past||!o.manual);
+}
+// Deleting a shift deletes its orders with it (they leave the sales and inventory counts too)
 $("#view").addEventListener("click",async e=>{
   if(tab!=="shifts") return;
   const d=e.target.closest("[data-shdel]");
-  if(d){ if(d.dataset.sure!=="1"){ d.dataset.sure="1"; d.textContent="Delete this shift for good? Tap again"; return; }
-    d.disabled=true; try{ await deleteDoc(doc(db,"shifts",d.dataset.shdel)); shiftOpen=null; }catch(x){ d.disabled=false; d.textContent=friendlyError(x); } return; }
+  if(d){ const x=allShifts.find(s=>s.id===d.dataset.shdel); if(!x) return;
+    d.disabled=true;
+    try{
+      if(d.dataset.sure!=="1"){
+        const list=await shiftOrders(x), total=list.filter(o=>o.status!=="cancelled").reduce((t,o)=>t+(o.total||0),0);
+        d.dataset.sure="1"; d.dataset.ids=list.map(o=>o.id).join(",");
+        d.textContent=list.length?`Delete this shift and its ${plural(list.length,"order")} (${peso(total)}) for good? Tap again`:"Delete this shift for good? Tap again";
+        d.disabled=false; return;
+      }
+      d.textContent="Deleting…";
+      const ids=d.dataset.ids?d.dataset.ids.split(","):[];
+      if(ids.length) await deleteOrders(ids);
+      await deleteDoc(doc(db,"shifts",x.id)); shiftOpen=null;
+    }catch(x){ d.disabled=false; d.textContent=friendlyError(x); } return; }
   const r=e.target.closest("[data-shopen]"); if(r){ shiftOpen=shiftOpen===r.dataset.shopen?null:r.dataset.shopen; render(); }
 });
 </script>
