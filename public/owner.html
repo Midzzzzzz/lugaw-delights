@@ -115,8 +115,8 @@ import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndP
 import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, Timestamp, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
-import { findShifts } from "./pastshifts.js";
-import { saved, prepMinutes, orderType, businessDate, DAY_START, platformName, boxRow, SHOP, PLATFORMS } from "./common.js";
+import { findShifts, pastSummary } from "./pastshifts.js";
+import { saved, prepMinutes, orderType, businessDate, DAY_START, platformName, boxRow, SHOP, PLATFORMS, shiftSummary } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
@@ -1267,7 +1267,30 @@ $("#view").addEventListener("click",async e=>{
 // Every cashier shift: who opened and closed it, its sales, and the cash expected in the drawer
 // against the cash counted. Totals are saved when the shift closes.
 let allShifts=[], shiftsErr="", shiftOpen=null;
+// A shift's totals always come from its orders as they are now, so orders imported, added or
+// deleted after the shift closed (Loyverse imports, test orders) show in it. Past shifts (recorded
+// from the order timeline) are all the orders in their time; cashier shifts are worked out the
+// same way as on the seller's screen, with the cash the seller counted when closing.
+let liveOrders=null, stopLiveOrders=null, liveOrdersFrom=null;
+function watchShiftOrders(){
+  if(!allShifts.length) return;
+  const from=Math.min(...allShifts.map(x=>x.openedAt?.toMillis?.()??Date.now()))-86400000; // a day earlier: deliveries paid in during a shift
+  if(liveOrdersFrom!=null && liveOrdersFrom<=from) return;
+  stopLiveOrders?.(); liveOrdersFrom=from;
+  stopLiveOrders=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromMillis(from))),
+    q=>{ liveOrders=q.docs.map(d=>({id:d.id,...d.data()})); if(tab==="shifts") render(); }, ()=>{});
+  subs.push(()=>{ stopLiveOrders?.(); stopLiveOrders=null; liveOrdersFrom=null; liveOrders=null; });
+}
+function liveSummary(x){
+  if(!liveOrders || !x.summary || !x.closedAt) return x.summary; // an open shift has no totals yet
+  if(x.past){ const a=x.openedAt?.toMillis?.(), b=x.closedAt?.toMillis?.();
+    return pastSummary(liveOrders.filter(o=>{ const t=o.createdAt?.toMillis?.(); return t!=null && t>=a && t<=b; })); }
+  const s=shiftSummary(x,liveOrders); s.counted=x.summary.counted??x.countedCash; return s;
+}
 function renderShifts(){
+  watchShiftOrders();
+  const shown=allShifts.map(x=>({...x,saved:x.summary,summary:liveSummary(x)}));
+  const changed=x=>x.saved && x.summary && x.closedAt && (x.saved.sales!==x.summary.sales || x.saved.orders!==x.summary.orders);
   const t=v=>v?.toDate?.()?.toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"—";
   const diffCell=x=>{ const s=x.summary; if(x.past) return `<span class="pill">From orders</span>`; if(!s||s.counted==null) return `<span class="muted">—</span>`; const d=s.counted-s.expected;
     return d===0?`<span class="pill go">Exact</span>`:d>0?`<span class="pill work">Over ${peso(d)}</span>`:`<span class="pill new">Short ${peso(-d)}</span>`; };
@@ -1282,6 +1305,7 @@ function renderShifts(){
           :row("Expected cash",peso(s.expected),true)+row("Counted",peso(s.counted)))
       :row("Starting cash",peso(x.startCash))+`<div class="muted">Still open: the totals are saved when the seller closes the shift.</div>`}</div>
       ${(x.moves||[]).length?`<b style="display:block;margin-top:8px">Pay in / pay out</b><ul class="lines">${x.moves.map(m=>`<li><span class="q">${m.type==="in"?"In":"Out"}</span><span>${esc(m.note)} · ${esc(m.byName)} · ${new Date(m.at).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"})}</span><span class="amt">${peso(m.amount)}</span></li>`).join("")}</ul>`:""}
+      ${changed(x)?`<p class="muted" style="font-size:.85rem;margin:6px 0 0">Orders changed after this shift was ${x.past?"recorded":"closed"} (it showed ${plural(x.saved.orders,"order")}, ${peso(x.saved.sales)} then). These totals are from its orders now.</p>`:""}
       <div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-shdel="${esc(x.id)}">Delete shift</button></div>`; };
   $("#view").innerHTML=`<div class="card" style="margin-top:12px">
     <h2 style="color:var(--brand-deep)">Shifts</h2>
@@ -1289,7 +1313,7 @@ function renderShifts(){
     ${pastPanel()}
     ${shiftsErr?`<div class="flag">${esc(shiftsErr)}</div>`:""}
     <div class="tablewrap"><table class="orders"><thead><tr><th>Opened</th><th>Closed</th><th>Cashier</th><th class="n">Orders</th><th class="n">Sales</th><th class="n">Expected cash</th><th class="n">Counted</th><th>Cash</th></tr></thead>
-    <tbody>${allShifts.map(x=>`<tr class="row" data-shopen="${esc(x.id)}"><td>${t(x.openedAt)}</td><td>${x.closedAt?t(x.closedAt):`<span class="pill go">Open now</span>`}</td>
+    <tbody>${shown.map(x=>`<tr class="row" data-shopen="${esc(x.id)}"><td>${t(x.openedAt)}</td><td>${x.closedAt?t(x.closedAt):`<span class="pill go">Open now</span>`}</td>
       <td>${esc(x.openedByName||"")}${x.closedByName&&x.closedByName!==x.openedByName?` → ${esc(x.closedByName)}`:""}</td>
       <td class="n">${x.summary?x.summary.orders:"—"}</td><td class="n">${x.summary?peso(x.summary.sales):"—"}</td>
       <td class="n">${x.summary?peso(x.summary.expected):"—"}</td><td class="n">${x.summary&&x.summary.counted!=null?peso(x.summary.counted):"—"}</td><td>${diffCell(x)}</td></tr>
