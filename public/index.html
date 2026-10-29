@@ -89,14 +89,14 @@ aside h2{font-size:1.4rem;color:var(--brand)}
         <form class="stack" id="form" novalidate>
           <label class="f" for="f-name">Name<input id="f-name" autocomplete="name" maxlength="80" placeholder="Juan Dela Cruz"></label>
           <label class="f" for="f-phone">Mobile number<input id="f-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="09XX XXX XXXX"></label>
-          <label class="f" for="f-zone" id="zoneWrap">Barangay (Los Baños or Bay, Laguna only)<select id="f-zone"></select></label>
-          <label class="f" for="f-addr" id="addrWrap">House no., street and landmark<textarea id="f-addr" rows="2" maxlength="200" placeholder="e.g. 12 Lopez Ave., near the chapel"></textarea></label>
           <div class="group" id="preModeWrap" hidden><span>Delivery or pickup?</span>
             <div class="seg">
               <input type="radio" name="premode" id="pm-del" value="Delivery" checked><label for="pm-del">Deliver to me</label>
               <input type="radio" name="premode" id="pm-pick" value="Pickup"><label for="pm-pick">I'll pick it up</label>
             </div>
             <small class="muted" id="pickWhere" hidden></small></div>
+          <label class="f" for="f-zone" id="zoneWrap">Barangay (Los Baños or Bay, Laguna only)<select id="f-zone"></select></label>
+          <label class="f" for="f-addr" id="addrWrap">House no., street and landmark<textarea id="f-addr" rows="2" maxlength="200" placeholder="e.g. 12 Lopez Ave., near the chapel"></textarea></label>
           <div class="group" id="preWhenWrap" hidden><span id="preWhenLabel">When should we deliver your pre-order?</span>
             <div style="display:flex;flex-wrap:wrap;gap:8px">
               <label class="f" for="f-date" style="flex:1 1 150px">Date<input type="date" id="f-date"></label>
@@ -251,6 +251,7 @@ function renderPayNote(){
   $("#pickWhere").hidden = isDel; $("#pickWhere").textContent = `Pick up at ${SHOP.name}: ${SHOP.receiptAddress||SHOP.pickupAddress}. Questions? ${SHOP.phone}.`;
   $("#addrWrap").hidden = !isDel; $("#zoneWrap").hidden = !isDel;
   $("#cashLabel").textContent = isDel ? "Cash on delivery" : "Cash on pickup";
+  $('label[for="p-cash"]').textContent = isDel ? "Cash on delivery" : "Cash on pickup";
   $("#cashLabel").hidden = !!SHOP.payQr; $("#payChoice").hidden = !SHOP.payQr;
   $("#qrNote").hidden = pay()!=="GCash";
 }
