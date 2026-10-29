@@ -148,7 +148,7 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
-import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder } from "./common.js";
+import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder, preorderWhen } from "./common.js";
 import { shiftSummary } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -757,7 +757,7 @@ function orderCard(o){
   return `<div class="order ${o.status==="new"||needsStore(o)?"alert":""}">
     <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${esc(st.tone)}">${esc(statusLabel(o))}</span></div>
     ${del?deliverySteps(o):""}
-    ${pre?`<div class="flag"><b>Pre-order</b> (platter / package): deliver on ${esc(new Date((o.createdAt?.toMillis?.()??Date.now())+86400000).toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"}))}. It must be paid in full first${o.payment==="Cash"?`. <b>This one says cash on delivery:</b> call the customer to pay by QR before accepting.`:o.paymentConfirmed?": paid.":`: check the payment arrived, then tap Payment received.`}</div>`:""}
+    ${pre?`<div class="flag"><b>Pre-order</b> (platter / package): deliver on <b>${esc(preorderWhen(o))}</b>${o.deliverOn?" (the customer's choice)":""}. It must be paid in full first${o.payment==="Cash"?`. <b>This one says cash on delivery:</b> call the customer to pay by QR before accepting.`:o.paymentConfirmed?": paid.":`: check the payment arrived, then tap Payment received.`}</div>`:""}
     ${o.unconfirmedAt&&o.status==="new"?`<div class="flag">Rider ${esc(o.unconfirmedByName||"")} couldn't confirm this customer by phone (${fmtTime(o.unconfirmedAt)}). Call the customer; if it's a fake order, cancel it.</div>`:""}
     ${o.manual||priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
     ${!dineIn && c && ["new","preparing"].includes(o.status) && phoneConfirmed(c.phone)===false?`<div class="flag">New number. Call ${esc(c.phone)} to check the order is real before cooking.</div>`:""}

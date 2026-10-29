@@ -32,6 +32,10 @@ await t("pre-order paid by QR allowed", () => assertSucceeds(place("GCash")));
 await t("pre-order with cash on delivery refused", () => assertFails(place("Cash")));
 await t("preorder flag must be true", () => assertFails(place("GCash", { preorder: "yes" })));
 await t("ordinary order without the flag still allowed", () => assertSucceeds(place("Cash", { preorder: undefined })));
+await t("pre-order with the delivery day and time the customer picked", () => assertSucceeds(place("GCash", { deliverOn: "2026-11-05", deliverTime: "11:30" })));
+await t("a delivery day that isn't a date refused", () => assertFails(place("GCash", { deliverOn: "next friday" })));
+await t("a delivery day on an ordinary order refused", () => assertFails(place("Cash", { preorder: undefined, deliverOn: "2026-11-05" })));
+await t("a time without a day refused", () => assertFails(place("GCash", { deliverTime: "11:30" })));
 
 const s1 = as("s1");
 const assigned = (id, over) => env.withSecurityRulesDisabled(c => setDoc(doc(c.firestore(), "orders", id), { code: "LD-" + id, customerUid: "cx", mode: "Delivery",
@@ -42,6 +46,7 @@ await t("seller can't accept a pre-order with only the screenshot", () => assert
 await t("seller confirms the payment arrived", () => assertSucceeds(updateDoc(doc(s1, "orders/p1"), { paymentConfirmed: true, paymentConfirmedAt: serverTimestamp() })));
 await t("then the seller can accept it", () => assertSucceeds(updateDoc(doc(s1, "orders/p1"), { status: "preparing", preparingAt: serverTimestamp(), sellerUid: "s1", sellerName: "S" })));
 await t("the pre-order mark can't be removed", () => assertFails(updateDoc(doc(s1, "orders/p1"), { preorder: false })));
+await t("the seller can't change the delivery day", () => assertFails(updateDoc(doc(s1, "orders/p1"), { deliverOn: "2026-12-01" })));
 await assigned("p2", {});
 await t("an ordinary QR order is still accepted with the screenshot", () => assertSucceeds(updateDoc(doc(s1, "orders/p2"), { status: "preparing", preparingAt: serverTimestamp(), sellerUid: "s1", sellerName: "S" })));
 

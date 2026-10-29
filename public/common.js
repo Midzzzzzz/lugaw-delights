@@ -48,6 +48,12 @@ export const MENU = MENU_SECTIONS.map(c => ({ ...c, items: (c.items || []).filte
 export const PREORDER_DAYS = 1;
 export const isPreorderSection = c => c.preorder ?? /platter|package|bilao/i.test(c.name || "");
 export const preorderItems = items => (items || []).filter(it => ITEMS[it.id]?.pre);
+// When a pre-order is to be delivered: the day the customer picked (and time, if any), else the day after ordering
+export function preorderWhen(o) {
+  const d = o?.deliverOn ? new Date(o.deliverOn + "T00:00") : new Date((o?.createdAt?.toMillis?.() ?? Date.now()) + PREORDER_DAYS * 86400000);
+  const t = o?.deliverTime ? new Date("2000-01-01T" + o.deliverTime).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" }) : "";
+  return d.toLocaleDateString("en-PH", { weekday: "long", month: "short", day: "numeric" }) + (t ? ", around " + t : "");
+}
 export const isPreorder = o => o?.preorder === true || (o?.mode !== "Dine-in" && !o?.manual && preorderItems(o?.items).length > 0);
 // Every item, sold out or not (names and prices for older orders)
 export const ITEMS = Object.create(null);
