@@ -70,10 +70,16 @@
     <div class="tabs" id="kTabs" role="tablist">
       <button type="button" role="tab" data-ktab="cook" class="on" aria-selected="true">To cook <span class="count" id="kCountTab">0</span></button>
       <button type="button" role="tab" data-ktab="refill" aria-selected="false">Refill <span class="count" id="rCountTab"></span></button>
+      <button type="button" role="tab" data-ktab="pre" aria-selected="false">Pre-orders <span class="count" id="pCountTab"></span></button>
     </div>
     <div id="cookPane">
       <h2 style="color:var(--brand);margin:14px 0 0">To cook <span class="pill brand" id="kCount">0</span></h2>
       <div class="kds" id="kBoard"></div>
+    </div>
+    <div id="prePane" hidden>
+      <p class="muted" style="font-size:.88rem;margin:12px 0 0">Platters and party packages ordered ahead, by delivery day. The amounts to prepare count paid orders only.
+        Each one comes to <b>To cook</b> on its day, when a rider takes it.</p>
+      <div id="preList"></div>
     </div>
     <div id="refillPane" hidden>
       <div class="card" id="refill" hidden></div>
@@ -85,7 +91,7 @@
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
-import { soldOutFrom, orderType, peso } from "./common.js";
+import { soldOutFrom, orderType, peso, uses, ITEMS } from "./common.js";
 import { auth, db, isConfigured, applyMenu, ingredientsLeft, trackerCount, belowStandard, esc, itemsHTML, phoneKey, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 
@@ -185,7 +191,36 @@ function start(){
     if(fresh.length) notify(fresh.length>1?`${fresh.length} new tickets`:((fresh[0].addedAt?"Items added":"New ticket")+(fresh[0].code?` · ${fresh[0].code}`:"")), fresh.length>1?"":orderSummary(fresh[0]));
     known=keys; render();
   }, e=>{ $("#kBoard").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; });
-  stopOrders=()=>{ stopTickets(); stopRefill(); };
+  // upcoming pre-orders (platters, packages): scheduled, or sent to riders but not cooked yet
+  const stopPre=onSnapshot(query(collection(db,"orders"),where("preorder","==",true),where("status","in",["scheduled","new","assigned","preparing"])),
+    s=>{ preOrders=s.docs.map(d=>({id:d.id,...d.data()})); renderPre(); }, ()=>{});
+  stopOrders=()=>{ stopTickets(); stopRefill(); stopPre(); };
+}
+
+// ---------- Pre-orders: what to prepare for each delivery day ----------
+let preOrders=[];
+const preDay=o=>o.deliverOn||(()=>{ const d=new Date((o.createdAt?.toMillis?.()??Date.now())+86400000); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); })();
+function renderPre(){
+  const days=new Map();
+  preOrders.forEach(o=>{ const k=preDay(o); if(!days.has(k)) days.set(k,[]); days.get(k).push(o); });
+  const paidCount=preOrders.filter(o=>o.paymentConfirmed).length;
+  $("#pCountTab").textContent=paidCount?String(paidCount):"";
+  $("#preList").innerHTML=days.size?[...days.entries()].sort(([a],[b])=>a<b?-1:a>b?1:0).map(([k,list])=>{
+    const paid=list.filter(o=>o.paymentConfirmed), items=new Map(), need={};
+    paid.forEach(o=>(o.items||[]).forEach(it=>{ const q=Number(it.qty)||0;
+      items.set(it.id,{name:ITEMS[it.id]?.name||it.name,qty:(items.get(it.id)?.qty||0)+q});
+      Object.entries(uses(it.id,true)).forEach(([g,per])=>need[g]=(need[g]||0)+per*q); }));
+    const day=new Date(k+"T00:00").toLocaleDateString("en-PH",{weekday:"long",month:"short",day:"numeric"});
+    const today=new Date(); const isToday=k===today.getFullYear()+"-"+String(today.getMonth()+1).padStart(2,"0")+"-"+String(today.getDate()).padStart(2,"0");
+    return `<div class="card" style="margin-top:12px;display:grid;gap:8px">
+      <h2 style="margin:0;color:var(--brand-deep);font-size:1.15rem">${esc(day)}${isToday?' <span class="pill go">Today</span>':""}</h2>
+      ${items.size?`<div><b>To prepare</b><ul class="lines">${[...items.values()].map(r=>`<li><span class="q">${r.qty}×</span><span>${esc(r.name)}</span></li>`).join("")}</ul></div>`
+        :`<p class="muted" style="margin:0">Nothing paid yet for this day.</p>`}
+      ${Object.keys(need).length?`<div><b>Ingredients needed</b><ul class="lines">${Object.entries(need).map(([g,n])=>`<li><span class="q">${esc(qty(n))}</span><span>${esc(ingName(g))} ${esc(ingUnit(g))}</span></li>`).join("")}</ul></div>`:""}
+      <div class="muted" style="font-size:.88rem">${list.sort((a,b)=>(a.deliverTime||"99")<(b.deliverTime||"99")?-1:1).map(o=>`<div><b class="num">${esc(o.code)}</b> · ${esc(o.deliverTime?new Date("2000-01-01T"+o.deliverTime).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}):"no time given")} ·
+        ${(o.items||[]).map(it=>`${esc(it.qty)}× ${esc(ITEMS[it.id]?.name||it.name)}`).join(", ")} ·
+        ${o.paymentConfirmed?'<span class="pill done">Paid</span>':'<span class="pill new">Not paid yet</span>'}${o.status!=="scheduled"?' <span class="pill work">Sent to riders</span>':""}</div>`).join("")}</div></div>`;
+  }).join(""):`<p class="empty">No platter or package pre-orders right now.</p>`;
 }
 
 // ---------- Stock and refills ----------
@@ -213,11 +248,11 @@ function watchRefill(){
   }, e=>{ refillMsg="Couldn't load the stock: "+friendlyError(e)+" If the owner just updated the app, the new security rules may not be published yet."; renderRefill(); });
   return ()=>{ a(); m(); b(); stopInvOrders?.(); stopInvOrders=null; invSince=null; };
 }
-// ---------- Tabs: To cook | Refill ----------
-let kTab=(()=>{ try{ return localStorage.getItem("ld_ktab")==="refill"?"refill":"cook"; }catch(_){ return "cook"; } })();
+// ---------- Tabs: To cook | Refill | Pre-orders ----------
+let kTab=(()=>{ try{ const t=localStorage.getItem("ld_ktab"); return ["refill","pre"].includes(t)?t:"cook"; }catch(_){ return "cook"; } })();
 function showTab(t){
   kTab=t; try{ localStorage.setItem("ld_ktab",t); }catch(_){}
-  $("#cookPane").hidden=t!=="cook"; $("#refillPane").hidden=t!=="refill";
+  $("#cookPane").hidden=t!=="cook"; $("#refillPane").hidden=t!=="refill"; $("#prePane").hidden=t!=="pre";
   document.querySelectorAll("#kTabs [data-ktab]").forEach(b=>{ const on=b.dataset.ktab===t; b.classList.toggle("on",on); b.setAttribute("aria-selected",String(on)); });
   if(t==="refill") document.querySelector('#kTabs [data-ktab="refill"]').classList.remove("due"); // seen
 }
