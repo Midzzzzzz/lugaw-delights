@@ -54,6 +54,15 @@ export function preorderWhen(o) {
   const t = o?.deliverTime ? new Date("2000-01-01T" + o.deliverTime).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" }) : "";
   return d.toLocaleDateString("en-PH", { weekday: "long", month: "short", day: "numeric" }) + (t ? ", around " + t : "");
 }
+// When a paid, scheduled pre-order is sent to riders: 2 hours before the time the customer asked
+// for, or 8 AM on the delivery day (never before 5 AM, when the shop's day starts)
+export function preorderReleaseAt(o) {
+  const day = o?.deliverOn ? new Date(o.deliverOn + "T00:00") : new Date((o?.createdAt?.toMillis?.() ?? Date.now()) + PREORDER_DAYS * 86400000);
+  const [h, m] = (o?.deliverTime || "10:00").split(":").map(Number);
+  day.setHours(h, m - 120, 0, 0);
+  const open = new Date(day); open.setHours(5, 0, 0, 0);
+  return day < open ? open : day;
+}
 export const isPreorder = o => o?.preorder === true || (o?.mode !== "Dine-in" && !o?.manual && preorderItems(o?.items).length > 0);
 // Every item, sold out or not (names and prices for older orders)
 export const ITEMS = Object.create(null);
@@ -157,6 +166,7 @@ export const esc = s => String(s ?? "").replace(/[&<>"']/g, ch =>
 //  Dine-in:  preparing → completed (recorded by the shop at the counter)
 //  Any time before delivery: cancelled
 export const STATUS = {
+  scheduled:    { label: "Pre-order: scheduled",  tone: "new" },
   new:          { label: "Order received",        tone: "new" },
   preparing:    { label: "Preparing",             tone: "work" },
   ready:        { label: "Waiting for a rider",   tone: "work" },
@@ -173,7 +183,7 @@ export const FLOW = {
   Pickup: ["new", "preparing", "ready_pickup", "completed"],
   "Dine-in": ["preparing", "completed"]
 };
-const DELIVERY_LABELS = { new: "Finding a rider", assigned: "Rider found", preparing: "Preparing", ready: "Ready for the rider" };
+const DELIVERY_LABELS = { scheduled: "Scheduled", new: "Finding a rider", assigned: "Rider found", preparing: "Preparing", ready: "Ready for the rider" };
 // A step's name for an order type (used for the customer's tracking steps)
 export function stepLabel(mode, s) {
   return (mode === "Delivery" && DELIVERY_LABELS[s]) || STATUS[s]?.label || s;
@@ -184,7 +194,7 @@ export function statusLabel(o) {
   if (o.mode === "Delivery" && !o.riderUid && ["preparing", "ready"].includes(o.status)) return stepLabel(o.mode, o.status) + " · finding a rider";
   return stepLabel(o.mode, o.status);
 }
-export const ACTIVE = ["new", "preparing", "ready", "ready_pickup", "assigned", "picked_up"];
+export const ACTIVE = ["scheduled", "new", "preparing", "ready", "ready_pickup", "assigned", "picked_up"];
 
 // fee: the delivery fee for the customer's barangay (only used for Delivery)
 // Totals for an order. Take-out boxes: every boxed menu item on a delivery order,

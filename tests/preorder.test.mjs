@@ -2,7 +2,7 @@
 // confirmed the payment arrived.
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebase/rules-unit-testing";
-import { doc, setDoc, updateDoc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, writeBatch, serverTimestamp } from "firebase/firestore";
 
 const env = await initializeTestEnvironment({ projectId: "demo-lugaw",
   firestore: { rules: readFileSync(new URL("../firestore.rules", import.meta.url), "utf8"), host: "127.0.0.1", port: 8080 } });
@@ -49,6 +49,30 @@ await t("the pre-order mark can't be removed", () => assertFails(updateDoc(doc(s
 await t("the seller can't change the delivery day", () => assertFails(updateDoc(doc(s1, "orders/p1"), { deliverOn: "2026-12-01" })));
 await assigned("p2", {});
 await t("an ordinary QR order is still accepted with the screenshot", () => assertSucceeds(updateDoc(doc(s1, "orders/p2"), { status: "preparing", preparingAt: serverTimestamp(), sellerUid: "s1", sellerName: "S" })));
+
+console.log("Scheduled pre-orders (held until the delivery day)");
+await env.withSecurityRulesDisabled(async c => {
+  const db = c.firestore();
+  await setDoc(doc(db, "riders/r1"), { name: "r1", phone: "09170000009", status: "approved", online: true, payMethod: "GCash", payName: "R", payNumber: "09171234567", payBank: "" });
+  await setDoc(doc(db, "agreements/r1"), { version: "x" });
+});
+await t("customer's pre-order is saved as scheduled", () => assertSucceeds(place("GCash", { status: "scheduled", deliverOn: "2026-11-05" })));
+await t("an ordinary order can't be scheduled", () => assertFails(place("Cash", { preorder: undefined, status: "scheduled" })));
+const sched = (id, over) => assigned(id, { preorder: true, status: "scheduled", riderUid: null, deliverOn: "2026-11-05", ...over });
+const r1 = as("r1");
+await sched("h1", {});
+await t("riders can't see a scheduled pre-order", () => assertFails(getDoc(doc(r1, "orders/h1"))));
+await t("riders can't take a scheduled pre-order", () => assertFails(updateDoc(doc(r1, "orders/h1"), { status: "assigned", riderUid: "r1", riderName: "r1", riderPhone: "09170000009", assignedAt: serverTimestamp() })));
+await t("seller can't send it to riders before it's paid", () => assertFails(updateDoc(doc(s1, "orders/h1"), { status: "new", releasedAt: serverTimestamp() })));
+await t("seller can't skip to cooking", () => assertFails(updateDoc(doc(s1, "orders/h1"), { status: "preparing", paymentConfirmed: true })));
+await t("seller confirms the payment", () => assertSucceeds(updateDoc(doc(s1, "orders/h1"), { paymentConfirmed: true, paymentConfirmedAt: serverTimestamp() })));
+await t("then sends it to riders on the day", () => assertSucceeds(updateDoc(doc(s1, "orders/h1"), { status: "new", releasedAt: serverTimestamp() })));
+await t("now riders can see it", () => assertSucceeds(getDoc(doc(r1, "orders/h1"))));
+await sched("h2", { customerUid: "c99" });
+await t("customer cancels an unpaid scheduled pre-order", () => assertSucceeds(updateDoc(doc(as("c99", "anonymous"), "orders/h2"), { status: "cancelled", cancelledBy: "customer" })));
+await sched("h3", { customerUid: "c98", paymentConfirmed: true });
+await t("a paid one can't be cancelled by the customer (call the shop)", () => assertFails(updateDoc(doc(as("c98", "anonymous"), "orders/h3"), { status: "cancelled", cancelledBy: "customer" })));
+await t("the seller can cancel it", () => assertSucceeds(updateDoc(doc(s1, "orders/h3"), { status: "cancelled", cancelReason: "Customer asked" })));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);

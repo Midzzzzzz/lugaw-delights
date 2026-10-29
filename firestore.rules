@@ -470,7 +470,8 @@ service cloud.firestore {
              ['code','customerUid','mode','address','notes','payment','hasPin','zone','zoneName',
               'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt','preorder','deliverOn','deliverTime'])
           && d.customerUid == uid()
-          && d.status == 'new'
+          // a pre-order waits as 'scheduled' (riders and the kitchen don't see it) until its delivery day
+          && (d.status == 'new' || (d.status == 'scheduled' && d.get('preorder', false) == true))
           && d.riderUid == null
           && d.mode == 'Delivery' // customers order delivery only (pickup orders from before stay valid)
           && d.payment in ['Cash', 'GCash'] // cash on delivery, or paid by QR before cooking
@@ -588,7 +589,11 @@ service cloud.firestore {
                  && !(request.resource.data.status in ['new', 'cancelled']))
             // and only goes back to looking for a rider before the kitchen has started on it
             && !(resource.data.mode == 'Delivery' && request.resource.data.status == 'new'
-                 && !(resource.data.status in ['new', 'assigned']))
+                 && !(resource.data.status in ['new', 'assigned', 'scheduled']))
+            // A scheduled pre-order is only sent on to riders (status new), once paid, or cancelled
+            && !(resource.data.status == 'scheduled' && !(request.resource.data.status in ['scheduled', 'new', 'cancelled']))
+            && !(resource.data.status == 'scheduled' && request.resource.data.status == 'new'
+                 && resource.data.get('paymentConfirmed', false) != true)
             // A pre-order isn't accepted until the seller has confirmed the full payment arrived
             && !(resource.data.get('preorder', false) == true && resource.data.status in ['new', 'assigned']
                  && request.resource.data.status == 'preparing' && resource.data.get('paymentConfirmed', false) != true)
@@ -662,8 +667,9 @@ service cloud.firestore {
             && request.resource.data[request.resource.data.status + 'At'] == request.time
             && isKitchen())
 
-        // Customer cancels before the shop accepts the order
-        || (signedIn() && resource.data.customerUid == uid() && resource.data.status == 'new'
+        // Customer cancels before the shop accepts the order (a scheduled pre-order: until it's paid)
+        || (signedIn() && resource.data.customerUid == uid()
+            && (resource.data.status == 'new' || (resource.data.status == 'scheduled' && resource.data.get('paymentConfirmed', false) != true))
             && changed().hasOnly(['status','cancelledBy'])
             && request.resource.data.status == 'cancelled'
             && request.resource.data.cancelledBy == 'customer')

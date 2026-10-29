@@ -341,7 +341,7 @@ function renderTrack(){
   if(document.body.classList.contains("tracking") && !busy) window.scrollTo({top:0,behavior:"smooth"});
   document.body.classList.toggle("tracking",busy);
   $("#trackBox").innerHTML = `<h2>Track your order</h2>` + list.map(o=>{
-    const flow=FLOW[o.mode]||FLOW.Delivery, at=flow.indexOf(o.status), finished=FINAL.includes(o.status);
+    const flow=o.preorder?["scheduled",...FLOW.Delivery]:FLOW[o.mode]||FLOW.Delivery, at=flow.indexOf(o.status), finished=FINAL.includes(o.status);
     const steps = o.status==="cancelled" ? `<p class="pill off" style="justify-self:start">Cancelled</p>` :
       `<ol class="steps">${flow.map((s,i)=>`<li class="${i<at||finished?"done":i===at?"now":""}"><span>${esc(stepLabel(o.mode,s))}</span></li>`).join("")}</ol>`;
     const cancelNote = o.status!=="cancelled" ? "" : o.cancelledBy==="customer"
@@ -352,12 +352,12 @@ function renderTrack(){
       : o.status==="completed" ? `<p style="margin:0"><b>Picked up.</b> Salamat po, enjoy your meal!</p>` : "";
     const rider = o.riderName && ["assigned","preparing","ready","picked_up"].includes(o.status)
       ? `<p style="margin:0">Your rider: <b>${esc(o.riderName)}</b> · <span class="num">${esc(o.riderPhone)}</span></p>` : "";
-    const cancel = o.status==="new" ? `<button class="btn ghost small" data-cancel="${o.id}">Cancel order</button>` : "";
+    const cancel = o.status==="new"||(o.status==="scheduled"&&!o.paymentConfirmed) ? `<button class="btn ghost small" data-cancel="${o.id}">Cancel order</button>` : "";
     const hide = finished ? `<button class="btn ghost small" data-hide="${o.id}" style="justify-self:start">Hide</button>` : "";
     return `<div style="border-top:2px dashed var(--line);padding-top:10px;display:grid;gap:6px">
       <div class="btnrow" style="justify-content:space-between"><b class="num">${esc(o.code)}</b><span class="muted">${fmtTime(o.createdAt)} · ${peso(o.total)}</span></div>
       ${payingId===o.id&&o.payment==="GCash"&&o.status!=="cancelled"&&!o.paymentConfirmed&&((!o.gcashRef&&!o.payShotAt)||payDraft[o.id]?.editing)?payStep(o):""}
-      ${steps}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${FINAL.includes(o.status)?"":preNote(o.items,o)}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
+      ${steps}${o.status==="scheduled"?`<p class="muted" style="margin:0;font-size:.88rem">${o.paymentConfirmed?"Paid, thank you! ":""}On the delivery day we cook it fresh and send it with a rider.</p>`:""}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${FINAL.includes(o.status)?"":preNote(o.items,o)}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
   }).join("");
   if(focusKey){ const el=document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); if(el){ el.focus(); if(el.tagName==="TEXTAREA") el.setSelectionRange(el.value.length,el.value.length); } }
 }
@@ -581,7 +581,7 @@ $("#form").addEventListener("submit", async e=>{
     address: mode()==="Delivery"?`${address}, Brgy. ${z.name}, ${z.town}, Laguna`:"", notes, payment:pay(), items,
     ...(mode()==="Delivery"?{zone:z.id, zoneName:zoneLabel(z)}:{}),
     subtotal:t.subtotal, deliveryFee:t.deliveryFee, boxFee:t.boxFee, total:t.total,
-    status:"new", riderUid:null, createdAt:serverTimestamp(), ...(pin?{hasPin:true}:{}), ...(preorderItems(items).length?{preorder:true,deliverOn,...(deliverTime?{deliverTime}:{})}:{})
+    status:preorderItems(items).length?"scheduled":"new", riderUid:null, createdAt:serverTimestamp(), ...(pin?{hasPin:true}:{}), ...(preorderItems(items).length?{preorder:true,deliverOn,...(deliverTime?{deliverTime}:{})}:{})
   });
   batch.set(doc(db,"contacts",ref.id),{ name, phone, customerUid:user.uid, createdAt:serverTimestamp() });
   batch.set(doc(db,"customers",user.uid),{ lastOrderAt:serverTimestamp(), lastOrderId:ref.id });

@@ -148,7 +148,7 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
-import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder, preorderWhen } from "./common.js";
+import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder, preorderWhen, preorderReleaseAt } from "./common.js";
 import { shiftSummary } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -297,12 +297,21 @@ function start(){
   // What's published now: read once, so a page that just opened doesn't save the same thing again
   getDoc(doc(db,"settings","stock")).then(s=>{ const d=s.exists()?s.data():{}; if(publishedSoldOut===null) publishedSoldOut=JSON.stringify([d.soldOut||[],d.left||{}]); updateStock(); }).catch(()=>{ publishedSoldOut=""; });
 }
+// Paid pre-orders go to riders on their delivery day by themselves (any seller screen that's open does it)
+const releasing=new Set();
+setInterval(()=>{
+  if(!me) return;
+  orders.filter(o=>o.status==="scheduled" && o.paymentConfirmed && Date.now()>=preorderReleaseAt(o) && !releasing.has(o.id)).forEach(o=>{
+    releasing.add(o.id);
+    updateDoc(doc(db,"orders",o.id),{status:"new",releasedAt:serverTimestamp()}).catch(()=>releasing.delete(o.id)); // another screen may have sent it already
+  });
+},30000);
 function merge(){
   const m=new Map(); Object.values(lists).forEach(l=>l.forEach(o=>m.set(o.id,o)));
   const t=o=>o.createdAt?.toMillis?.()??Infinity; // just-placed orders have no server time yet
   orders=[...m.values()].sort((a,b)=>t(b)-t(a));
   if(lists.active){
-    const ids=new Set(orders.filter(needsStore).map(o=>o.id));
+    const ids=new Set(orders.filter(o=>needsStore(o)||o.status==="scheduled").map(o=>o.id)); // a new pre-order: check its payment
     const fresh=known?orders.filter(o=>ids.has(o.id)&&!known.has(o.id)):[];
     if(fresh.length) notify(fresh.length>1?`${fresh.length} new orders`:`New order ${orderCode(fresh[0].id)}`, fresh.length>1?fresh.map(o=>orderCode(o.id)).join(", "):orderSummary(fresh[0]));
     known=ids;
@@ -614,11 +623,12 @@ const unpaidDine=o=>o.mode==="Dine-in"&&o.status!=="cancelled"&&balanceOf(o)!==0
 // progress), so the seller doesn't have to follow them from tab to tab. Once delivered they
 // move to Done today. New, Kitchen and Ready for pickup are pickup and dine-in orders.
 const isDel=o=>o.mode==="Delivery";
-const delActive=o=>isDel(o)&&ACTIVE.includes(o.status);
+const delActive=o=>isDel(o)&&ACTIVE.includes(o.status)&&o.status!=="scheduled";
 // New and Ready for pickup are for customer pickup orders (switched off): shown only when they hold an order
 const TABS=[
   ["new","New",o=>needsStore(o)&&!isDel(o),"hideEmpty"],
   ["delivery","Delivery",delActive],
+  ["pre","Pre-orders",o=>o.status==="scheduled","hideEmpty"],
   ["kitchen","Kitchen",o=>o.status==="preparing"&&!isDel(o)],
   ["out","Ready for pickup",o=>o.status==="ready_pickup","hideEmpty"],
   ["done","Done today",o=>["delivered","completed"].includes(o.status)&&isToday(o.createdAt)],
@@ -632,7 +642,7 @@ const delSort=(a,b)=>ms(a)-ms(b);
 // Progress along the delivery steps, shown on every delivery card
 const DEL_STEPS=[["new","Finding rider"],["assigned","Rider found"],["preparing","Cooking"],["ready","Food ready"],["picked_up","On the way"],["delivered","Delivered"]];
 function deliverySteps(o){
-  if(o.status==="cancelled") return "";
+  if(o.status==="cancelled"||o.status==="scheduled") return "";
   const i=DEL_STEPS.findIndex(([s])=>s===o.status), done=o.status==="delivered";
   const steps=DEL_STEPS.map(([s,l],k)=>`<span class="dstep ${k<i||(done&&k===i)?"done":k===i?"now":""}">${l}</span>`);
   // GCash / QR: the customer paid the shop, so only the rider's fee is left to send
@@ -707,6 +717,7 @@ function render(force){
   const list=orders.filter(TABS.find(t=>t[0]===tab)[2]);
   if(tab==="new"||tab==="kitchen") list.reverse(); // oldest first
   if(tab==="delivery") list.sort(delSort);
+  if(tab==="pre") list.sort((a,b)=>preorderReleaseAt(a)-preorderReleaseAt(b)); // soonest delivery first
   // keep the cursor in a cash or cancel-reason box when new orders refresh the board
   const focusKey=document.activeElement?.dataset?.focusKey;
   $("#board").innerHTML=(tab==="settle"?settleSummary(list):"")+(list.length?list.map(orderCard).join(""):`<p class="empty">Nothing here right now.</p>`);
@@ -730,6 +741,8 @@ function orderCard(o){
   const pre=isPreorder(o), unpaidGcash=o.payment==="GCash" && !dineIn && (pre ? !o.paymentConfirmed : !o.gcashRef && !o.payShotAt);
   // Pickup orders are cooked right away; delivery orders once a rider has accepted
   const waitLabel=pre?"Pre-order: confirm the full payment first":"Waiting for GCash payment";
+  // a scheduled pre-order goes to riders by itself on its day once paid; the seller can send it earlier
+  if(o.status==="scheduled") acts.push(o.paymentConfirmed?["release","Send to riders now","btn ghost small"]:["waitpay",waitLabel,"btn"]);
   if(o.status==="new" && !del) acts.push(unpaidGcash ? ["waitpay",waitLabel,"btn"] : ["preparing","Accept & start cooking","btn"]);
   if(o.status==="assigned" && del) acts.push(unpaidGcash ? ["waitpay",waitLabel,"btn"] : ["preparing","Rider found: start cooking","btn"]);
   if(o.status==="preparing") acts.push(dineIn ? ["completed","Served","btn ok"]
@@ -757,7 +770,7 @@ function orderCard(o){
   return `<div class="order ${o.status==="new"||needsStore(o)?"alert":""}">
     <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${esc(st.tone)}">${esc(statusLabel(o))}</span></div>
     ${del?deliverySteps(o):""}
-    ${pre?`<div class="flag"><b>Pre-order</b> (platter / package): deliver on <b>${esc(preorderWhen(o))}</b>${o.deliverOn?" (the customer's choice)":""}. It must be paid in full first${o.payment==="Cash"?`. <b>This one says cash on delivery:</b> call the customer to pay by QR before accepting.`:o.paymentConfirmed?": paid.":`: check the payment arrived, then tap Payment received.`}</div>`:""}
+    ${pre?`<div class="flag"><b>Pre-order</b> (platter / package): deliver on <b>${esc(preorderWhen(o))}</b>${o.deliverOn?" (the customer's choice)":""}.${o.status==="scheduled"?` Riders get it ${o.paymentConfirmed?"":"once it's paid, "}at <b>${esc(preorderReleaseAt(o).toLocaleString("en-PH",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}</b>.`:""} It must be paid in full first${o.payment==="Cash"?`. <b>This one says cash on delivery:</b> call the customer to pay by QR before accepting.`:o.paymentConfirmed?": paid.":`: check the payment arrived, then tap Payment received.`}</div>`:""}
     ${o.unconfirmedAt&&o.status==="new"?`<div class="flag">Rider ${esc(o.unconfirmedByName||"")} couldn't confirm this customer by phone (${fmtTime(o.unconfirmedAt)}). Call the customer; if it's a fake order, cancel it.</div>`:""}
     ${o.manual||priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
     ${!dineIn && c && ["new","preparing"].includes(o.status) && phoneConfirmed(c.phone)===false?`<div class="flag">New number. Call ${esc(c.phone)} to check the order is real before cooking.</div>`:""}
@@ -1184,7 +1197,7 @@ $("#shiftCard").addEventListener("click",async e=>{
   }
 });
 
-const CONFIRM=new Set(["reassign"]);
+const CONFIRM=new Set(["reassign","release"]);
 $("#board").addEventListener("click", async e=>{
   const b=e.target.closest("button"); if(!b) return;
   if(b.dataset.settleBal){
@@ -1261,6 +1274,7 @@ $("#board").addEventListener("click", async e=>{
   const set=b.dataset.set, ref=b.dataset.id&&doc(db,"orders",b.dataset.id), now=serverTimestamp();
   try{
     if(set==="paid") await updateDoc(ref,{paymentConfirmed:true,paymentConfirmedAt:now});
+    else if(set==="release") await updateDoc(ref,{status:"new",releasedAt:now});
     else if(set==="settle"){
       const o=orders.find(x=>x.id===b.dataset.id);
       await updateDoc(ref,{...(o?.payment==="Cash"?{cashReceived:true}:{feePaid:true}),settled:true,settledAt:now});
