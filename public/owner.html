@@ -102,7 +102,7 @@ table.inv input{width:90px;text-align:right;padding:5px 8px}
       <div class="stat"><b id="sSales">₱0</b><span>Total sales</span><small class="muted" style="display:block;font-size:.78rem;margin-top:2px">Dine-in + delivery</small></div>
       <div class="stat"><b id="sPlat">₱0</b><span>Foodpanda / Grab</span></div>
       <div class="stat"><b id="sOrders">0</b><span>Completed orders</span></div>
-      <div class="stat"><b id="sAvg">₱0</b><span>Average order</span></div>
+      <div class="stat"><b id="sAll">₱0</b><span>All sales</span><small class="muted" style="display:block;font-size:.78rem;margin-top:2px">Dine-in + all delivery, incl. Foodpanda / Grab</small></div>
       <div class="stat"><b id="sOpen">0</b><span>In progress</span></div>
       <div class="stat"><b id="sCancel">0</b><span>Cancelled</span></div>
     </div>
@@ -290,7 +290,8 @@ function render(force){
   $("#sSales").textContent=peso(sales);
   $("#sPlat").textContent=peso(done.filter(o=>platformName(o)).reduce((s,o)=>s+shopAmount(o),0));
   $("#sOrders").textContent=done.length;
-  $("#sAvg").textContent=peso(own.length?Math.round(sales/own.length):0);
+  // everything sold: dine-in, Lugaw Delights delivery and Foodpanda / Grab (riders' fees not included)
+  $("#sAll").textContent=peso(done.reduce((s,o)=>s+shopAmount(o),0));
   // Total sales = dine-in (the counter, take-out included) + Lugaw Delights' own delivery (food and
   // boxes; the riders' fees shown under it are theirs, not sales)
   const dels=own.filter(o=>o.mode==="Delivery"), dine=own.filter(o=>o.mode!=="Delivery");
