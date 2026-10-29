@@ -203,8 +203,14 @@ export function shiftSummary(shift, orders, now = Date.now()) {
     if (o.status === "cancelled") { if (inShift(made)) s.cancelled++; return; }
     if (inShift(made)) { s.orders++; if (!platformName(o)) s.sales += shopAmount(o); } // Foodpanda / Grab: platformSales (paid out weekly)
     if (o.mode === "Delivery") {
+      // Cash: the rider pays the shop at pickup. GCash / QR: the customer pays the shop directly, so
+      // once the seller confirms it, it's GCash the shop received (the rider is only owed the fee).
       const got = ms(o.riderPaidAt) ?? ms(o.settledAt);
       if (o.payment === "Cash" && o.cashReceived && inShift(got)) s.riderCash += shopAmount(o);
+      if (o.payment === "GCash") {
+        if (o.paymentConfirmed) { if (inShift(ms(o.paymentConfirmedAt) ?? made)) s.gcashSales += shopAmount(o); }
+        else if (inShift(made)) { s.unpaid += shopAmount(o); s.unpaidCount++; }
+      }
       return;
     }
     if (!inShift(made)) return;

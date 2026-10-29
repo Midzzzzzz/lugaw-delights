@@ -635,7 +635,9 @@ function deliverySteps(o){
   if(o.status==="cancelled") return "";
   const i=DEL_STEPS.findIndex(([s])=>s===o.status), done=o.status==="delivered";
   const steps=DEL_STEPS.map(([s,l],k)=>`<span class="dstep ${k<i||(done&&k===i)?"done":k===i?"now":""}">${l}</span>`);
-  steps.push(`<span class="dstep ${!done?"":o.settled===false?"now":"done"}">${done&&o.settled!==false?"Settled":"Settle with rider"}</span>`);
+  // GCash / QR: the customer paid the shop, so only the rider's fee is left to send
+  const last=o.payment==="GCash"?(done&&o.settled!==false?"Rider's fee sent":"Send rider's fee"):(done&&o.settled!==false?"Settled":"Settle with rider");
+  steps.push(`<span class="dstep ${!done?"":o.settled===false?"now":"done"}">${last}</span>`);
   return `<div class="dsteps" aria-label="Delivery progress">${steps.join("")}</div>`;
 }
 
@@ -749,7 +751,7 @@ function orderCard(o){
   const payAtPickup=o.status==="ready"&&del&&o.riderUid&&o.payment==="Cash"?`<b>Pickup</b><span>Hand over the food only after the rider pays you <b>${peso(shopAmount(o))}</b>. The rider then collects ${peso(o.total)} from the customer and keeps the ${peso(o.deliveryFee)} fee.</span>`:"";
   const settle=unsettled(o)?`<b>Settle</b><span>${o.payment==="Cash"
     ? `Older cash order: the rider collected ${peso(o.total)} cash, keeps the ${peso(o.deliveryFee)} fee and owes you ${peso(shopAmount(o))}.`
-    : `Paid by GCash. You owe the rider the ${peso(o.deliveryFee)} fee.${payTo(o.riderUid)}`}</span>`:"";
+    : `${o.paymentConfirmed?`The customer paid the shop by GCash: the ${peso(shopAmount(o))} sale is already yours.`:"Paid by GCash."} You owe the rider only the ${peso(o.deliveryFee)} delivery fee.${payTo(o.riderUid)}`}</span>`:"";
   return `<div class="order ${o.status==="new"||needsStore(o)?"alert":""}">
     <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${esc(st.tone)}">${esc(statusLabel(o))}</span></div>
     ${del?deliverySteps(o):""}
