@@ -468,12 +468,14 @@ service cloud.firestore {
       function newOrder(d) {
         return d.keys().hasOnly(
              ['code','customerUid','mode','address','notes','payment','hasPin','zone','zoneName',
-              'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt'])
+              'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt','preorder'])
           && d.customerUid == uid()
           && d.status == 'new'
           && d.riderUid == null
           && d.mode == 'Delivery' // customers order delivery only (pickup orders from before stay valid)
           && d.payment in ['Cash', 'GCash'] // cash on delivery, or paid by QR before cooking
+          // a pre-order (platters, party packages) is paid in full by QR before the shop accepts it
+          && (!('preorder' in d) || (d.preorder == true && d.payment == 'GCash'))
           && okItems(d.items)
           && amount(d.subtotal) && amount(d.deliveryFee) && amount(d.total)
           && boxOk(d) && d.total == d.subtotal + d.deliveryFee + d.get('boxFee', 0) && d.subtotal > 0
@@ -583,6 +585,9 @@ service cloud.firestore {
             // and only goes back to looking for a rider before the kitchen has started on it
             && !(resource.data.mode == 'Delivery' && request.resource.data.status == 'new'
                  && !(resource.data.status in ['new', 'assigned']))
+            // A pre-order isn't accepted until the seller has confirmed the full payment arrived
+            && !(resource.data.get('preorder', false) == true && resource.data.status in ['new', 'assigned']
+                 && request.resource.data.status == 'preparing' && resource.data.get('paymentConfirmed', false) != true)
             // An online GCash order isn't cooked until the customer sends their GCash reference number
             && !(resource.data.status in ['new', 'assigned'] && request.resource.data.status == 'preparing'
                  && resource.data.payment == 'GCash' && resource.data.mode != 'Dine-in'
@@ -610,7 +615,7 @@ service cloud.firestore {
             && (!changed().hasAny(['settledTotal']) || (resource.data.mode == 'Dine-in' && ('paidTotal' in resource.data)
                  && request.resource.data.settledTotal == resource.data.total))
             // (items, prices, box fees and the removal log only change through the dine-in change rule below)
-            && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','boxFee','total','payment','createdAt','source','platformRef',
+            && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','boxFee','total','payment','createdAt','source','platformRef','preorder',
                                   'addedAt','removed','editedAt','editedBy','editedByName'])
             && (!changed().hasAny(['cancelReason']) || str(request.resource.data.cancelReason, 150))
             && (!changed().hasAny(['sellerUid','sellerName'])

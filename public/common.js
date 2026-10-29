@@ -48,6 +48,7 @@ export const MENU = MENU_SECTIONS.map(c => ({ ...c, items: (c.items || []).filte
 export const PREORDER_DAYS = 1;
 export const isPreorderSection = c => c.preorder ?? /platter|package|bilao/i.test(c.name || "");
 export const preorderItems = items => (items || []).filter(it => ITEMS[it.id]?.pre);
+export const isPreorder = o => o?.preorder === true || (o?.mode !== "Dine-in" && !o?.manual && preorderItems(o?.items).length > 0);
 // Every item, sold out or not (names and prices for older orders)
 export const ITEMS = Object.create(null);
 MENU_SECTIONS.forEach(c => (c.items || []).forEach(it => {

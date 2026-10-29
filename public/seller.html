@@ -148,7 +148,7 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
-import { prepMinutes, orderType, PLATFORMS, salesRows } from "./common.js";
+import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder } from "./common.js";
 import { shiftSummary } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -726,10 +726,12 @@ function orderCard(o){
   const del=o.mode==="Delivery", dineIn=o.mode==="Dine-in", c=dineIn?null:contactFor(o.id);
   let acts=[];
   const avail=riders.filter(r=>r.status==="approved"&&r.online);
-  const unpaidGcash=o.payment==="GCash" && !dineIn && !o.gcashRef && !o.payShotAt; // can't be accepted until the customer pays
+  // can't be accepted until the customer pays; a pre-order only once the seller confirmed the full payment arrived
+  const pre=isPreorder(o), unpaidGcash=o.payment==="GCash" && !dineIn && (pre ? !o.paymentConfirmed : !o.gcashRef && !o.payShotAt);
   // Pickup orders are cooked right away; delivery orders once a rider has accepted
-  if(o.status==="new" && !del) acts.push(unpaidGcash ? ["waitpay","Waiting for GCash payment","btn"] : ["preparing","Accept & start cooking","btn"]);
-  if(o.status==="assigned" && del) acts.push(unpaidGcash ? ["waitpay","Waiting for GCash payment","btn"] : ["preparing","Rider found: start cooking","btn"]);
+  const waitLabel=pre?"Pre-order: confirm the full payment first":"Waiting for GCash payment";
+  if(o.status==="new" && !del) acts.push(unpaidGcash ? ["waitpay",waitLabel,"btn"] : ["preparing","Accept & start cooking","btn"]);
+  if(o.status==="assigned" && del) acts.push(unpaidGcash ? ["waitpay",waitLabel,"btn"] : ["preparing","Rider found: start cooking","btn"]);
   if(o.status==="preparing") acts.push(dineIn ? ["completed","Served","btn ok"]
     : [del?"ready":"ready_pickup", del?"Food ready":"Ready for pickup","btn ok"]);
   if(o.status==="ready_pickup") acts.push(["completed","Customer picked up","btn ok"]);
@@ -755,6 +757,7 @@ function orderCard(o){
   return `<div class="order ${o.status==="new"||needsStore(o)?"alert":""}">
     <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${esc(st.tone)}">${esc(statusLabel(o))}</span></div>
     ${del?deliverySteps(o):""}
+    ${pre?`<div class="flag"><b>Pre-order</b> (platter / package): deliver on ${esc(new Date((o.createdAt?.toMillis?.()??Date.now())+86400000).toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"}))}. It must be paid in full first${o.payment==="Cash"?`. <b>This one says cash on delivery:</b> call the customer to pay by QR before accepting.`:o.paymentConfirmed?": paid.":`: check the payment arrived, then tap Payment received.`}</div>`:""}
     ${o.unconfirmedAt&&o.status==="new"?`<div class="flag">Rider ${esc(o.unconfirmedByName||"")} couldn't confirm this customer by phone (${fmtTime(o.unconfirmedAt)}). Call the customer; if it's a fake order, cancel it.</div>`:""}
     ${o.manual||priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
     ${!dineIn && c && ["new","preparing"].includes(o.status) && phoneConfirmed(c.phone)===false?`<div class="flag">New number. Call ${esc(c.phone)} to check the order is real before cooking.</div>`:""}

@@ -97,6 +97,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
               <input type="radio" name="pay" id="p-cash" value="Cash" checked><label for="p-cash">Cash on delivery</label>
               <input type="radio" name="pay" id="p-qr" value="GCash"><label for="p-qr">Pay now: GCash or bank app (QR)</label>
             </div>
+            <p class="flag" id="prePay" hidden style="margin:0">Your order has a pre-order (platter or package): it must be paid in full by QR before we accept it.</p>
             <p class="muted" id="qrNote" hidden style="margin:0;font-size:.88rem">After you place your order, we show a QR code. Pay with GCash, Maya or your bank app, then type the reference number.</p>
           </div>
           <label class="f" for="f-notes">Notes (optional)<input id="f-notes" maxlength="300" placeholder="Extra spicy, no spring onion, etc."></label>
@@ -192,6 +193,9 @@ const cartItems=()=>Object.entries(cart).map(([id,qty])=>({id,name:ITEMS[id].nam
 
 function renderCart(){
   const items=cartItems(), t=calcTotals(items,mode(),zoneFee()||0), count=items.reduce((a,b)=>a+b.qty,0);
+  // pre-orders are paid in full by QR first: cash isn't offered
+  const pre=preorderItems(items).length>0;
+  if(SHOP.payQr){ $("#p-cash").disabled=pre; if(pre) $("#p-qr").checked=true; $("#prePay").hidden=!pre; $("#qrNote").hidden=pay()!=="GCash"; }
   $("#cartBox").innerHTML = items.length ? `
     <ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${esc(it.name)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
     <div class="totals"><div><span>Subtotal</span><span>${peso(t.subtotal)}</span></div>
@@ -564,7 +568,7 @@ $("#form").addEventListener("submit", async e=>{
     address: mode()==="Delivery"?`${address}, Brgy. ${z.name}, ${z.town}, Laguna`:"", notes, payment:pay(), items,
     ...(mode()==="Delivery"?{zone:z.id, zoneName:zoneLabel(z)}:{}),
     subtotal:t.subtotal, deliveryFee:t.deliveryFee, boxFee:t.boxFee, total:t.total,
-    status:"new", riderUid:null, createdAt:serverTimestamp(), ...(pin?{hasPin:true}:{})
+    status:"new", riderUid:null, createdAt:serverTimestamp(), ...(pin?{hasPin:true}:{}), ...(preorderItems(items).length?{preorder:true}:{})
   });
   batch.set(doc(db,"contacts",ref.id),{ name, phone, customerUid:user.uid, createdAt:serverTimestamp() });
   batch.set(doc(db,"customers",user.uid),{ lastOrderAt:serverTimestamp(), lastOrderId:ref.id });
