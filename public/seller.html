@@ -148,7 +148,7 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
-import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder, preorderWhen, preorderReleaseAt, PREORDER_PAY_MINUTES, preorderItems, paymentSent, paymentRejected } from "./common.js";
+import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder, preorderWhen, preorderReleaseAt, PREORDER_PAY_MINUTES, preorderItems, paymentSent, paymentRejected, saleAt, ymdOf } from "./common.js";
 import { shiftSummary } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -641,7 +641,7 @@ const TABS=[
   ["pre","Pre-orders",o=>o.status==="scheduled","hideEmpty"],
   ["kitchen","Kitchen",o=>o.status==="preparing"&&!isDel(o)],
   ["out","Ready for pickup",o=>o.status==="ready_pickup","hideEmpty"],
-  ["done","Done today",o=>["delivered","completed"].includes(o.status)&&isToday(o.createdAt)],
+  ["done","Done today",o=>["delivered","completed"].includes(o.status)&&isToday(saleAt(o))],
   ["unpaid","Unpaid",unpaidDine],
   ["settle","Settle with riders",unsettled],
   ["cancelled","Cancelled",o=>o.status==="cancelled"&&isToday(o.createdAt)],
@@ -1061,7 +1061,7 @@ if(BT){
 // ---------- Cashier shift ----------
 // One shift at a time for the counter. Open it with the cash in the drawer; pay in / pay out
 // cash during the shift; close it by counting the drawer. Dine-in orders need an open shift.
-let shift=null, shiftOrders=[], stopShiftOrders=null, shiftForm="", shiftMsg="", shiftDraft={}, lastClosed=null;
+let shift=null, shiftOrders=[], shiftPre=[], stopShiftOrders=null, shiftForm="", shiftMsg="", shiftDraft={}, lastClosed=null;
 const plural=(n,w)=>`${n} ${w}${n===1?"":"s"}`;
 const SHIFT_REASONS={in:["Change fund","Owner added cash"],out:["Bought supplies","Bought ice","Owner took cash","Paid rider"]};
 function watchShift(){
@@ -1069,9 +1069,16 @@ function watchShift(){
     const list=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})).sort((a,b)=>(b.openedAt?.toMillis?.()||0)-(a.openedAt?.toMillis?.()||0));
     const was=shift?.id; shift=list[0]||null; shiftLoaded=true; syncStore();
     if(shift?.id!==was){
-      stopShiftOrders?.(); stopShiftOrders=null; shiftOrders=[];
-      if(shift?.openedAt) stopShiftOrders=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",shift.openedAt)),
-        q=>{ shiftOrders=q.docs.map(d=>({id:d.id,...d.data()})); renderShift(); }, ()=>{});
+      stopShiftOrders?.(); stopShiftOrders=null; shiftOrders=[]; shiftPre=[];
+      if(shift?.openedAt){
+        const a=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",shift.openedAt)),
+          q=>{ shiftOrders=q.docs.map(d=>({id:d.id,...d.data()})); renderShift(); }, ()=>{});
+        // pre-orders ordered before the shift but delivered or picked up during it count in it
+        const opened=shift.openedAt.toDate?.()||new Date();
+        const b=onSnapshot(query(collection(db,"orders"),where("preorder","==",true),where("deliverOn",">=",ymdOf(new Date(opened.getTime()-86400000)))),
+          q=>{ shiftPre=q.docs.map(d=>({id:d.id,...d.data()})); renderShift(); }, ()=>{});
+        stopShiftOrders=()=>{ a(); b(); };
+      }
     }
     renderShift();
   }, e=>{ shiftMsg="Couldn't load the shift: "+friendlyError(e)+" If the owner just updated the app, the new security rules may not be published yet."; renderShift(); }));
@@ -1079,7 +1086,7 @@ function watchShift(){
 }
 // Orders for the summary: this shift's orders, plus deliveries whose cash came in during it
 function shiftNow(sh=shift){
-  const m=new Map(); [...orders,...shiftOrders].forEach(o=>m.set(o.id,o));
+  const m=new Map(); [...orders,...shiftOrders,...shiftPre].forEach(o=>m.set(o.id,o));
   return shiftSummary(sh,[...m.values()]);
 }
 const typingInShift=()=>{ const a=document.activeElement; return !!a && a.tagName==="INPUT" && !!a.closest("#shiftCard"); };

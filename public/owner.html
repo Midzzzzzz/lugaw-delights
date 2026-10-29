@@ -117,7 +117,7 @@ import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot,
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
 import { findShifts, pastSummary } from "./pastshifts.js";
-import { saved, prepMinutes, orderType, businessDate, DAY_START, platformName, boxRow, SHOP, PLATFORMS, shiftSummary, salesRows, isPreorderSection, isPreorder, preorderWhen } from "./common.js";
+import { saved, prepMinutes, orderType, businessDate, DAY_START, platformName, boxRow, SHOP, PLATFORMS, shiftSummary, salesRows, isPreorderSection, isPreorder, preorderWhen, saleAt, ymdOf } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
@@ -129,7 +129,7 @@ const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==
 $("#setup").innerHTML=setupNotice();
 
 if(isConfigured) onAuthStateChanged(auth, async u=>{
-  subs.forEach(f=>f()); subs=[]; ordersSub?.(); ordersSub=null;
+  subs.forEach(f=>f()); subs=[]; ordersSub?.(); ordersSub=null; preSub?.(); preSub=null;
   const me=u && !u.isAnonymous ? u : null;
   $("#signOut").hidden=!me;
   if(!me) return show("loginForm");
@@ -254,6 +254,17 @@ function watchOrders(){
   ordersSub=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<",Timestamp.fromDate(b)),orderBy("createdAt","desc")),
     s=>{ orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); },
     e=>{ $("#view").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; });
+  // pre-orders count as sales on the day they're delivered or picked up, which may be after they were ordered
+  preSub?.(); preDone=[];
+  preSub=onSnapshot(query(collection(db,"orders"),where("preorder","==",true),where("deliverOn",">=",ymdOf(addDays(a,-1))),where("deliverOn","<=",ymdOf(b))),
+    s=>{ preDone=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{});
+}
+let preSub=null, preDone=[];
+// The finished orders whose sale falls in the chosen range
+function salesDone(){
+  const [a,b]=rangeDates(), inRange=o=>{ const t=saleAt(o)?.toMillis?.(); return t!=null && t>=a.getTime() && t<b.getTime(); };
+  const pre=new Map([...orders.filter(o=>o.preorder&&!o.deliverOn),...preDone].map(o=>[o.id,o])); // older pre-orders have no delivery day
+  return [...orders.filter(o=>isDone(o)&&!o.preorder), ...[...pre.values()].filter(o=>isDone(o)&&inRange(o))];
 }
 
 // ---------- Numbers ----------
@@ -286,7 +297,7 @@ function render(force){
   const a=document.activeElement;
   if(force!==true && a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.closest("#view") && a.id!=="search"){ renderWaiting=true; return; }
   // Sales: what the shop took in (cash, GCash). Foodpanda and Grab pay out weekly, so they're counted apart.
-  const done=orders.filter(isDone), own=done.filter(o=>!platformName(o)), sales=own.reduce((s,o)=>s+shopAmount(o),0);
+  const done=salesDone(), own=done.filter(o=>!platformName(o)), sales=own.reduce((s,o)=>s+shopAmount(o),0);
   $("#sSales").textContent=peso(sales);
   $("#sPlat").textContent=peso(done.filter(o=>platformName(o)).reduce((s,o)=>s+shopAmount(o),0));
   $("#sOrders").textContent=done.length;
@@ -326,7 +337,7 @@ function renderSales(done){
   const byPay=group(all,o=>o.payment,o=>o.payment,food);
   // Foodpanda / Grab by week (Monday to Sunday), as the platforms pay out weekly
   const weekOf=d=>{ const x=businessDate(d); x.setDate(x.getDate()-(x.getDay()+6)%7); return x; }, byWeek=new Map();
-  plat.forEach(o=>{ const d=o.createdAt?.toDate?.(); if(!d) return; const w=weekOf(d), k=ymd(w)+"|"+o.source;
+  plat.forEach(o=>{ const d=saleAt(o)?.toDate?.(); if(!d) return; const w=weekOf(d), k=ymd(w)+"|"+o.source;
     const r=byWeek.get(k)||{key:k,w,label:`${platformName(o)} · ${w.toLocaleDateString("en-PH",{month:"short",day:"numeric"})} – ${addDays(w,6).toLocaleDateString("en-PH",{month:"short",day:"numeric"})}`,count:0,value:0};
     r.count++; r.value+=food(o); byWeek.set(k,r); });
   const platWeeks=[...byWeek.values()].sort((x,y)=>y.w-x.w||x.label.localeCompare(y.label));
@@ -338,10 +349,10 @@ function renderSales(done){
   const topItems=[...items.values()].sort((x,y)=>y.count-x.count||y.value-x.value).slice(0,10).map(r=>({...r,value:r.count,sales:r.value}));
   // Sales over time: by hour for a single day, by day for longer ranges
   const [a,b]=rangeDates(), oneDay=b-a<=86400000, buckets=new Map();
-  if(oneDay){ done.forEach(o=>{ const h=o.createdAt?.toDate?.().getHours(); if(h!=null) buckets.set(h,(buckets.get(h)||0)+food(o)); }); }
+  if(oneDay){ done.forEach(o=>{ const h=saleAt(o)?.toDate?.().getHours(); if(h!=null) buckets.set(h,(buckets.get(h)||0)+food(o)); }); }
   else {
     for(let d=new Date(a); d<b; d=addDays(d,1)) buckets.set(ymd(d),0); // every day shows, even with no sales
-    done.forEach(o=>{ const d=o.createdAt?.toDate?.(); if(d){ const k=ymd(businessDate(d)); buckets.set(k,(buckets.get(k)||0)+food(o)); } });
+    done.forEach(o=>{ const d=saleAt(o)?.toDate?.(); if(d){ const k=ymd(businessDate(d)); buckets.set(k,(buckets.get(k)||0)+food(o)); } });
   }
   let time=[...buckets.entries()].map(([k,v])=>({label:oneDay?new Date(2000,0,1,k).toLocaleTimeString("en-PH",{hour:"numeric"}):new Date(k+"T00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"}),value:v,k:oneDay?(k-DAY_START()+24)%24:k})); // a day's hours run from opening (5 AM) to 4 AM
   time.sort((x,y)=>x.k<y.k?-1:x.k>y.k?1:0);

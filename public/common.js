@@ -70,6 +70,12 @@ export const PREORDER_PAY_MINUTES = 60;
 const tms = t => t?.toMillis?.() ?? 0;
 export const paymentSent = o => { const sent = Math.max(tms(o?.payShotAt), tms(o?.gcashSentAt), o?.gcashRef && !o?.gcashSentAt ? 1 : 0); return sent > 0 && sent > tms(o?.payRejectedAt); };
 export const paymentRejected = o => !!o?.payRejectedAt && !o?.paymentConfirmed && !paymentSent(o);
+// When an order counts as a sale: when it was placed; a pre-order (paid days ahead) only once it
+// was delivered, served or picked up. null for a pre-order not finished yet.
+export const saleAt = o => !o?.preorder ? o?.createdAt
+  : ["delivered", "completed"].includes(o.status) ? (o.deliveredAt || o.completedAt || o.createdAt) : null;
+// The days (YYYY-MM-DD) a pre-order may be finished on, for loading the pre-orders of a date range
+export const ymdOf = d => d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
 export const isPreorder = o => o?.preorder === true || (o?.mode !== "Dine-in" && !o?.manual && preorderItems(o?.items).length > 0);
 // Every item, sold out or not (names and prices for older orders)
 export const ITEMS = Object.create(null);
@@ -228,7 +234,9 @@ export function shiftSummary(shift, orders, now = Date.now()) {
     payIn: 0, payOut: 0, startCash: shift.startCash || 0 };
   orders.forEach(o => {
     if (o.manual) return;
-    const made = ms(o.createdAt) ?? now;
+    // a pre-order counts in the shift it was delivered or picked up in (not when it was ordered and paid)
+    if (o.preorder && o.status !== "cancelled" && !saleAt(o)) return;
+    const made = ms(o.preorder && o.status !== "cancelled" ? saleAt(o) : o.createdAt) ?? now;
     if (o.status === "cancelled") { if (inShift(made)) s.cancelled++; return; }
     if (inShift(made)) { s.orders++; if (!platformName(o)) { s.sales += shopAmount(o); s[o.mode === "Delivery" ? "deliverySales" : "dineSales"] += shopAmount(o); } } // Foodpanda / Grab: platformSales (paid out weekly)
     if (o.mode === "Delivery") {
@@ -237,7 +245,7 @@ export function shiftSummary(shift, orders, now = Date.now()) {
       const got = ms(o.riderPaidAt) ?? ms(o.settledAt);
       if (o.payment === "Cash" && o.cashReceived && inShift(got)) s.riderCash += shopAmount(o);
       if (o.payment === "GCash") {
-        if (o.paymentConfirmed) { if (inShift(ms(o.paymentConfirmedAt) ?? made)) s.gcashSales += shopAmount(o); }
+        if (o.paymentConfirmed) { if (inShift(o.preorder ? made : ms(o.paymentConfirmedAt) ?? made)) s.gcashSales += shopAmount(o); }
         else if (inShift(made)) { s.unpaid += shopAmount(o); s.unpaidCount++; }
       }
       return;
