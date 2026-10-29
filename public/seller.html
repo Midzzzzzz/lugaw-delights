@@ -148,7 +148,7 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
-import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder, preorderWhen, preorderReleaseAt } from "./common.js";
+import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder, preorderWhen, preorderReleaseAt, PREORDER_PAY_MINUTES, preorderItems } from "./common.js";
 import { shiftSummary } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -304,6 +304,12 @@ setInterval(()=>{
   orders.filter(o=>o.status==="scheduled" && o.paymentConfirmed && Date.now()>=preorderReleaseAt(o) && !releasing.has(o.id)).forEach(o=>{
     releasing.add(o.id);
     updateDoc(doc(db,"orders",o.id),{status:"new",releasedAt:serverTimestamp()}).catch(()=>releasing.delete(o.id)); // another screen may have sent it already
+  });
+  // a pre-order nobody paid for (no screenshot or Ref No.) is cancelled after an hour
+  orders.filter(o=>o.status==="scheduled" && !o.paymentConfirmed && !o.payShotAt && !o.gcashRef && !releasing.has(o.id)
+    && Date.now()-(o.createdAt?.toMillis?.()??Date.now())>PREORDER_PAY_MINUTES*60000).forEach(o=>{
+    releasing.add(o.id);
+    updateDoc(doc(db,"orders",o.id),{status:"cancelled",cancelledBy:"shop",cancelReason:`Not paid within ${PREORDER_PAY_MINUTES} minutes`}).catch(()=>releasing.delete(o.id));
   });
 },30000);
 function merge(){
@@ -487,11 +493,13 @@ function renderDineTotals(){
   $("#gcashWrap").hidden=dinePay()!=="GCash" || !!addingTo;
   $("#platformWrap").hidden=!PLATFORMS[dinePay()] || !!addingTo;
   $("#platformLabel").textContent=`${PLATFORMS[dinePay()]||""} order number`;
-  $("#gcashChips").innerHTML=`<button type="button" class="${gcashNow?"":"on"}" data-gcash-now="">Pay later</button>
+  const preNow=preorderItems(items).length>0; // platters and packages are paid in full now: no "pay later"
+  if(preNow && !gcashNow && dinePay()==="GCash") gcashNow=true;
+  $("#gcashChips").innerHTML=`${preNow?"":`<button type="button" class="${gcashNow?"":"on"}" data-gcash-now="">Pay later</button>`}
     <button type="button" class="${gcashNow?"on":""}" data-gcash-now="1">GCash received${items.length?` · ${peso(t.total)}`:""}</button>`;
   $("#dineSave").textContent=addingTo?"Save changes":items.length?`Send to kitchen · ${peso(t.total)}`:"Send to kitchen";
   const gv=$("#d-given").value.trim();
-  $("#cashChips").innerHTML=items.length&&!addingTo?[`<button type="button" class="${gv===""?"on":""}" data-cash="">Pay later</button>`,
+  $("#cashChips").innerHTML=items.length&&!addingTo?[...(preNow?[]:[`<button type="button" class="${gv===""?"on":""}" data-cash="">Pay later</button>`]),
     ...cashChoices(t.total).map((n,i)=>`<button type="button" class="${gv===String(n)?"on":""}" data-cash="${n}">${cashLabel(n,i)}</button>`)].join(""):"";
   const change = given===null ? "" : given>=t.total
     ? `<div><span>Cash received</span><span>${peso(given)}</span></div><div class="grand"><span>Change</span><span>${peso(given-t.total)}</span></div>`
@@ -591,6 +599,8 @@ $("#dineForm").onsubmit=async e=>{
   const short=stockProblem(); if(short) return dineErr(short); // stock may have changed since the items were tapped
   const t=calcTotals(items,"Dine-in"), ref=doc(collection(db,"orders")), given=cashGiven();
   if(given!==null && !(given>=t.total)) return dineErr(`Cash received is less than the ${peso(t.total)} total.`);
+  if(preorderItems(items).length && !PLATFORMS[dinePay()] && !(dinePay()==="Cash"?given!==null:gcashNow))
+    return dineErr(`Platters and packages are paid in full first: ${dinePay()==="Cash"?"enter the cash received":"tap GCash received"} (${peso(t.total)}).`);
   $("#dineSave").disabled=true;
   const src=PLATFORMS[dinePay()]?dinePay():null, pref=$("#d-pref").value.trim().slice(0,30);
   const order={ code:orderCode(ref.id), customerUid:me.uid, sellerUid:me.uid, sellerName:myName, mode:"Dine-in",

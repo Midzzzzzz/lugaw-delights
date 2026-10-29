@@ -63,6 +63,8 @@ export function preorderReleaseAt(o) {
   const open = new Date(day); open.setHours(5, 0, 0, 0);
   return day < open ? open : day;
 }
+// An unpaid pre-order (no payment sent) is cancelled after this long, so it doesn't hold a day's order
+export const PREORDER_PAY_MINUTES = 60;
 export const isPreorder = o => o?.preorder === true || (o?.mode !== "Dine-in" && !o?.manual && preorderItems(o?.items).length > 0);
 // Every item, sold out or not (names and prices for older orders)
 export const ITEMS = Object.create(null);
