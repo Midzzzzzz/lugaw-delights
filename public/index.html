@@ -35,6 +35,8 @@ section.cat h2 small{font-family:var(--body);font-size:.8rem;color:var(--muted);
 .step span{min-width:24px;text-align:center;font-weight:800;font-variant-numeric:tabular-nums}
 aside#side{position:sticky;top:70px;display:grid;gap:14px;scroll-margin-top:70px}
 @media (max-width:860px){aside#side{position:static}}
+.hist{display:grid;gap:4px;border-top:2px dashed var(--line);padding-top:8px}
+.hist .when{font-size:.85rem;color:var(--muted)}
 /* While an order is in progress the page shows only its tracking */
 body.tracking #menu,body.tracking #cats,body.tracking #orderBox,body.tracking #bar,body.tracking #closed{display:none!important}
 body.tracking .layout{grid-template-columns:minmax(0,1fr)}
@@ -68,6 +70,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
       <p class="tag">Comfort in a bowl, delivered hot to your door.</p>
       <div class="chips">
         <span class="pill brand" id="hoursPill"></span>
+        <a class="pill" href="#histBox" id="histLink" hidden style="text-decoration:none">My orders</a>
         <span class="pill">Delivery</span><span class="pill">Cash on delivery</span>
       </div>
     </div>
@@ -83,6 +86,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
     <aside id="side">
       <div class="card track" id="trackBox" hidden></div>
 
+      <div class="card" id="histBox" hidden style="margin-bottom:12px;display:grid;gap:8px"></div>
       <div class="card" id="orderBox">
         <h2>Your order</h2>
         <div id="cartBox"></div>
@@ -124,7 +128,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
 
 <script type="module">
 import { onAuthStateChanged, signInAnonymously } from "./fb/auth.js";
-import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp } from "./fb/firestore.js";
+import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp, query, where, orderBy, limit } from "./fb/firestore.js";
 import { compressPhoto } from "./common.js";
 import { preorderItems, PREORDER_DAYS, preorderWhen, PREORDER_PAY_MINUTES, paymentSent, paymentRejected } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, shortItem, servingsLeft, MAX_LINES, MAX_QTY, REPORT_REASONS, phoneKey, DELIVERY_ZONES, ZONES, zoneLabel, peso, esc, STATUS, FLOW, stepLabel, calcTotals, boxRow, itemsHTML, fmtTime, orderCode, friendlyError, setupNotice } from "./common.js";
@@ -132,6 +136,7 @@ import { notify, setupAlerts, statusLabel } from "./common.js";
 setupAlerts();
 
 const $ = s => document.querySelector(s);
+let pastOrders=[], histAll=false; // My orders (finished orders of this phone)
 const cart = {};
 let storeOpen = true, user = null;
 // Delivery fees per barangay, from the owner's settings (null until loaded, {} if not set up)
@@ -321,7 +326,7 @@ if(isConfigured){
   onAuthStateChanged(auth, u=>{
     user=u;
     if(!u){ signInAnonymously(auth).catch(e=>showErr(friendlyError(e))); return; }
-    watchMyOrders();
+    watchMyOrders(); watchHistory();
   });
 }
 
@@ -341,6 +346,43 @@ function watchMyOrders(){
       ()=>{ delete live[id]; renderTrack(); });
   });
 }
+// ---------- My orders: this phone's past orders, with "Order again" ----------
+function watchHistory(){
+  if(!user) return;
+  onSnapshot(query(collection(db,"orders"),where("customerUid","==",user.uid),orderBy("createdAt","desc"),limit(30)),
+    s=>{ pastOrders=s.docs.map(d=>({id:d.id,...d.data()})).filter(o=>FINAL.includes(o.status)).slice(0,20); renderHistory(); }, ()=>{});
+}
+function renderHistory(){
+  $("#histBox").hidden=!pastOrders.length; $("#histLink").hidden=!pastOrders.length;
+  if(!pastOrders.length) return;
+  const busy=document.body.classList.contains("tracking"), shown=histAll?pastOrders:pastOrders.slice(0,5);
+  $("#histBox").innerHTML=`<h2 style="margin:0">My orders</h2>
+    <p class="muted" style="margin:0;font-size:.85rem">Your past orders on this ${appView?"phone":"phone or browser"}. Tap <b>Order again</b> to put the same items in your order.</p>
+    ${shown.map(o=>`<div class="hist">
+      <div class="btnrow" style="justify-content:space-between"><b class="num">${esc(o.code)}</b><span class="pill ${o.status==="cancelled"?"off":"done"}">${esc(o.status==="cancelled"?"Cancelled":o.mode==="Pickup"?"Picked up":"Delivered")}</span></div>
+      <div class="when">${esc((o.createdAt?.toDate?.()||new Date()).toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}${o.preorder?" · Pre-order":""}</div>
+      <div style="font-size:.92rem">${(o.items||[]).map(it=>`${esc(it.qty)}× ${esc(ITEMS[it.id]?.name||it.name)}`).join(", ")}</div>
+      <div class="btnrow" style="justify-content:space-between"><b>${peso(o.total)}</b>
+        <button class="btn small" data-again="${esc(o.id)}"${busy?" disabled":""}>Order again</button></div></div>`).join("")}
+    ${pastOrders.length>5?`<button class="btn ghost small" data-histall style="justify-self:start">${histAll?"Show fewer":`Show all ${pastOrders.length}`}</button>`:""}
+    ${busy?`<p class="muted" style="margin:0;font-size:.85rem">You can order again once your current order arrives.</p>`:""}
+    <p class="err" id="againMsg" hidden style="margin:0"></p>`;
+}
+$("#histBox").addEventListener("click",e=>{
+  if(e.target.closest("[data-histall]")){ histAll=!histAll; return renderHistory(); }
+  const b=e.target.closest("[data-again]"); if(!b) return;
+  const o=pastOrders.find(x=>x.id===b.dataset.again); if(!o) return;
+  // the same items, if they're still on the menu and not sold out (prices are today's)
+  const skip=[]; Object.keys(cart).forEach(id=>{ delete cart[id]; renderCtl(id); });
+  (o.items||[]).forEach(it=>{ const id=it.id;
+    if(!ITEMS[id] || removed.has(id) || soldOut.has(id) || ITEMS[id].off) { skip.push(it.name||id); return; }
+    cart[id]=Math.min(MAX_QTY,(cart[id]||0)+(Number(it.qty)||0)); renderCtl(id); });
+  const short=stockProblem(); if(short) skip.push(short);
+  if(o.preorder && o.mode==="Pickup") $("#pm-pick").checked=true; else $("#pm-del").checked=true;
+  renderCart(); showErr("");
+  const m=$("#againMsg"); m.hidden=!skip.length; m.textContent=skip.length?`Not added (no longer available or sold out): ${skip.join(", ")}.`:"";
+  if(Object.keys(cart).length) $("#orderBox").scrollIntoView({behavior:"smooth",block:"start"});
+});
 // Stop tracking an order on this phone
 function forgetOrder(id){
   try{ localStorage.setItem(KEY, JSON.stringify(myOrderIds().filter(x=>x!==id))); }catch(_){}
@@ -371,7 +413,7 @@ function renderTrack(){
   const waiting=o=>o.status==="scheduled" && (o.paymentConfirmed || paymentSent(o));
   const busy=list.some(o=>!FINAL.includes(o.status) && !waiting(o));
   if(document.body.classList.contains("tracking") && !busy) window.scrollTo({top:0,behavior:"smooth"});
-  document.body.classList.toggle("tracking",busy);
+  document.body.classList.toggle("tracking",busy); renderHistory();
   $("#trackBox").innerHTML = `<h2>Track your order</h2>` + list.map(o=>{
     const flow=o.preorder?["scheduled",...(FLOW[o.mode]||FLOW.Delivery)]:FLOW[o.mode]||FLOW.Delivery, at=flow.indexOf(o.status), finished=FINAL.includes(o.status);
     const steps = o.status==="cancelled" ? `<p class="pill off" style="justify-self:start">Cancelled</p>` :
