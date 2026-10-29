@@ -230,7 +230,7 @@ const ms = t => t?.toMillis?.() ?? (t instanceof Date ? t.getTime() : null);
 export function shiftSummary(shift, orders, now = Date.now()) {
   const from = ms(shift.openedAt) ?? now, to = ms(shift.closedAt) ?? now;
   const inShift = t => t != null && t >= from && t < to + 1;
-  const s = { orders: 0, sales: 0, dineSales: 0, deliverySales: 0, cashSales: 0, gcashSales: 0, platformSales: 0, riderCash: 0, adjustIn: 0, adjustOut: 0, unpaid: 0, unpaidCount: 0, cancelled: 0,
+  const s = { orders: 0, sales: 0, dineSales: 0, deliverySales: 0, preSales: 0, preCount: 0, cashSales: 0, gcashSales: 0, platformSales: 0, riderCash: 0, adjustIn: 0, adjustOut: 0, unpaid: 0, unpaidCount: 0, cancelled: 0,
     payIn: 0, payOut: 0, startCash: shift.startCash || 0 };
   orders.forEach(o => {
     if (o.manual) return;
@@ -238,7 +238,7 @@ export function shiftSummary(shift, orders, now = Date.now()) {
     if (o.preorder && o.status !== "cancelled" && !saleAt(o)) return;
     const made = ms(o.preorder && o.status !== "cancelled" ? saleAt(o) : o.createdAt) ?? now;
     if (o.status === "cancelled") { if (inShift(made)) s.cancelled++; return; }
-    if (inShift(made)) { s.orders++; if (!platformName(o)) { s.sales += shopAmount(o); s[o.mode === "Delivery" ? "deliverySales" : "dineSales"] += shopAmount(o); } } // Foodpanda / Grab: platformSales (paid out weekly)
+    if (inShift(made)) { s.orders++; if (!platformName(o)) { s.sales += shopAmount(o); s[salesKind(o)] += shopAmount(o); if (o.preorder) s.preCount++; } } // Foodpanda / Grab: platformSales (paid out weekly)
     if (o.mode === "Delivery") {
       // Cash: the rider pays the shop at pickup. GCash / QR: the customer pays the shop directly, so
       // once the seller confirms it, it's GCash the shop received (the rider is only owed the fee).
@@ -267,8 +267,11 @@ export function shiftSummary(shift, orders, now = Date.now()) {
 }
 // Sales lines of a shift: the counter (dine-in and take-out), Lugaw Delights delivery, and their total.
 // Older shift records have only the total.
+// Which sales line an order is on: a pre-order (platters, packages), Lugaw Delights delivery, or dine-in
+export const salesKind = o => o.preorder ? "preSales" : o.mode === "Delivery" ? "deliverySales" : "dineSales";
 export const salesRows = s => s.dineSales == null ? [["Sales", s.sales]]
-  : [["Dine-in sales", s.dineSales], ["Lugaw Delights delivery sales", s.deliverySales], ["Total sales", s.sales]];
+  : [["Dine-in sales", s.dineSales], ["Lugaw Delights delivery sales", s.deliverySales],
+     ...(s.preSales ? [[`Pre-orders: platters & packages (${s.preCount || 0})`, s.preSales]] : []), ["Total sales", s.sales]];
 
 // The "Take-out boxes" line for an order's totals (empty when there are none)
 export function boxRow(o) {

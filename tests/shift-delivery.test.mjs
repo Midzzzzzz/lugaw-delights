@@ -32,11 +32,16 @@ const pre = over => del({ payment: "GCash", preorder: true, createdAt: at(1), pa
 s = shiftSummary(shift, [pre({ status: "scheduled" })]);
 t("a paid pre-order not delivered yet isn't a sale yet (nor unpaid)", s.orders === 0 && s.sales === 0 && s.gcashSales === 0 && s.unpaid === 0);
 s = shiftSummary(shift, [pre({ deliveredAt: at(14) })]);
-t("delivered during the shift: counted then, GCash too", s.orders === 1 && s.deliverySales === 110 && s.gcashSales === 110);
+t("delivered during the shift: counted then (on the pre-orders line), GCash too", s.orders === 1 && s.preSales === 110 && s.deliverySales === 0 && s.gcashSales === 110);
 s = shiftSummary({ ...shift, openedAt: at(0), closedAt: at(3) }, [pre({ deliveredAt: at(14) })]);
 t("not in the shift it was ordered and paid in", s.orders === 0 && s.sales === 0 && s.gcashSales === 0);
 s = shiftSummary(shift, [pre({ mode: "Pickup", deliveryFee: 0, total: 110, status: "completed", completedAt: at(15) })]);
-t("a pickup pre-order counts when picked up", s.orders === 1 && s.dineSales === 110 && s.gcashSales === 110);
+t("a pickup pre-order counts when picked up (on the pre-orders line)", s.orders === 1 && s.preSales === 110 && s.dineSales === 0 && s.gcashSales === 110);
+
+s = shiftSummary(shift, [pre({ deliveredAt: at(14) }), { mode: "Dine-in", status: "completed", payment: "Cash", cashGiven: 100, total: 78, paidTotal: 78, createdAt: at(12) },
+  del({ payment: "GCash", paymentConfirmed: true, paymentConfirmedAt: at(13), createdAt: at(13) })]);
+t("pre-orders on their own line; dine-in, delivery and pre-orders add up to the total",
+  s.preSales === 110 && s.preCount === 1 && s.dineSales === 78 && s.deliverySales === 110 && s.dineSales + s.deliverySales + s.preSales === s.sales);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
