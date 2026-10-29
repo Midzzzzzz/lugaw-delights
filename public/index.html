@@ -70,7 +70,6 @@ aside h2{font-size:1.4rem;color:var(--brand)}
       <p class="tag">Comfort in a bowl, delivered hot to your door.</p>
       <div class="chips">
         <span class="pill brand" id="hoursPill"></span>
-        <a class="pill" href="#histBox" id="histLink" hidden style="text-decoration:none">My orders</a>
         <span class="pill">Delivery</span><span class="pill">Cash on delivery</span>
       </div>
     </div>
@@ -78,6 +77,16 @@ aside h2{font-size:1.4rem;color:var(--brand)}
   <div id="setup"></div>
   <div class="notice closed" id="closed" hidden>We're closed right now. You can browse the menu, and ordering opens again during store hours.</div>
 
+  <!-- Order: the menu and the order form. My orders: upcoming pre-orders and past orders. -->
+  <div class="tabs" id="ctabs" role="tablist" style="margin-bottom:8px;position:static">
+    <button type="button" role="tab" data-ctab="order" class="on" aria-selected="true">Order</button>
+    <button type="button" role="tab" data-ctab="mine" aria-selected="false">My orders <span class="count" id="mineCount"></span></button>
+  </div>
+  <div id="minePane" hidden style="display:grid;gap:12px;max-width:640px">
+    <div class="card track" id="preBox"></div>
+    <div class="card" id="histBox" style="display:grid;gap:8px"></div>
+  </div>
+  <div id="orderPane">
   <nav class="cats" id="cats" aria-label="Menu categories"></nav>
 
   <div class="layout">
@@ -86,7 +95,6 @@ aside h2{font-size:1.4rem;color:var(--brand)}
     <aside id="side">
       <div class="card track" id="trackBox" hidden></div>
 
-      <div class="card" id="histBox" hidden style="margin-bottom:12px;display:grid;gap:8px"></div>
       <div class="card" id="orderBox">
         <h2>Your order</h2>
         <div id="cartBox"></div>
@@ -121,6 +129,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
         </form>
       </div>
     </aside>
+  </div>
   </div>
   <footer id="foot"></footer>
 </div>
@@ -333,7 +342,7 @@ if(isConfigured){
 // Orders this phone placed are remembered so the customer can track them.
 const KEY="ld_orders";
 function myOrderIds(){ try{ return JSON.parse(localStorage.getItem(KEY)||"[]"); }catch(_){ return []; } }
-function rememberOrder(id){ try{ localStorage.setItem(KEY, JSON.stringify([id,...myOrderIds().filter(x=>x!==id)].slice(0,5))); }catch(_){} }
+function rememberOrder(id){ try{ localStorage.setItem(KEY, JSON.stringify([id,...myOrderIds().filter(x=>x!==id)].slice(0,10))); }catch(_){} }
 const live={}, unsubs={};
 function watchMyOrders(){
   myOrderIds().forEach(id=>{
@@ -350,13 +359,17 @@ function watchMyOrders(){
 function watchHistory(){
   if(!user) return;
   onSnapshot(query(collection(db,"orders"),where("customerUid","==",user.uid),orderBy("createdAt","desc"),limit(30)),
-    s=>{ pastOrders=s.docs.map(d=>({id:d.id,...d.data()})).filter(o=>FINAL.includes(o.status)).slice(0,20); renderHistory(); }, ()=>{});
+    s=>{ const all=s.docs.map(d=>({id:d.id,...d.data()}));
+      pastOrders=all.filter(o=>FINAL.includes(o.status)).slice(0,20); renderHistory();
+      // a pre-order this phone isn't following (e.g. after the phone's data was cleared): follow it again
+      const open=all.filter(o=>o.preorder && !FINAL.includes(o.status) && !myOrderIds().includes(o.id));
+      if(open.length){ open.forEach(o=>rememberOrder(o.id)); watchMyOrders(); }
+    }, ()=>{});
 }
 function renderHistory(){
-  $("#histBox").hidden=!pastOrders.length; $("#histLink").hidden=!pastOrders.length;
-  if(!pastOrders.length) return;
+  if(!pastOrders.length){ $("#histBox").innerHTML=`<h2 style="margin:0">Past orders</h2><p class="muted" style="margin:0">Your orders show here once they're delivered or picked up.</p>`; return; }
   const busy=document.body.classList.contains("tracking"), shown=histAll?pastOrders:pastOrders.slice(0,5);
-  $("#histBox").innerHTML=`<h2 style="margin:0">My orders</h2>
+  $("#histBox").innerHTML=`<h2 style="margin:0">Past orders</h2>
     <p class="muted" style="margin:0;font-size:.85rem">Your past orders on this ${appView?"phone":"phone or browser"}. Tap <b>Order again</b> to put the same items in your order.</p>
     ${shown.map(o=>`<div class="hist">
       <div class="btnrow" style="justify-content:space-between"><b class="num">${esc(o.code)}</b><span class="pill ${o.status==="cancelled"?"off":"done"}">${esc(o.status==="cancelled"?"Cancelled":o.mode==="Pickup"?"Picked up":"Delivered")}</span></div>
@@ -381,7 +394,7 @@ $("#histBox").addEventListener("click",e=>{
   if(o.preorder && o.mode==="Pickup") $("#pm-pick").checked=true; else $("#pm-del").checked=true;
   renderCart(); showErr("");
   const m=$("#againMsg"); m.hidden=!skip.length; m.textContent=skip.length?`Not added (no longer available or sold out): ${skip.join(", ")}.`:"";
-  if(Object.keys(cart).length) $("#orderBox").scrollIntoView({behavior:"smooth",block:"start"});
+  if(Object.keys(cart).length){ showCtab("order"); setTimeout(()=>$("#orderBox").scrollIntoView({behavior:"smooth",block:"start"}),300); }
 });
 // Stop tracking an order on this phone
 function forgetOrder(id){
@@ -400,21 +413,43 @@ function orderSummary(o){
       ${del?`<div><span>Delivery fee${o.zoneName?` (${esc(o.zoneName)})`:""}</span><span>${peso(o.deliveryFee)}</span></div>`:""}
       ${boxRow(o)}
       <div class="grand"><span>Total</span><span>${peso(o.total)}</span></div></div>
-    <div class="muted" style="font-size:.88rem">${del?`Deliver to: ${esc(o.address)}`:`Pickup at: ${esc(SHOP.pickupAddress)}`}
+    <div class="muted" style="font-size:.88rem">${del?`Deliver to: ${esc(o.address)}`:`Pickup at: ${esc(SHOP.receiptAddress||SHOP.pickupAddress)}`}
       <br>Payment: ${o.payment==="GCash"?(SHOP.payQr?"Paid by QR (GCash / bank app)":"GCash"):del?"Cash on delivery":"Cash on pickup"}${o.notes?`<br>Notes: ${esc(o.notes)}`:""}</div></div>`;
 }
+// The order cards are in two places: the tracker on the Order tab, and upcoming pre-orders on My orders
+function onTrack(type, fn){ ["#trackBox","#preBox"].forEach(sel=>$(sel).addEventListener(type,fn)); }
+// A pre-order that's paid (or its payment sent) and waiting for its day: it's on the My orders tab
+const waiting=o=>o.status==="scheduled" && (o.paymentConfirmed || paymentSent(o));
+// ---------- Tabs: Order | My orders ----------
+let ctab="order";
+function showCtab(t){
+  ctab=t; $("#orderPane").hidden=t!=="order"; $("#minePane").hidden=t!=="mine";
+  document.querySelectorAll("#ctabs [data-ctab]").forEach(b=>{ const on=b.dataset.ctab===t; b.classList.toggle("on",on); b.setAttribute("aria-selected",String(on)); });
+  document.body.classList.toggle("mine",t==="mine");
+  window.scrollTo({top:0,behavior:"smooth"});
+}
+$("#ctabs").addEventListener("click",e=>{ const b=e.target.closest("[data-ctab]"); if(b) showCtab(b.dataset.ctab); });
 function renderTrack(){
   const focusKey=document.activeElement?.dataset?.focusKey; // restore the cursor after redrawing
   const list=Object.values(live).filter(o=>{ const d=endedAt(o); return !FINAL.includes(o.status) || !d || Date.now()-d.getTime()<KEEP_FINISHED; })
     .sort((a,b)=>(b.createdAt?.seconds||9e9)-(a.createdAt?.seconds||9e9));
-  $("#trackBox").hidden=!list.length;
+  // Upcoming pre-orders go to My orders; the tracker shows the rest
+  const upcoming=Object.values(live).filter(waiting).sort((a,b)=>(a.deliverOn||"")<(b.deliverOn||"")?-1:1);
+  const tracked=list.filter(o=>!waiting(o));
+  $("#trackBox").hidden=!tracked.length;
   // An order still in progress: show only its tracking. The menu comes back once it's delivered or cancelled.
   // A pre-order that's paid and waiting for its day doesn't hold the menu: the customer can order again.
-  const waiting=o=>o.status==="scheduled" && (o.paymentConfirmed || paymentSent(o));
-  const busy=list.some(o=>!FINAL.includes(o.status) && !waiting(o));
+  const busy=tracked.some(o=>!FINAL.includes(o.status));
   if(document.body.classList.contains("tracking") && !busy) window.scrollTo({top:0,behavior:"smooth"});
   document.body.classList.toggle("tracking",busy); renderHistory();
-  $("#trackBox").innerHTML = `<h2>Track your order</h2>` + list.map(o=>{
+  $("#trackBox").innerHTML = `<h2>Track your order</h2>` + tracked.map(trackCard).join("");
+  $("#preBox").innerHTML = `<h2 style="margin:0">Upcoming pre-orders</h2>` + (upcoming.length ? upcoming.map(trackCard).join("")
+    : `<p class="muted" style="margin:0">No pre-orders waiting. Platters and party packages you order ahead show here until their day.</p>`);
+  $("#mineCount").textContent=upcoming.length?String(upcoming.length):"";
+  if(focusKey){ const el=document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); if(el){ el.focus(); if(el.tagName==="TEXTAREA") el.setSelectionRange(el.value.length,el.value.length); } }
+}
+// One order: its steps, notes, summary and buttons
+function trackCard(o){
     const flow=o.preorder?["scheduled",...(FLOW[o.mode]||FLOW.Delivery)]:FLOW[o.mode]||FLOW.Delivery, at=flow.indexOf(o.status), finished=FINAL.includes(o.status);
     const steps = o.status==="cancelled" ? `<p class="pill off" style="justify-self:start">Cancelled</p>` :
       `<ol class="steps">${flow.map((s,i)=>`<li class="${i<at||finished?"done":i===at?"now":""}"><span>${esc(s==="scheduled"&&!o.paymentConfirmed?(paymentSent(o)?"Payment sent: the shop is checking it":"Waiting for your payment"):stepLabel(o.mode,s))}</span></li>`).join("")}</ol>`;
@@ -426,15 +461,15 @@ function renderTrack(){
       : o.status==="completed" ? `<p style="margin:0"><b>Picked up.</b> Salamat po, enjoy your meal!</p>` : "";
     const rider = o.riderName && ["assigned","preparing","ready","picked_up"].includes(o.status)
       ? `<p style="margin:0">Your rider: <b>${esc(o.riderName)}</b> · <span class="num">${esc(o.riderPhone)}</span></p>` : "";
-    const cancel = o.status==="new"||(o.status==="scheduled"&&!o.paymentConfirmed) ? `<button class="btn ghost small" data-cancel="${o.id}">Cancel order</button>` : "";
+    // a pre-order whose payment was already sent is cancelled by calling the shop (it needs a refund)
+    const cancel = o.status==="new"||(o.status==="scheduled"&&!o.paymentConfirmed&&!paymentSent(o)) ? `<button class="btn ghost small" data-cancel="${o.id}">Cancel order</button>`
+      : o.status==="scheduled" ? `<p class="muted" style="margin:0;font-size:.85rem">To cancel or change this pre-order, call or text ${esc(SHOP.phone)}.</p>` : "";
     const hide = finished ? `<button class="btn ghost small" data-hide="${o.id}" style="justify-self:start">Hide</button>` : "";
     return `<div style="border-top:2px dashed var(--line);padding-top:10px;display:grid;gap:6px">
       <div class="btnrow" style="justify-content:space-between"><b class="num">${esc(o.code)}</b><span class="muted">${fmtTime(o.createdAt)} · ${peso(o.total)}</span></div>
       ${(payingId===o.id||o.preorder)&&o.payment==="GCash"&&o.status!=="cancelled"&&!o.paymentConfirmed&&(!paymentSent(o)||payDraft[o.id]?.editing)?payStep(o):""}
       ${steps}${o.status==="scheduled"?`<p class="muted" style="margin:0;font-size:.88rem">${o.paymentConfirmed?"Paid, thank you! ":""}${o.mode==="Pickup"?"On the day we cook it fresh and have it ready for you.":"On the delivery day we cook it fresh and send it with a rider."}
-      ${waiting(o)?" You can order something else meanwhile from the menu: regular food and pre-orders go in separate orders.":""}</p>`:""}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${FINAL.includes(o.status)?"":preNote(o.items,o)}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
-  }).join("");
-  if(focusKey){ const el=document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); if(el){ el.focus(); if(el.tagName==="TEXTAREA") el.setSelectionRange(el.value.length,el.value.length); } }
+</p>`:""}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${FINAL.includes(o.status)?"":preNote(o.items,o)}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
 }
 setInterval(renderTrack, 60000); // let finished orders drop off without a reload
 
@@ -533,13 +568,13 @@ function payBox(o){
     <div class="btnrow"><button class="btn small" data-pay-send="${id}">Send reference number</button>
       ${d.editing?`<button class="btn ghost small" data-pay-cancel="${id}">Never mind</button>`:""}</div></div>`;
 }
-$("#trackBox").addEventListener("input",e=>{
+onTrack("input",e=>{
   const r=e.target.closest("[data-pay-ref]"); if(r){ r.value=r.value.replace(/[^0-9A-Za-z]/g,""); payDraft[r.dataset.payRef].ref=r.value; }
   const s=e.target.closest("[data-pay-sender]"); if(s) payDraft[s.dataset.paySender].sender=s.value;
 });
 // Payment screenshot (QR payments): shrunk on the phone, then saved with the order in one go
 const shotDraft={}; // order id -> picture (data URL) chosen but not sent yet
-$("#trackBox").addEventListener("change", async e=>{
+onTrack("change", async e=>{
   const f=e.target.closest("[data-shot-pick]"); if(!f || !f.files?.[0]) return;
   const id=f.dataset.shotPick, d=payDraft[id]||(payDraft[id]={ref:"",sender:"",err:"",editing:false});
   try{ shotDraft[id]=await compressPhoto(f.files[0], 1280, 0.7); d.err=""; }
@@ -590,10 +625,10 @@ function reportBox(o){
     <div class="btnrow"><button class="btn small" data-report-send="${id}">Send report</button>
       <button class="btn ghost small" data-report-back="${id}">Never mind</button></div></div>`;
 }
-$("#trackBox").addEventListener("change",e=>{
+onTrack("change",e=>{
   const s=e.target.closest("[data-report-reason]"); if(s) reporting[s.dataset.reportReason].reason=s.value;
 });
-$("#trackBox").addEventListener("input",e=>{
+onTrack("input",e=>{
   const t=e.target.closest("[data-report-details]"); if(t) reporting[t.dataset.reportDetails].details=t.value;
 });
 async function sendReport(id){
@@ -613,7 +648,7 @@ async function sendReport(id){
   renderTrack();
 }
 
-$("#trackBox").addEventListener("click", async e=>{
+onTrack("click", async e=>{
   const ss=e.target.closest("[data-shot-send]"); if(ss){ ss.disabled=true; ss.textContent="Sending…"; await sendPayShot(ss.dataset.shotSend); return; }
   const ps=e.target.closest("[data-pay-send]"); if(ps){ ps.disabled=true; await sendPayRef(ps.dataset.paySend); return; }
   const pe=e.target.closest("[data-pay-edit]"); if(pe){ payDraft[pe.dataset.payEdit].editing=true; payingId=pe.dataset.payEdit; renderTrack(); return; }
