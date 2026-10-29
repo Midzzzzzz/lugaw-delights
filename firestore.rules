@@ -590,7 +590,7 @@ service cloud.firestore {
             // A paid order can't be cancelled (the sale stays on the books). A Foodpanda or Grab
             // order can: the platform may cancel it, and then the shop is never paid for it.
             && !(resource.data.mode == 'Dine-in' && request.resource.data.status == 'cancelled' && resource.data.status != 'cancelled'
-                 && !('source' in resource.data)
+                 && !(resource.data.get('source', '') in ['foodpanda', 'grab'])
                  && (('cashGiven' in resource.data) || resource.data.get('paid', false) == true))
             // Payment is recorded once: cash received (covering the total) or GCash marked received
             && (!changed().hasAny(['cashGiven']) || (!('cashGiven' in resource.data)

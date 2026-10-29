@@ -98,6 +98,7 @@ table.inv input{width:90px;text-align:right;padding:5px 8px}
     <div class="card toolbar" id="ranges"></div>
     <div class="stats">
       <div class="stat"><b id="sSales">₱0</b><span>Sales</span></div>
+      <div class="stat"><b id="sPlat">₱0</b><span>Foodpanda / Grab</span></div>
       <div class="stat"><b id="sOrders">0</b><span>Completed orders</span></div>
       <div class="stat"><b id="sAvg">₱0</b><span>Average order</span></div>
       <div class="stat"><b id="sFees">₱0</b><span>Rider fees</span></div>
@@ -282,10 +283,12 @@ $("#view").addEventListener("focusout",()=>setTimeout(()=>{ const a=document.act
 function render(force){
   const a=document.activeElement;
   if(force!==true && a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.closest("#view") && a.id!=="search"){ renderWaiting=true; return; }
-  const done=orders.filter(isDone), sales=done.reduce((s,o)=>s+shopAmount(o),0);
+  // Sales: what the shop took in (cash, GCash). Foodpanda and Grab pay out weekly, so they're counted apart.
+  const done=orders.filter(isDone), own=done.filter(o=>!platformName(o)), sales=own.reduce((s,o)=>s+shopAmount(o),0);
   $("#sSales").textContent=peso(sales);
+  $("#sPlat").textContent=peso(done.filter(o=>platformName(o)).reduce((s,o)=>s+shopAmount(o),0));
   $("#sOrders").textContent=done.length;
-  $("#sAvg").textContent=peso(done.length?Math.round(sales/done.length):0);
+  $("#sAvg").textContent=peso(own.length?Math.round(sales/own.length):0);
   $("#sFees").textContent=peso(done.reduce((s,o)=>s+(o.deliveryFee||0),0));
   $("#sOpen").textContent=orders.filter(o=>ACTIVE.includes(o.status)).length;
   $("#sCancel").textContent=orders.filter(o=>o.status==="cancelled").length;
@@ -306,12 +309,20 @@ $("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]");
 
 function renderSales(done){
   const food=o=>shopAmount(o); // food and take-out boxes
+  const all=done, plat=done.filter(o=>platformName(o));
+  done=done.filter(o=>!platformName(o)); // sellers' sales and the sales over time: the shop's own (Foodpanda / Grab apart)
   const bySeller=group(done,o=>o.sellerUid||"_none",sellerName,food);
   const byRider=group(done.filter(o=>o.mode==="Delivery"&&o.riderUid),o=>o.riderUid,riderName,o=>o.deliveryFee||0);
-  const byMode=group(done,o=>platformName(o)||o.mode,o=>platformName(o)||o.mode,food); // Foodpanda and Grab apart from the counter
-  const byPay=group(done,o=>o.payment,o=>o.payment,food);
+  const byMode=group(all,o=>platformName(o)||o.mode,o=>platformName(o)||o.mode,food); // Foodpanda and Grab apart from the counter
+  const byPay=group(all,o=>o.payment,o=>o.payment,food);
+  // Foodpanda / Grab by week (Monday to Sunday), as the platforms pay out weekly
+  const weekOf=d=>{ const x=businessDate(d); x.setDate(x.getDate()-(x.getDay()+6)%7); return x; }, byWeek=new Map();
+  plat.forEach(o=>{ const d=o.createdAt?.toDate?.(); if(!d) return; const w=weekOf(d), k=ymd(w)+"|"+o.source;
+    const r=byWeek.get(k)||{key:k,w,label:`${platformName(o)} · ${w.toLocaleDateString("en-PH",{month:"short",day:"numeric"})} – ${addDays(w,6).toLocaleDateString("en-PH",{month:"short",day:"numeric"})}`,count:0,value:0};
+    r.count++; r.value+=food(o); byWeek.set(k,r); });
+  const platWeeks=[...byWeek.values()].sort((x,y)=>y.w-x.w||x.label.localeCompare(y.label));
   const items=new Map();
-  done.forEach(o=>(o.items||[]).forEach(it=>{
+  all.forEach(o=>(o.items||[]).forEach(it=>{
     const k=it.id, r=items.get(k)||{key:k,label:ITEMS[k]?.name||it.name||"Unknown item",count:0,value:0};
     r.count+=Number(it.qty)||0; r.value+=(Number(it.price)||0)*(Number(it.qty)||0); items.set(k,r);
   }));
@@ -328,12 +339,14 @@ function renderSales(done){
   if(oneDay) time=time.filter(r=>r.value>0);
   const money=r=>peso(r.value);
   $("#view").innerHTML=`<div class="panels">
-    <section class="card panel"><h2>Sellers</h2><p class="sub">Food sales from completed orders each seller accepted or recorded</p>
+    <section class="card panel"><h2>Sellers</h2><p class="sub">Food sales from completed orders each seller accepted or recorded (not Foodpanda / Grab)</p>
       ${rank(bySeller,{main:money,sub:r=>plural(r.count,"order"),empty:"No completed orders in this range yet."})}</section>
     <section class="card panel"><h2>Best-selling items</h2><p class="sub">Top 10 by quantity</p>
       ${rank(topItems,{main:r=>plural(r.count,"pc"),sub:r=>peso(r.sales),empty:"Nothing sold in this range yet."})}</section>
-    <section class="card panel"><h2>${oneDay?"Sales by hour":"Sales by day"}</h2><p class="sub">Food sales from completed orders</p>
+    <section class="card panel"><h2>${oneDay?"Sales by hour":"Sales by day"}</h2><p class="sub">Food sales from completed orders (not Foodpanda / Grab)</p>
       ${rank(time,{main:money,sub:()=>"",numbered:false,empty:"No sales in this range yet."})}</section>
+    <section class="card panel"><h2>Foodpanda &amp; Grab</h2><p class="sub">At menu prices, by week (Monday to Sunday): what each platform owes for the week's orders</p>
+      ${rank(platWeeks,{main:money,sub:r=>plural(r.count,"order"),numbered:false,empty:"No Foodpanda or Grab orders in this range."})}</section>
     <section class="card panel"><h2>Riders</h2><p class="sub">Delivery fees earned on completed deliveries</p>
       ${rank(byRider,{main:money,sub:r=>r.count===1?"1 delivery":`${r.count} deliveries`,empty:"No deliveries in this range yet."})}</section>
     <section class="card panel"><h2>Order type</h2><p class="sub">Food sales by delivery, pickup and dine-in</p>

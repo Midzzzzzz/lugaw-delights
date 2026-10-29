@@ -760,7 +760,7 @@ function orderCard(o){
       ${dineIn?(o.table?`<b>Table/Customer</b><span style="font-size:1.1rem;font-weight:800">${esc(o.table)}</span>`:"")
         :`<b>Customer</b><span>${c?`${esc(c.name)} · <a class="num" href="${esc(telLink(c.phone))}">${esc(c.phone)}</a><br>${phoneBadge(c.phone)}`:`<span class="muted">Loading…</span>`}</span>`}
       ${del?`<b>Address</b><span>${esc(o.address)} · <a href="${mapsLink(o.address)}" target="_blank" rel="noopener">Map</a></span>`:""}
-      <b>Payment</b><span>${o.source?`${esc(o.payment)} (paid in the app)${o.platformRef?` · order <b class="num">${esc(o.platformRef)}</b>`:""}`:o.payment==="GCash"?(dineIn?"GCash":gcashLine(o)):"Cash"}</span>
+      <b>Payment</b><span>${PLATFORMS[o.source]?`${esc(o.payment)} (paid in the app)${o.platformRef?` · order <b class="num">${esc(o.platformRef)}</b>`:""}`:o.payment==="GCash"?(dineIn?"GCash":gcashLine(o)):"Cash"}</span>
       ${o.notes?`<b>Notes</b><span>${esc(o.notes)}</span>`:""}${o.sellerName?`<b>Seller</b><span>${esc(o.sellerName)}</span>`:""}${rider}${payAtPickup}${settle}
       ${o.cancelledBy?`<b>Cancelled by</b><span>${esc(o.cancelledBy)}${o.cancelReason?`: ${esc(o.cancelReason)}`:""}</span>`:""}</div>
     ${itemsHTML(o,true)}${removedHTML(o)}
@@ -795,7 +795,7 @@ function cashBlock(o){
     : due+cashInput(o);
   const first=o.paidTotal??o.total;
   const paid=o.payment!=="Cash"
-    ? `<div><span class="pill done">Paid</span> ${o.source?esc(o.payment):"GCash"} ${peso(first)}${o.gcashRef?` · Ref <b class="num">${esc(o.gcashRef)}</b>`:""}</div>${refReused(o)}`
+    ? `<div><span class="pill done">Paid</span> ${PLATFORMS[o.source]?esc(o.payment):"GCash"} ${peso(first)}${o.gcashRef?` · Ref <b class="num">${esc(o.gcashRef)}</b>`:""}</div>${refReused(o)}`
     : `<div class="totals"><div><span>Paid (cash)</span><span>${peso(o.cashGiven)}</span></div>
        <div class="grand"><span>Change</span><span>${peso(o.cashGiven-first)}</span></div></div>`;
   return paid+adjustLine(o)+balanceBlock(o);

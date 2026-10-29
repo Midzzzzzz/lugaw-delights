@@ -11,8 +11,9 @@ export function pastSummary(orders) {
   orders.forEach(o => {
     if (o.status === "cancelled") { s.cancelled++; return; }
     const shop = (o.total || 0) - (o.deliveryFee || 0);
-    s.orders++; s.sales += shop; s.deliveryFees += o.deliveryFee || 0;
-    if (o.source) s.platformSales += shop; else if (o.payment === "GCash") s.gcashSales += shop; else s.cashSales += shop;
+    s.orders++; s.deliveryFees += o.deliveryFee || 0;
+    if (o.source === "foodpanda" || o.source === "grab") { s.platformSales += shop; return; } // paid out weekly by the platform, not part of the shift's sales
+    s.sales += shop; if (o.payment === "GCash") s.gcashSales += shop; else s.cashSales += shop;
   });
   s.expected = s.cashSales;
   return s;

@@ -201,14 +201,14 @@ export function shiftSummary(shift, orders, now = Date.now()) {
     if (o.manual) return;
     const made = ms(o.createdAt) ?? now;
     if (o.status === "cancelled") { if (inShift(made)) s.cancelled++; return; }
-    if (inShift(made)) { s.orders++; s.sales += shopAmount(o); }
+    if (inShift(made)) { s.orders++; if (!platformName(o)) s.sales += shopAmount(o); } // Foodpanda / Grab: platformSales (paid out weekly)
     if (o.mode === "Delivery") {
       const got = ms(o.riderPaidAt) ?? ms(o.settledAt);
       if (o.payment === "Cash" && o.cashReceived && inShift(got)) s.riderCash += shopAmount(o);
       return;
     }
     if (!inShift(made)) return;
-    if (o.source) { s.platformSales += o.total || 0; return; } // Foodpanda / Grab pay the shop later, not into the drawer
+    if (platformName(o)) { s.platformSales += o.total || 0; return; } // Foodpanda / Grab pay the shop later, not into the drawer
     // pickup orders are paid at the counter when they're collected
     if (o.mode === "Pickup") { if (o.status === "completed") { if (o.payment === "GCash") s.gcashSales += o.total || 0; else s.cashSales += o.total || 0; } return; }
     const paid = o.cashGiven != null || o.paid === true, first = o.paidTotal ?? o.total ?? 0;
