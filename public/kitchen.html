@@ -78,7 +78,7 @@
     </div>
     <div id="prePane" hidden>
       <p class="muted" style="font-size:.88rem;margin:12px 0 0">Platters and party packages ordered ahead, by delivery day. The amounts to prepare count paid orders only.
-        Each one comes to <b>To cook</b> on its day, when a rider takes it.</p>
+        Each one comes to <b>To cook</b> on its day: a delivery when a rider takes it, a pickup when the seller accepts it.</p>
       <div id="preList"></div>
     </div>
     <div id="refillPane" hidden>
@@ -217,7 +217,7 @@ function renderPre(){
       ${items.size?`<div><b>To prepare</b><ul class="lines">${[...items.values()].map(r=>`<li><span class="q">${r.qty}×</span><span>${esc(r.name)}</span></li>`).join("")}</ul></div>`
         :`<p class="muted" style="margin:0">Nothing paid yet for this day.</p>`}
       ${Object.keys(need).length?`<div><b>Ingredients needed</b><ul class="lines">${Object.entries(need).map(([g,n])=>`<li><span class="q">${esc(qty(n))}</span><span>${esc(ingName(g))} ${esc(ingUnit(g))}</span></li>`).join("")}</ul></div>`:""}
-      <div class="muted" style="font-size:.88rem">${list.sort((a,b)=>(a.deliverTime||"99")<(b.deliverTime||"99")?-1:1).map(o=>`<div><b class="num">${esc(o.code)}</b> · ${esc(o.deliverTime?new Date("2000-01-01T"+o.deliverTime).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}):"no time given")} ·
+      <div class="muted" style="font-size:.88rem">${list.sort((a,b)=>(a.deliverTime||"99")<(b.deliverTime||"99")?-1:1).map(o=>`<div><b class="num">${esc(o.code)}</b> · ${o.mode==="Pickup"?"Pickup":"Delivery"} · ${esc(o.deliverTime?new Date("2000-01-01T"+o.deliverTime).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}):"no time given")} ·
         ${(o.items||[]).map(it=>`${esc(it.qty)}× ${esc(ITEMS[it.id]?.name||it.name)}`).join(", ")} ·
         ${o.paymentConfirmed?'<span class="pill done">Paid</span>':'<span class="pill new">Not paid yet</span>'}${o.status!=="scheduled"?' <span class="pill work">Sent to riders</span>':""}</div>`).join("")}</div></div>`;
   }).join(""):`<p class="empty">No platter or package pre-orders right now.</p>`;

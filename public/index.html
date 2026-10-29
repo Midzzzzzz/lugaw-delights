@@ -91,7 +91,13 @@ aside h2{font-size:1.4rem;color:var(--brand)}
           <label class="f" for="f-phone">Mobile number<input id="f-phone" type="tel" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="09XX XXX XXXX"></label>
           <label class="f" for="f-zone" id="zoneWrap">Barangay (Los Baños or Bay, Laguna only)<select id="f-zone"></select></label>
           <label class="f" for="f-addr" id="addrWrap">House no., street and landmark<textarea id="f-addr" rows="2" maxlength="200" placeholder="e.g. 12 Lopez Ave., near the chapel"></textarea></label>
-          <div class="group" id="preWhenWrap" hidden><span>When should we deliver your pre-order?</span>
+          <div class="group" id="preModeWrap" hidden><span>Delivery or pickup?</span>
+            <div class="seg">
+              <input type="radio" name="premode" id="pm-del" value="Delivery" checked><label for="pm-del">Deliver to me</label>
+              <input type="radio" name="premode" id="pm-pick" value="Pickup"><label for="pm-pick">I'll pick it up</label>
+            </div>
+            <small class="muted" id="pickWhere" hidden></small></div>
+          <div class="group" id="preWhenWrap" hidden><span id="preWhenLabel">When should we deliver your pre-order?</span>
             <div style="display:flex;flex-wrap:wrap;gap:8px">
               <label class="f" for="f-date" style="flex:1 1 150px">Date<input type="date" id="f-date"></label>
               <label class="f" for="f-time" style="flex:1 1 150px">Preferred time (optional)<input type="time" id="f-time"></label></div>
@@ -144,8 +150,8 @@ const preMin = () => ymdL(new Date(Date.now()+PREORDER_DAYS*86400000)), preMax =
 // when: { deliverOn, deliverTime, createdAt } (an order, or what's picked in the form)
 function preNote(items, when){
   const pre=preorderItems(items); if(!pre.length) return "";
-  return `<div class="flag" style="margin:0"><b>Pre-order:</b> ${esc(pre.map(it=>ITEMS[it.id]?.name||it.name).join(", "))} ${pre.length===1?"is":"are"} made to order and ${pre.length===1?"takes":"take"} ${PRE_WHEN} to deliver.
-    We'll deliver ${pre.length===1?"it":"them"} on <b>${esc(preorderWhen(when))}</b>.</div>`;
+  return `<div class="flag" style="margin:0"><b>Pre-order:</b> ${esc(pre.map(it=>ITEMS[it.id]?.name||it.name).join(", "))} ${pre.length===1?"is":"are"} made to order and ${pre.length===1?"takes":"take"} ${PRE_WHEN} to prepare.
+    ${(when.mode||mode())==="Pickup"?`Ready for pickup at the shop on <b>${esc(preorderWhen(when))}</b>.`:`We'll deliver ${pre.length===1?"it":"them"} on <b>${esc(preorderWhen(when))}</b>.`}</div>`;
 }
 // Best sellers first: every item the owner marked "best seller", repeated from its own category
 const BEST=MENU.flatMap(c=>c.items.map(([id])=>id)).filter(id=>ITEMS[id]?.best);
@@ -208,7 +214,8 @@ function itemNote(el, msg){
   const n=document.createElement("p"); n.className="flag mixnote"; n.style.margin="0 0 8px"; n.setAttribute("role","alert"); n.textContent=msg;
   el.after(n); setTimeout(()=>n.remove(),8000);
 }
-const mode=()=>"Delivery"; // customers order delivery only
+// Customers order delivery; a pre-order (platters, packages) can also be picked up at the shop
+const mode=()=>preorderItems(cartItems()).length && $("#pm-pick")?.checked ? "Pickup" : "Delivery";
 // In the Android app a download link does nothing, so the QR is saved with a screenshot there
 const appView=!!window.Capacitor?.isNativePlatform?.();
 // Cash on delivery, or pay now by scanning the shop's QR (saved as "GCash" on the order)
@@ -221,7 +228,9 @@ function renderCart(){
   const pre=preorderItems(items).length>0;
   if(SHOP.payQr){ $("#p-cash").disabled=pre; if(pre) $("#p-qr").checked=true; $("#prePay").hidden=!pre; $("#qrNote").hidden=pay()!=="GCash"; }
   // the customer picks the delivery day of a pre-order (tomorrow at the earliest)
-  $("#preWhenWrap").hidden=!pre;
+  $("#preWhenWrap").hidden=!pre; $("#preModeWrap").hidden=!pre;
+  if(!pre && $("#pm-pick").checked){ $("#pm-del").checked=true; } // pickup is only for pre-orders
+  renderPayNote();
   if(pre){ const d=$("#f-date"); d.min=preMin(); d.max=preMax(); if(!d.value||d.value<d.min) d.value=d.min; }
   $("#cartBox").innerHTML = items.length ? `
     <ul class="lines">${items.map(it=>`<li><span class="q">${it.qty}×</span><span>${esc(it.name)}</span><span class="amt">${peso(it.price*it.qty)}</span></li>`).join("")}</ul>
@@ -238,6 +247,8 @@ function renderCart(){
 }
 function renderPayNote(){
   const isDel = mode()==="Delivery";
+  $("#preWhenLabel").textContent = isDel ? "When should we deliver your pre-order?" : "When will you pick up your pre-order?";
+  $("#pickWhere").hidden = isDel; $("#pickWhere").textContent = `Pick up at ${SHOP.name}: ${SHOP.receiptAddress||SHOP.pickupAddress}. Questions? ${SHOP.phone}.`;
   $("#addrWrap").hidden = !isDel; $("#zoneWrap").hidden = !isDel;
   $("#cashLabel").textContent = isDel ? "Cash on delivery" : "Cash on pickup";
   $("#cashLabel").hidden = !!SHOP.payQr; $("#payChoice").hidden = !SHOP.payQr;
@@ -245,6 +256,7 @@ function renderPayNote(){
 }
 document.querySelectorAll('input[name="pay"]').forEach(r=>r.addEventListener("change",()=>{ renderPayNote(); renderCart(); }));
 ["#f-date","#f-time"].forEach(s=>$(s).addEventListener("change",renderCart));
+document.querySelectorAll('input[name="premode"]').forEach(r=>r.addEventListener("change",()=>{ renderPayNote(); renderCart(); }));
 // Barangay list: only barangays the owner delivers to, each with its fee
 function renderZones(){
   const keep=zone();
@@ -358,7 +370,7 @@ function renderTrack(){
   if(document.body.classList.contains("tracking") && !busy) window.scrollTo({top:0,behavior:"smooth"});
   document.body.classList.toggle("tracking",busy);
   $("#trackBox").innerHTML = `<h2>Track your order</h2>` + list.map(o=>{
-    const flow=o.preorder?["scheduled",...FLOW.Delivery]:FLOW[o.mode]||FLOW.Delivery, at=flow.indexOf(o.status), finished=FINAL.includes(o.status);
+    const flow=o.preorder?["scheduled",...(FLOW[o.mode]||FLOW.Delivery)]:FLOW[o.mode]||FLOW.Delivery, at=flow.indexOf(o.status), finished=FINAL.includes(o.status);
     const steps = o.status==="cancelled" ? `<p class="pill off" style="justify-self:start">Cancelled</p>` :
       `<ol class="steps">${flow.map((s,i)=>`<li class="${i<at||finished?"done":i===at?"now":""}"><span>${esc(s==="scheduled"&&!o.paymentConfirmed?(paymentSent(o)?"Payment sent: the shop is checking it":"Waiting for your payment"):stepLabel(o.mode,s))}</span></li>`).join("")}</ol>`;
     const cancelNote = o.status!=="cancelled" ? "" : o.cancelledBy==="customer"

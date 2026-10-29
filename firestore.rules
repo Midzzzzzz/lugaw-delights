@@ -473,7 +473,8 @@ service cloud.firestore {
           // a pre-order waits as 'scheduled' (riders and the kitchen don't see it) until its delivery day
           && (d.status == 'new' || (d.status == 'scheduled' && d.get('preorder', false) == true))
           && d.riderUid == null
-          && d.mode == 'Delivery' // customers order delivery only (pickup orders from before stay valid)
+          // customers order delivery; a pre-order can also be picked up at the shop (pickup orders from before stay valid)
+          && (d.mode == 'Delivery' || (d.mode == 'Pickup' && d.get('preorder', false) == true))
           && d.payment in ['Cash', 'GCash'] // cash on delivery, or paid by QR before cooking
           // a pre-order (platters, party packages) is paid in full by QR before the shop accepts it
           && (!('preorder' in d) || (d.preorder == true && d.payment == 'GCash'))

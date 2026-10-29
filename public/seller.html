@@ -752,7 +752,7 @@ function orderCard(o){
   // Pickup orders are cooked right away; delivery orders once a rider has accepted
   const waitLabel=pre?"Pre-order: confirm the full payment first":"Waiting for GCash payment";
   // a scheduled pre-order goes to riders by itself on its day once paid; the seller can send it earlier
-  if(o.status==="scheduled") acts.push(o.paymentConfirmed?["release","Send to riders now","btn ghost small"]:["waitpay",waitLabel,"btn"]);
+  if(o.status==="scheduled") acts.push(o.paymentConfirmed?["release",o.mode==="Pickup"?"Start it now":"Send to riders now","btn ghost small"]:["waitpay",waitLabel,"btn"]);
   if(o.status==="new" && !del) acts.push(unpaidGcash ? ["waitpay",waitLabel,"btn"] : ["preparing","Accept & start cooking","btn"]);
   if(o.status==="assigned" && del) acts.push(unpaidGcash ? ["waitpay",waitLabel,"btn"] : ["preparing","Rider found: start cooking","btn"]);
   if(o.status==="preparing") acts.push(dineIn ? ["completed","Served","btn ok"]
@@ -782,7 +782,7 @@ function orderCard(o){
   return `<div class="order ${o.status==="new"||needsStore(o)?"alert":""}">
     <div class="head"><span class="code">${esc(o.code)}</span><span class="pill ${esc(st.tone)}">${esc(statusLabel(o))}</span></div>
     ${del?deliverySteps(o):""}
-    ${pre?`<div class="flag"><b>Pre-order</b> (platter / package): deliver on <b>${esc(preorderWhen(o))}</b>${o.deliverOn?" (the customer's choice)":""}.${o.status==="scheduled"?` Riders get it ${o.paymentConfirmed?"":"once it's paid, "}at <b>${esc(preorderReleaseAt(o).toLocaleString("en-PH",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}</b>.`:""} It must be paid in full first${o.payment==="Cash"?`. <b>This one says cash on delivery:</b> call the customer to pay by QR before accepting.`:o.paymentConfirmed?": paid.":`: check the payment arrived, then tap Payment received.`}</div>`:""}
+    ${pre?`<div class="flag"><b>Pre-order</b> (platter / package): ${o.mode==="Pickup"?"<b>pickup at the shop</b>":"deliver"} on <b>${esc(preorderWhen(o))}</b>${o.deliverOn?" (the customer's choice)":""}.${o.status==="scheduled"?` ${o.mode==="Pickup"?"It comes to the New tab":"Riders get it"} ${o.paymentConfirmed?"":"once it's paid, "}at <b>${esc(preorderReleaseAt(o).toLocaleString("en-PH",{weekday:"short",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}</b>.`:""} It must be paid in full first${o.payment==="Cash"?`. <b>This one says cash on delivery:</b> call the customer to pay by QR before accepting.`:o.paymentConfirmed?": paid.":`: check the payment arrived, then tap Payment received.`}</div>`:""}
     ${o.unconfirmedAt&&o.status==="new"?`<div class="flag">Rider ${esc(o.unconfirmedByName||"")} couldn't confirm this customer by phone (${fmtTime(o.unconfirmedAt)}). Call the customer; if it's a fake order, cancel it.</div>`:""}
     ${o.manual||priceCheck(o)?"":`<div class="flag">This order doesn't match your menu prices or totals. It may have been edited. Check it before accepting.</div>`}
     ${!dineIn && c && ["new","preparing"].includes(o.status) && phoneConfirmed(c.phone)===false?`<div class="flag">New number. Call ${esc(c.phone)} to check the order is real before cooking.</div>`:""}

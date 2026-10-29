@@ -87,5 +87,23 @@ await t("a cash order can't be marked not received", () => assertFails(updateDoc
 await assigned("x4", {});
 await t("the time must be now", () => assertFails(updateDoc(doc(s1, "orders/x4"), { payRejectedAt: new Date(2020, 0, 1) })));
 
+console.log("Pre-order picked up at the shop");
+const noZone = o => { const d = { ...o }; delete d.zone; delete d.zoneName; return d; };
+function placePick(payment, over = {}) {
+  const uid = "c" + (++n), db = as(uid, "anonymous"), b = writeBatch(db), id = "o" + n;
+  const data = noZone({ code: "LD-" + n, customerUid: uid, mode: "Pickup", address: "", notes: "", payment,
+    items: [{ id: "P03", name: "Shanghai platter", price: 499, qty: 1 }], subtotal: 499, deliveryFee: 0, total: 499,
+    status: "scheduled", riderUid: null, createdAt: serverTimestamp(), preorder: true, deliverOn: "2026-11-05", ...over });
+  Object.keys(data).forEach(k => { if (data[k] === undefined) delete data[k]; }); // left out, not sent
+  b.set(doc(db, "orders", id), data);
+  b.set(doc(db, "contacts", id), { name: "J", phone: "09170001111", customerUid: uid, createdAt: serverTimestamp() });
+  b.set(doc(db, "customers", uid), { lastOrderAt: serverTimestamp(), lastOrderId: id });
+  return b.commit();
+}
+await t("a pre-order for pickup at the shop allowed", () => assertSucceeds(placePick("GCash")));
+await t("a pickup pre-order still can't be cash", () => assertFails(placePick("Cash")));
+await t("an ordinary order can't be pickup", () => assertFails(placePick("GCash", { preorder: undefined, status: "new", deliverOn: undefined })));
+await t("a pickup pre-order has no delivery fee", () => assertFails(placePick("GCash", { deliveryFee: 40, total: 539 })));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);
