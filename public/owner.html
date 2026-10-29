@@ -99,7 +99,8 @@ table.inv input{width:90px;text-align:right;padding:5px 8px}
     <div class="stats">
       <div class="stat"><b id="sDine">₱0</b><span>Dine-in</span><small id="sDineN" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Counter orders, incl. take-out</small></div>
       <div class="stat"><b id="sDel">₱0</b><span>Lugaw Delights delivery</span><small id="sFees" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Rider fees ₱0</small></div>
-      <div class="stat"><b id="sSales">₱0</b><span>Total sales</span><small class="muted" style="display:block;font-size:.78rem;margin-top:2px">Dine-in + delivery</small></div>
+      <div class="stat"><b id="sPre">₱0</b><span>Pre-orders</span><small id="sPreN" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Platters &amp; packages</small></div>
+      <div class="stat"><b id="sSales">₱0</b><span>Total sales</span><small class="muted" style="display:block;font-size:.78rem;margin-top:2px">Dine-in + delivery + pre-orders</small></div>
       <div class="stat"><b id="sPlat">₱0</b><span>Foodpanda / Grab</span></div>
       <div class="stat"><b id="sOrders">0</b><span>Completed orders</span></div>
       <div class="stat"><b id="sAll">₱0</b><span>All sales</span><small class="muted" style="display:block;font-size:.78rem;margin-top:2px">Dine-in + all delivery, incl. Foodpanda / Grab</small></div>
@@ -202,6 +203,9 @@ function start(){
     alertSeen=new Set([...(alertSeen||[]),...ids]);
     if(fresh.length) notify(fresh.length>1?`${fresh.length} new orders`:`New order ${orderCode(fresh[0].id)}`, fresh.length>1?"":orderSummary(fresh[0]));
   }, ()=>{}));
+  // pre-orders not delivered or picked up yet, for the Pre-orders tile
+  subs.push(onSnapshot(query(collection(db,"orders"),where("preorder","==",true),where("status","in",["scheduled","new","assigned","preparing","ready","ready_pickup","picked_up"])),
+    s=>{ upcomingPre=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
   subs.push(onSnapshot(doc(db,"settings","payqr"), s=>{ payQrDoc=s.exists()?s.data():null; if(tab==="settings") render(); }, ()=>{}));
   subs.push(onSnapshot(doc(db,"settings","menu"), s=>{
     menuDoc=s.exists()?s.data():null; if(menuDoc) applyMenu(menuDoc.sections);
@@ -259,7 +263,7 @@ function watchOrders(){
   preSub=onSnapshot(query(collection(db,"orders"),where("preorder","==",true),where("deliverOn",">=",ymdOf(addDays(a,-1))),where("deliverOn","<=",ymdOf(b))),
     s=>{ preDone=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{});
 }
-let preSub=null, preDone=[];
+let preSub=null, preDone=[], upcomingPre=[];
 // The finished orders whose sale falls in the chosen range
 function salesDone(){
   const [a,b]=rangeDates(), inRange=o=>{ const t=saleAt(o)?.toMillis?.(); return t!=null && t>=a.getTime() && t<b.getTime(); };
@@ -305,7 +309,11 @@ function render(force){
   $("#sAll").textContent=peso(done.reduce((s,o)=>s+shopAmount(o),0));
   // Total sales = dine-in (the counter, take-out included) + Lugaw Delights' own delivery (food and
   // boxes; the riders' fees shown under it are theirs, not sales)
-  const dels=own.filter(o=>o.mode==="Delivery"), dine=own.filter(o=>o.mode!=="Delivery");
+  // pre-orders (platters, packages) apart, like on the shift report: counted when delivered or picked up
+  const pres=own.filter(o=>o.preorder), dels=own.filter(o=>o.mode==="Delivery"&&!o.preorder), dine=own.filter(o=>o.mode!=="Delivery"&&!o.preorder);
+  $("#sPre").textContent=peso(pres.reduce((s,o)=>s+shopAmount(o),0));
+  const up=upcomingPre.filter(o=>o.paymentConfirmed);
+  $("#sPreN").textContent=`${plural(pres.length,"order")} done · ${up.length} paid, coming${up.length?` (${peso(up.reduce((s,o)=>s+shopAmount(o),0))})`:""}`;
   $("#sDine").textContent=peso(dine.reduce((s,o)=>s+shopAmount(o),0));
   $("#sDineN").textContent=`${plural(dine.length,"order")} · incl. take-out`;
   $("#sDel").textContent=peso(dels.reduce((s,o)=>s+shopAmount(o),0));
@@ -333,7 +341,8 @@ function renderSales(done){
   done=done.filter(o=>!platformName(o)); // sellers' sales and the sales over time: the shop's own (Foodpanda / Grab apart)
   const bySeller=group(done,o=>o.sellerUid||"_none",sellerName,food);
   const byRider=group(done.filter(o=>o.mode==="Delivery"&&o.riderUid),o=>o.riderUid,riderName,o=>o.deliveryFee||0);
-  const byMode=group(all,o=>platformName(o)||o.mode,o=>platformName(o)||o.mode,food); // Foodpanda and Grab apart from the counter
+  const kind=o=>platformName(o)||(o.preorder?"Pre-order":o.mode);
+  const byMode=group(all,kind,kind,food); // Foodpanda, Grab and pre-orders apart from the counter
   const byPay=group(all,o=>o.payment,o=>o.payment,food);
   // Foodpanda / Grab by week (Monday to Sunday), as the platforms pay out weekly
   const weekOf=d=>{ const x=businessDate(d); x.setDate(x.getDate()-(x.getDay()+6)%7); return x; }, byWeek=new Map();

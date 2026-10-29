@@ -367,7 +367,9 @@ function renderTrack(){
     .sort((a,b)=>(b.createdAt?.seconds||9e9)-(a.createdAt?.seconds||9e9));
   $("#trackBox").hidden=!list.length;
   // An order still in progress: show only its tracking. The menu comes back once it's delivered or cancelled.
-  const busy=list.some(o=>!FINAL.includes(o.status));
+  // A pre-order that's paid and waiting for its day doesn't hold the menu: the customer can order again.
+  const waiting=o=>o.status==="scheduled" && (o.paymentConfirmed || paymentSent(o));
+  const busy=list.some(o=>!FINAL.includes(o.status) && !waiting(o));
   if(document.body.classList.contains("tracking") && !busy) window.scrollTo({top:0,behavior:"smooth"});
   document.body.classList.toggle("tracking",busy);
   $("#trackBox").innerHTML = `<h2>Track your order</h2>` + list.map(o=>{
@@ -387,7 +389,8 @@ function renderTrack(){
     return `<div style="border-top:2px dashed var(--line);padding-top:10px;display:grid;gap:6px">
       <div class="btnrow" style="justify-content:space-between"><b class="num">${esc(o.code)}</b><span class="muted">${fmtTime(o.createdAt)} · ${peso(o.total)}</span></div>
       ${(payingId===o.id||o.preorder)&&o.payment==="GCash"&&o.status!=="cancelled"&&!o.paymentConfirmed&&(!paymentSent(o)||payDraft[o.id]?.editing)?payStep(o):""}
-      ${steps}${o.status==="scheduled"?`<p class="muted" style="margin:0;font-size:.88rem">${o.paymentConfirmed?"Paid, thank you! ":""}On the delivery day we cook it fresh and send it with a rider.</p>`:""}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${FINAL.includes(o.status)?"":preNote(o.items,o)}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
+      ${steps}${o.status==="scheduled"?`<p class="muted" style="margin:0;font-size:.88rem">${o.paymentConfirmed?"Paid, thank you! ":""}${o.mode==="Pickup"?"On the day we cook it fresh and have it ready for you.":"On the delivery day we cook it fresh and send it with a rider."}
+      ${waiting(o)?" You can order something else meanwhile from the menu: regular food and pre-orders go in separate orders.":""}</p>`:""}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${FINAL.includes(o.status)?"":preNote(o.items,o)}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
   }).join("");
   if(focusKey){ const el=document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); if(el){ el.focus(); if(el.tagName==="TEXTAREA") el.setSelectionRange(el.value.length,el.value.length); } }
 }
