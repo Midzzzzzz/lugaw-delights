@@ -153,7 +153,7 @@ const SECTIONS=BEST.length?[{id:"best",name:"Best sellers",note:"Our customers' 
 $("#cats").innerHTML = SECTIONS.map((c,i)=>`<a href="#${c.id}" class="${i?"":"on"}">${esc(c.name.replace(" Series",""))}</a>`).join("");
 $("#menu").innerHTML = SECTIONS.map(c => `
   <section class="cat" id="${c.id}"><h2>${esc(c.name)}${c.note?`<small>${esc(c.note)}</small>`:""}</h2>
-  ${c.id!=="best"&&c.items.some(([id])=>ITEMS[id]?.pre)?`<p class="flag" style="margin:0 0 8px">Pre-order: these are made to order and delivered ${PRE_WHEN} after you order.</p>`:""}
+  ${c.id!=="best"&&c.items.some(([id])=>ITEMS[id]?.pre)?`<p class="flag" style="margin:0 0 8px">Pre-order: these are made to order and delivered on the day you pick (${PRE_WHEN} ahead at the earliest). Order them separately from the regular menu.</p>`:""}
   ${c.items.map(([id])=>{const it=ITEMS[id];return `
     <div class="item${it.best?" best":""}" data-item="${id}"><img class="ph" data-ph="${id}" alt="${esc(it.name)}" hidden><div class="meta"><div class="name">${esc(it.name.replace("Add-on: ",""))}</div>
     ${it.inc?`<div class="inc">${esc(it.inc)}</div>`:""}${it.pre?`<div class="inc" style="color:var(--brand-deep);font-weight:700">Pre-order · delivered ${PRE_WHEN} later</div>`:""}<div class="price">${peso(it.price)}</div></div>
@@ -186,11 +186,28 @@ $("#menu").addEventListener("click", e=>{
   if(+b.dataset.d>0 && removed.has(id)) return showErr(`Sorry, ${ITEMS[id].name} is no longer on the menu.`);
   if(+b.dataset.d>0 && soldOut.has(id)) return showErr(`Sorry, ${ITEMS[id].name} is sold out right now.`);
   if(+b.dataset.d>0){ const p=stockProblem({id,qty:1}); if(p) return showErr(p); }
+  // pre-orders (platters, packages) and the regular menu go in separate orders
+  if(+b.dataset.d>0 && !cart[id]){ const m=mixProblem(id); if(m){ showErr(m); return itemNote(b.closest(".item"),m); } }
   showErr("");
   if(q>0) cart[id]=q; else delete cart[id];
   renderCtl(id); renderCart();
 });
 
+// Pre-orders are delivered on their own day, so they can't share an order with the regular menu
+function mixProblem(id){
+  const ids=Object.keys(cart); if(!ids.length) return "";
+  const pre=!!ITEMS[id]?.pre, cartPre=ids.some(x=>ITEMS[x]?.pre);
+  if(pre===cartPre) return "";
+  return pre ? `${ITEMS[id].name} is a pre-order (delivered on the day you pick), so it can't be in the same order as the regular menu. Place this order first, then order platters and packages separately.`
+    : `Your order has a pre-order (platter or package). Regular menu items need a separate order: place this pre-order first, then order ${ITEMS[id].name} separately.`;
+}
+// A short message right under a menu item (the error under the form may be off screen on a phone)
+function itemNote(el, msg){
+  if(!el) return;
+  el.parentNode.querySelectorAll(".mixnote").forEach(n=>n.remove());
+  const n=document.createElement("p"); n.className="flag mixnote"; n.style.margin="0 0 8px"; n.setAttribute("role","alert"); n.textContent=msg;
+  el.after(n); setTimeout(()=>n.remove(),8000);
+}
 const mode=()=>"Delivery"; // customers order delivery only
 // In the Android app a download link does nothing, so the QR is saved with a screenshot there
 const appView=!!window.Capacitor?.isNativePlatform?.();
@@ -569,6 +586,7 @@ $("#form").addEventListener("submit", async e=>{
   if(mode()==="Delivery" && zoneFee()==null) miss.push("your barangay (we deliver in Los Baños and Bay only)");
   if(mode()==="Delivery" && !address) miss.push("your house no., street and landmark");
   const preNow=preorderItems(cartItems()).length>0, deliverOn=$("#f-date").value, deliverTime=$("#f-time").value;
+  if(preNow && preorderItems(cartItems()).length<cartItems().length) return showErr("Platters and packages are pre-orders: please order them separately from the regular menu. Remove one kind from this order.");
   if(preNow && !(deliverOn>=preMin() && deliverOn<=preMax())) miss.push("the delivery date for your pre-order (tomorrow up to 60 days ahead)");
   if(miss.length) return showErr("Please add "+miss.join(", ")+".");
   const gone=Object.keys(cart).filter(id=>soldOut.has(id));
