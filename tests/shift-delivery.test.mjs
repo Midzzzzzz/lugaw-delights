@@ -25,6 +25,7 @@ t("cash delivery: the rider paid at pickup, so it's cash in the drawer", s.rider
 s = shiftSummary(shift, [{ mode: "Dine-in", status: "completed", payment: "Cash", cashGiven: 100, total: 78, paidTotal: 78, createdAt: at(12) },
   del({ payment: "GCash", paymentConfirmed: true, paymentConfirmedAt: at(13), createdAt: at(13) })]);
 t("mixed shift: sales are the dine-in and the delivery", s.sales === 188 && s.cashSales === 78 && s.gcashSales === 110 && s.expected === 578);
+t("mixed shift: dine-in and delivery sales shown apart, and they add up to the total", s.dineSales === 78 && s.deliverySales === 110 && s.dineSales + s.deliverySales === s.sales);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

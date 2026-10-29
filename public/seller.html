@@ -148,7 +148,7 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
-import { prepMinutes, orderType, PLATFORMS } from "./common.js";
+import { prepMinutes, orderType, PLATFORMS, salesRows } from "./common.js";
 import { shiftSummary } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -1110,7 +1110,7 @@ const diffText=d=>d==null?"":d===0?`<span style="color:var(--ok)">Cash is exact<
 function shiftTable(s){
   const row=(l,v,b)=>`<div${b?' class="grand"':""}><span>${l}</span><span>${v}</span></div>`;
   return `<div class="totals" style="margin-top:8px;max-width:420px">
-    ${row("Orders",s.orders)}${row("Sales",peso(s.sales))}${row("GCash received",peso(s.gcashSales))}${s.platformSales?row("Foodpanda / Grab",peso(s.platformSales)):""}${s.unpaidCount?row(`Not paid yet (${s.unpaidCount})`,peso(s.unpaid)):""}${s.cancelled?row("Cancelled orders",s.cancelled):""}
+    ${row("Orders",s.orders)}${salesRows(s).map(([l,v],i,a)=>row(l,peso(v),a.length>1&&i===a.length-1)).join("")}${row("GCash received",peso(s.gcashSales))}${s.platformSales?row("Foodpanda / Grab",peso(s.platformSales)):""}${s.unpaidCount?row(`Not paid yet (${s.unpaidCount})`,peso(s.unpaid)):""}${s.cancelled?row("Cancelled orders",s.cancelled):""}
     <div style="border-top:1px dashed var(--line);margin:4px 0"></div>
     ${row("Starting cash",peso(s.startCash))}${row("Cash sales",peso(s.cashSales))}${s.riderCash?row("Cash from riders",peso(s.riderCash)):""}
     ${s.adjustIn?row("Extra collected",peso(s.adjustIn)):""}${s.adjustOut?row("Given back","−"+peso(s.adjustOut)):""}
