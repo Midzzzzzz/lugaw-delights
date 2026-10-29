@@ -252,6 +252,13 @@ if(isConfigured){
     const l=s.exists()?s.data().left:null; stockLeftNow=l&&Object.keys(l).length?l:null;
     MENU.forEach(c=>c.items.forEach(([id])=>renderCtl(id))); renderCart();
   }, ()=>{});
+  // The QR customers pay to: the one the owner uploaded (Shop settings), else the built-in pay-qr.jpg
+  const QR0=SHOP.payQr, QRNAME0=SHOP.payQrName;
+  onSnapshot(doc(db,"settings","payqr"), s=>{
+    const d=s.exists()?s.data():null;
+    SHOP.payQr=d?.image||QR0; SHOP.payQrName=d?.image?(d.name||""):QRNAME0;
+    renderTrack();
+  }, ()=>{});
   onSnapshot(doc(db,"settings","store"), s=>{
     storeOpen = !s.exists() || s.data().open !== false;
     $("#closed").hidden = storeOpen; renderCart();

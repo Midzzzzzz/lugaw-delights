@@ -201,6 +201,7 @@ function start(){
     alertSeen=new Set([...(alertSeen||[]),...ids]);
     if(fresh.length) notify(fresh.length>1?`${fresh.length} new orders`:`New order ${orderCode(fresh[0].id)}`, fresh.length>1?"":orderSummary(fresh[0]));
   }, ()=>{}));
+  subs.push(onSnapshot(doc(db,"settings","payqr"), s=>{ payQrDoc=s.exists()?s.data():null; if(tab==="settings") render(); }, ()=>{}));
   subs.push(onSnapshot(doc(db,"settings","menu"), s=>{
     menuDoc=s.exists()?s.data():null; if(menuDoc) applyMenu(menuDoc.sections);
     if(invDoc) publishStock(ingredientsLeft(trackerCount(invDoc),invOrders));
@@ -629,8 +630,51 @@ $("#view").addEventListener("click",async e=>{
     say(`Saved. Sign in with ${auth.currentUser.email}${acct.loaded?` or ${acct.loaded}`:""}${pw?" and your new password. Other phones signed in as you were signed out.":"."}`, true);
   }catch(x){ acct.cur=""; say(String(x?.code).includes("invalid-credential")?"Your current password isn't right.":friendlyError(x)); }
 });
+// ---------- Payment QR ----------
+// The QR customers scan to pay a delivery by GCash or a bank app (settings/payqr: image, name).
+// Without one, the built-in pay-qr.jpg is shown.
+let payQrDoc=null, qrDraft=null, qrName=null, qrMsg="";
+function payQrCard(){
+  const img=qrDraft||payQrDoc?.image||SHOP.payQr, name=qrName??(payQrDoc?payQrDoc.name||"":SHOP.payQrName||"");
+  return `<div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
+    <h2 style="color:var(--brand-deep);font-size:1.2rem">Payment QR</h2>
+    <p style="margin:0">The QR code customers scan to pay a delivery by GCash or a bank app. To change it, take a screenshot of the new QR in your GCash or bank app, choose it here, and save.</p>
+    ${img?`<img src="${esc(img)}" alt="Payment QR customers see" style="width:220px;max-width:100%;border-radius:12px;background:#fff;border:1px solid var(--line)">`:""}
+    ${qrDraft?`<p class="flag" style="margin:0">New QR, not saved yet. Check it's the right account, then tap Save QR.</p>`:`<p class="muted" style="margin:0;font-size:.88rem">${payQrDoc?`Uploaded ${esc(when(payQrDoc.updatedAt))}.`:"This is the original QR built into the website."}</p>`}
+    <label class="f" for="qrName">Account name customers see<input id="qrName" maxlength="80" value="${esc(name)}" placeholder="e.g. Armida Contreras (GCash)"></label>
+    <div class="btnrow"><button class="btn ghost small" data-qr="pick">Choose new QR picture</button>
+      <button class="btn" data-qr="save"${qrDraft||qrName!=null?"":" disabled"}>Save QR</button>
+      ${payQrDoc&&!qrDraft?`<button class="btn ghost small" data-qr="reset">Go back to the original QR</button>`:""}
+      ${qrDraft||qrName!=null?`<button class="btn ghost small" data-qr="cancel">Cancel</button>`:""}
+      <span class="muted">${esc(qrMsg)}</span></div></div>`;
+}
+const qrInput=document.createElement("input");
+qrInput.type="file"; qrInput.accept="image/*"; qrInput.id="qrFile"; qrInput.hidden=true; document.body.append(qrInput);
+qrInput.onchange=async()=>{
+  const f=qrInput.files[0]; qrInput.value=""; if(!f) return;
+  // sharp enough to scan: large, with little compression
+  try{ qrDraft=await compressPhoto(f,1000,0.92); qrMsg=""; }catch(x){ qrMsg="Couldn't read that picture."; }
+  render(true);
+};
+$("#view").addEventListener("input",e=>{ if(tab==="settings" && e.target.id==="qrName"){ qrName=e.target.value; const b=document.querySelector('[data-qr="save"]'); if(b) b.disabled=false; } });
+$("#view").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-qr]"); if(!b || tab!=="settings") return;
+  const a=b.dataset.qr;
+  if(a==="pick") return qrInput.click();
+  if(a==="cancel"){ qrDraft=null; qrName=null; qrMsg=""; return render(true); }
+  if(a==="reset"){ if(b.dataset.sure!=="1"){ b.dataset.sure="1"; b.textContent="Use the original QR again? Tap again"; return; }
+    b.disabled=true; try{ await deleteDoc(doc(db,"settings","payqr")); qrMsg="Customers see the original QR again."; }catch(x){ qrMsg=friendlyError(x); } return render(true); }
+  if(a==="save"){
+    const image=qrDraft||payQrDoc?.image, name=String(qrName??payQrDoc?.name??SHOP.payQrName??"").trim().slice(0,80);
+    if(!image){ qrMsg="Choose the QR picture first."; return render(true); }
+    b.disabled=true; qrMsg="Saving…";
+    try{ await saved(setDoc(doc(db,"settings","payqr"),{image,name,updatedAt:serverTimestamp()})); qrDraft=null; qrName=null; qrMsg="Saved. Customers see this QR now."; }
+    catch(x){ qrMsg="Couldn't save: "+friendlyError(x); b.disabled=false; }
+    return render(true);
+  }
+});
 function renderSettings(){
-  $("#view").innerHTML=accountCard()+`<div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
+  $("#view").innerHTML=accountCard()+payQrCard()+`<div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
     <h2 style="color:var(--brand-deep);font-size:1.2rem">Delivery areas and fees</h2>
     <p style="margin:0">Customers can only order delivery to the barangays ticked here, and pay that barangay's fee.
       Set higher fees for barangays farther from the stall. The fee goes to the rider.</p>
