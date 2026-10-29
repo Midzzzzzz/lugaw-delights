@@ -1144,15 +1144,14 @@ function endCount(batch){
   return belowStandard(invDoc,leftNow).length;
 }
 const diffText=d=>d==null?"":d===0?`<span style="color:var(--ok)">Cash is exact</span>`:d>0?`<span style="color:var(--warn)">Over by ${peso(d)}</span>`:`<span style="color:var(--brand-deep)">Short by ${peso(-d)}</span>`;
+// The seller sees only what to check: the cash that should be in the drawer and the GCash / QR
+// payments that should be in the shop's account (the full breakdown is on the printed report
+// and in the owner's Shifts tab)
 function shiftTable(s){
   const row=(l,v,b)=>`<div${b?' class="grand"':""}><span>${l}</span><span>${v}</span></div>`;
   return `<div class="totals" style="margin-top:8px;max-width:420px">
-    ${row("Orders",s.orders)}${salesRows(s).map(([l,v],i,a)=>row(l,peso(v),a.length>1&&i===a.length-1)).join("")}${row("GCash received",peso(s.gcashSales))}${s.platformSales?row("Foodpanda / Grab",peso(s.platformSales)):""}${s.unpaidCount?row(`Not paid yet (${s.unpaidCount})`,peso(s.unpaid)):""}${s.cancelled?row("Cancelled orders",s.cancelled):""}
-    <div style="border-top:1px dashed var(--line);margin:4px 0"></div>
-    ${row("Starting cash",peso(s.startCash))}${row("Cash sales",peso(s.cashSales))}${s.riderCash?row("Cash from riders",peso(s.riderCash)):""}
-    ${s.adjustIn?row("Extra collected",peso(s.adjustIn)):""}${s.adjustOut?row("Given back","−"+peso(s.adjustOut)):""}
-    ${s.payIn?row("Pay in",peso(s.payIn)):""}${s.payOut?row("Pay out","−"+peso(s.payOut)):""}
-    ${row("Expected cash in drawer",peso(s.expected),true)}${s.counted!=null?row("Counted",peso(s.counted))+`<div>${diffText(s.counted-s.expected)}</div>`:""}</div>`;
+    ${row("Expected cash in drawer",peso(s.expected),true)}${row("Expected GCash",peso(s.gcashSales),true)}
+    ${s.counted!=null?row("Counted cash",peso(s.counted))+`<div>${diffText(s.counted-s.expected)}</div>`:""}</div>`;
 }
 $("#shiftCard").addEventListener("input",e=>{
   if(e.target.id==="shiftStart") shiftDraft.start=e.target.value;
