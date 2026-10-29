@@ -65,6 +65,11 @@ export function preorderReleaseAt(o) {
 }
 // An unpaid pre-order (no payment sent) is cancelled after this long, so it doesn't hold a day's order
 export const PREORDER_PAY_MINUTES = 60;
+// Whether the customer's payment (screenshot or GCash Ref No.) is waiting for the shop: sent, and
+// not marked "not received" since. paymentRejected: the shop marked it not received.
+const tms = t => t?.toMillis?.() ?? 0;
+export const paymentSent = o => { const sent = Math.max(tms(o?.payShotAt), tms(o?.gcashSentAt), o?.gcashRef && !o?.gcashSentAt ? 1 : 0); return sent > 0 && sent > tms(o?.payRejectedAt); };
+export const paymentRejected = o => !!o?.payRejectedAt && !o?.paymentConfirmed && !paymentSent(o);
 export const isPreorder = o => o?.preorder === true || (o?.mode !== "Dine-in" && !o?.manual && preorderItems(o?.items).length > 0);
 // Every item, sold out or not (names and prices for older orders)
 export const ITEMS = Object.create(null);

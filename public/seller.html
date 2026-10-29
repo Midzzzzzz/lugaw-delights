@@ -148,7 +148,7 @@
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
-import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder, preorderWhen, preorderReleaseAt, PREORDER_PAY_MINUTES, preorderItems } from "./common.js";
+import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder, preorderWhen, preorderReleaseAt, PREORDER_PAY_MINUTES, preorderItems, paymentSent, paymentRejected } from "./common.js";
 import { shiftSummary } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
@@ -306,8 +306,8 @@ setInterval(()=>{
     updateDoc(doc(db,"orders",o.id),{status:"new",releasedAt:serverTimestamp()}).catch(()=>releasing.delete(o.id)); // another screen may have sent it already
   });
   // a pre-order nobody paid for (no screenshot or Ref No.) is cancelled after an hour
-  orders.filter(o=>o.status==="scheduled" && !o.paymentConfirmed && !o.payShotAt && !o.gcashRef && !releasing.has(o.id)
-    && Date.now()-(o.createdAt?.toMillis?.()??Date.now())>PREORDER_PAY_MINUTES*60000).forEach(o=>{
+  orders.filter(o=>o.status==="scheduled" && !o.paymentConfirmed && !paymentSent(o) && !releasing.has(o.id)
+    && Date.now()-Math.max(o.createdAt?.toMillis?.()??Date.now(),o.payRejectedAt?.toMillis?.()??0)>PREORDER_PAY_MINUTES*60000).forEach(o=>{
     releasing.add(o.id);
     updateDoc(doc(db,"orders",o.id),{status:"cancelled",cancelledBy:"shop",cancelReason:`Not paid within ${PREORDER_PAY_MINUTES} minutes`}).catch(()=>releasing.delete(o.id));
   });
@@ -748,7 +748,7 @@ function orderCard(o){
   let acts=[];
   const avail=riders.filter(r=>r.status==="approved"&&r.online);
   // can't be accepted until the customer pays; a pre-order only once the seller confirmed the full payment arrived
-  const pre=isPreorder(o), unpaidGcash=o.payment==="GCash" && !dineIn && (pre ? !o.paymentConfirmed : !o.gcashRef && !o.payShotAt);
+  const pre=isPreorder(o), unpaidGcash=o.payment==="GCash" && !dineIn && (pre ? !o.paymentConfirmed : !paymentSent(o));
   // Pickup orders are cooked right away; delivery orders once a rider has accepted
   const waitLabel=pre?"Pre-order: confirm the full payment first":"Waiting for GCash payment";
   // a scheduled pre-order goes to riders by itself on its day once paid; the seller can send it earlier
@@ -765,6 +765,8 @@ function orderCard(o){
   if(o.status==="picked_up" && o.hasPin) acts.push(["showpin","Customer can't show the code?","btn ghost small"]);
   if(unsettled(o)) acts.push(["settle", o.payment==="Cash" ? `Got ${peso(shopAmount(o))} from rider` : `Paid rider's ${peso(o.deliveryFee)} fee`, "btn ok"]);
   if(o.payment==="GCash" && !dineIn && !o.paymentConfirmed && o.status!=="cancelled") acts.unshift(["paid",o.payShotAt?"Payment received":"GCash payment received","btn ok"]);
+  // the screenshot isn't a real payment, or the money isn't there: the customer is asked to pay again
+  if(o.payment==="GCash" && !dineIn && !o.paymentConfirmed && paymentSent(o) && !["cancelled","delivered"].includes(o.status)) acts.splice(1,0,["notpaid","Payment not received","btn ghost small"]);
   if(dineIn && ["preparing","completed"].includes(o.status)) acts.push(["additems","Change order","btn ghost small"]);
   // a paid order isn't cancelled (the sale stays on the books): change it instead
   if((ACTIVE.includes(o.status) && !(dineIn && hasPayment(o))) || (dineIn && o.status==="completed" && !hasPayment(o))) acts.push(["cancelled","Cancel","btn ghost small"]);
@@ -883,6 +885,8 @@ function phoneBadge(phone){
 // The customer types their GCash reference number; the seller finds that Ref No. and
 // amount in the shop's GCash history, then taps "GCash payment received".
 function gcashLine(o){
+  if(paymentRejected(o)) return `<b style="color:var(--brand-deep)">Marked not received</b> ${esc(fmtTime(o.payRejectedAt))}. The customer is asked to pay and send the real receipt.
+    Don't cook until it's paid.${o.payShotAt?`<br>${payShotButton(o)}`:""}`;
   if(o.paymentConfirmed) return `<span class="pill done">Paid</span> ${o.payShotAt?"QR":"GCash"}${o.gcashRef?` · Ref <span class="num">${esc(o.gcashRef)}</span>`:""} ${payShotButton(o)}`;
   if(o.payShotAt && !o.gcashRef) return `QR payment: <b>screenshot sent</b><br>
     <span class="muted">Check the screenshot, then find <b>${peso(o.total)}</b> in the shop's bank app (MariBank) before tapping payment received.</span><br>${payShotButton(o)}`;
@@ -1207,7 +1211,7 @@ $("#shiftCard").addEventListener("click",async e=>{
   }
 });
 
-const CONFIRM=new Set(["reassign","release"]);
+const CONFIRM=new Set(["reassign","release","notpaid"]);
 $("#board").addEventListener("click", async e=>{
   const b=e.target.closest("button"); if(!b) return;
   if(b.dataset.settleBal){
@@ -1285,6 +1289,7 @@ $("#board").addEventListener("click", async e=>{
   try{
     if(set==="paid") await updateDoc(ref,{paymentConfirmed:true,paymentConfirmedAt:now});
     else if(set==="release") await updateDoc(ref,{status:"new",releasedAt:now});
+    else if(set==="notpaid") await updateDoc(ref,{payRejectedAt:now});
     else if(set==="settle"){
       const o=orders.find(x=>x.id===b.dataset.id);
       await updateDoc(ref,{...(o?.payment==="Cash"?{cashReceived:true}:{feePaid:true}),settled:true,settledAt:now});

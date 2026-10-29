@@ -74,5 +74,18 @@ await sched("h3", { customerUid: "c98", paymentConfirmed: true });
 await t("a paid one can't be cancelled by the customer (call the shop)", () => assertFails(updateDoc(doc(as("c98", "anonymous"), "orders/h3"), { status: "cancelled", cancelledBy: "customer" })));
 await t("the seller can cancel it", () => assertSucceeds(updateDoc(doc(s1, "orders/h3"), { status: "cancelled", cancelReason: "Customer asked" })));
 
+console.log("Payment not received (wrong or fake screenshot)");
+await assigned("x1", { payShotAt: new Date(Date.now() - 60000) });
+await t("seller marks the screenshot as not received", () => assertSucceeds(updateDoc(doc(s1, "orders/x1"), { payRejectedAt: serverTimestamp() })));
+await t("then the order can't be cooked", () => assertFails(updateDoc(doc(s1, "orders/x1"), { status: "preparing", preparingAt: serverTimestamp(), sellerUid: "s1", sellerName: "S" })));
+await env.withSecurityRulesDisabled(c => updateDoc(doc(c.firestore(), "orders/x1"), { payShotAt: new Date(Date.now() + 5000) })); // the customer sends a new screenshot
+await t("after a new screenshot it can be cooked again", () => assertSucceeds(updateDoc(doc(s1, "orders/x1"), { status: "preparing", preparingAt: serverTimestamp(), sellerUid: "s1", sellerName: "S" })));
+await assigned("x2", { paymentConfirmed: true });
+await t("a confirmed payment can't be marked not received", () => assertFails(updateDoc(doc(s1, "orders/x2"), { payRejectedAt: serverTimestamp() })));
+await assigned("x3", { payment: "Cash", payShotAt: null });
+await t("a cash order can't be marked not received", () => assertFails(updateDoc(doc(s1, "orders/x3"), { payRejectedAt: serverTimestamp() })));
+await assigned("x4", {});
+await t("the time must be now", () => assertFails(updateDoc(doc(s1, "orders/x4"), { payRejectedAt: new Date(2020, 0, 1) })));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);

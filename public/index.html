@@ -120,7 +120,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
 import { onAuthStateChanged, signInAnonymously } from "./fb/auth.js";
 import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp } from "./fb/firestore.js";
 import { compressPhoto } from "./common.js";
-import { preorderItems, PREORDER_DAYS, preorderWhen, PREORDER_PAY_MINUTES } from "./common.js";
+import { preorderItems, PREORDER_DAYS, preorderWhen, PREORDER_PAY_MINUTES, paymentSent, paymentRejected } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, shortItem, servingsLeft, MAX_LINES, MAX_QTY, REPORT_REASONS, phoneKey, DELIVERY_ZONES, ZONES, zoneLabel, peso, esc, STATUS, FLOW, stepLabel, calcTotals, boxRow, itemsHTML, fmtTime, orderCode, friendlyError, setupNotice } from "./common.js";
 import { notify, setupAlerts, statusLabel } from "./common.js";
 setupAlerts();
@@ -343,7 +343,7 @@ function renderTrack(){
   $("#trackBox").innerHTML = `<h2>Track your order</h2>` + list.map(o=>{
     const flow=o.preorder?["scheduled",...FLOW.Delivery]:FLOW[o.mode]||FLOW.Delivery, at=flow.indexOf(o.status), finished=FINAL.includes(o.status);
     const steps = o.status==="cancelled" ? `<p class="pill off" style="justify-self:start">Cancelled</p>` :
-      `<ol class="steps">${flow.map((s,i)=>`<li class="${i<at||finished?"done":i===at?"now":""}"><span>${esc(s==="scheduled"&&!o.paymentConfirmed?(o.payShotAt||o.gcashRef?"Payment sent: the shop is checking it":"Waiting for your payment"):stepLabel(o.mode,s))}</span></li>`).join("")}</ol>`;
+      `<ol class="steps">${flow.map((s,i)=>`<li class="${i<at||finished?"done":i===at?"now":""}"><span>${esc(s==="scheduled"&&!o.paymentConfirmed?(paymentSent(o)?"Payment sent: the shop is checking it":"Waiting for your payment"):stepLabel(o.mode,s))}</span></li>`).join("")}</ol>`;
     const cancelNote = o.status!=="cancelled" ? "" : o.cancelledBy==="customer"
       ? `<p style="margin:0">You cancelled this order.</p>`
       : `<p style="margin:0">Sorry, we had to cancel this order${o.cancelReason?`: <b>${esc(o.cancelReason)}</b>`:"."}</p>
@@ -356,7 +356,7 @@ function renderTrack(){
     const hide = finished ? `<button class="btn ghost small" data-hide="${o.id}" style="justify-self:start">Hide</button>` : "";
     return `<div style="border-top:2px dashed var(--line);padding-top:10px;display:grid;gap:6px">
       <div class="btnrow" style="justify-content:space-between"><b class="num">${esc(o.code)}</b><span class="muted">${fmtTime(o.createdAt)} · ${peso(o.total)}</span></div>
-      ${(payingId===o.id||o.preorder)&&o.payment==="GCash"&&o.status!=="cancelled"&&!o.paymentConfirmed&&((!o.gcashRef&&!o.payShotAt)||payDraft[o.id]?.editing)?payStep(o):""}
+      ${(payingId===o.id||o.preorder)&&o.payment==="GCash"&&o.status!=="cancelled"&&!o.paymentConfirmed&&(!paymentSent(o)||payDraft[o.id]?.editing)?payStep(o):""}
       ${steps}${o.status==="scheduled"?`<p class="muted" style="margin:0;font-size:.88rem">${o.paymentConfirmed?"Paid, thank you! ":""}On the delivery day we cook it fresh and send it with a rider.</p>`:""}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${FINAL.includes(o.status)?"":preNote(o.items,o)}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
   }).join("");
   if(focusKey){ const el=document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); if(el){ el.focus(); if(el.tagName==="TEXTAREA") el.setSelectionRange(el.value.length,el.value.length); } }
@@ -393,6 +393,7 @@ function payStep(o){
   const copy=(text,label)=>`<button type="button" class="btn ghost small" data-copy="${esc(text)}">Copy ${label}</button>`;
   return `<div class="paystep" role="dialog" aria-modal="true" aria-labelledby="ps-title-${id}"><div class="card">
     <h2 id="ps-title-${id}" style="color:var(--brand)">Pay ${peso(o.total)} ${SHOP.payQr?"by QR":"with GCash"}</h2>
+    ${paymentRejected(o)?`<p class="flag" style="margin:0;background:var(--brand);color:var(--on-brand)"><b>The shop didn't receive your payment.</b> The picture you sent isn't a payment receipt for this order, or the money hasn't arrived. Please pay ${peso(o.total)} and upload the screenshot of your payment receipt.</p>`:""}
     ${o.preorder?`<p class="flag" style="margin:0">Order <b class="num">${esc(o.code)}</b> is a pre-order: it's <b>not confirmed until you pay the full amount</b>.
       Please pay within ${PREORDER_PAY_MINUTES} minutes, or it's cancelled.</p>`
       :`<p class="muted" style="margin:0">Order <b class="num">${esc(o.code)}</b>. The shop starts cooking once you pay.</p>`}
@@ -435,7 +436,10 @@ function payBox(o){
   if(o.payment!=="GCash" || o.status==="cancelled") return "";
   if(o.paymentConfirmed) return `<p style="margin:0"><span class="pill done">Paid</span> Payment confirmed by the shop.</p>`;
   const d=payDraft[o.id]||(payDraft[o.id]={ref:"",sender:"",err:"",editing:false}), id=esc(o.id);
-  if(o.payShotAt && !d.editing) return payingId===o.id ? "" : `<div class="notice" style="margin:0;font-size:.9rem">Payment screenshot sent.
+  if(paymentRejected(o) && !d.editing) return payingId===o.id ? "" : `<div class="notice closed" style="margin:0;display:grid;gap:6px">
+    <div><b>The shop didn't receive your payment.</b> Please pay ${peso(o.total)} and send the screenshot of your payment receipt.</div>
+    <button class="btn small" data-pay-open="${id}" style="justify-self:start;background:#fff;color:var(--brand-deep)">Pay now</button></div>`;
+  if(o.payShotAt && paymentSent(o) && !d.editing) return payingId===o.id ? "" : `<div class="notice" style="margin:0;font-size:.9rem">Payment screenshot sent.
     Waiting for the shop to confirm your payment.<br><button class="btn ghost small" data-pay-edit="${id}" style="margin-top:6px">Send a different screenshot</button></div>`;
   if(!o.gcashRef && !d.editing) return `<div class="notice closed" style="margin:0;display:grid;gap:6px">
     <div>Not paid yet. The shop starts cooking once you pay ${peso(o.total)}${SHOP.payQr?"":" by GCash"}.</div>

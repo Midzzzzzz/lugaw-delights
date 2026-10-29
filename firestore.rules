@@ -601,6 +601,15 @@ service cloud.firestore {
             && !(resource.data.status in ['new', 'assigned'] && request.resource.data.status == 'preparing'
                  && resource.data.payment == 'GCash' && resource.data.mode != 'Dine-in'
                  && !('gcashRef' in resource.data) && !('payShotAt' in resource.data))
+            // ... nor while the payment the customer sent was marked not received (until they send another)
+            && !(resource.data.status in ['new', 'assigned'] && request.resource.data.status == 'preparing'
+                 && ('payRejectedAt' in resource.data) && resource.data.get('paymentConfirmed', false) != true
+                 && resource.data.get('payShotAt', resource.data.payRejectedAt) <= resource.data.payRejectedAt
+                 && resource.data.get('gcashSentAt', resource.data.payRejectedAt) <= resource.data.payRejectedAt)
+            // The seller marks a sent payment as not received (wrong or fake screenshot), before confirming it
+            && (!changed().hasAny(['payRejectedAt']) || (request.resource.data.payRejectedAt == request.time
+                 && resource.data.payment == 'GCash' && resource.data.get('paymentConfirmed', false) != true
+                 && request.resource.data.get('paymentConfirmed', false) != true))
             // A paid order can't be cancelled (the sale stays on the books). A Foodpanda or Grab
             // order can: the platform may cancel it, and then the shop is never paid for it.
             && !(resource.data.mode == 'Dine-in' && request.resource.data.status == 'cancelled' && resource.data.status != 'cancelled'
