@@ -101,7 +101,7 @@ table.inv input{width:90px;text-align:right;padding:5px 8px}
       <div class="stat"><b id="sPlat">₱0</b><span>Foodpanda / Grab</span></div>
       <div class="stat"><b id="sOrders">0</b><span>Completed orders</span></div>
       <div class="stat"><b id="sAvg">₱0</b><span>Average order</span></div>
-      <div class="stat"><b id="sFees">₱0</b><span>Rider fees</span></div>
+      <div class="stat"><b id="sDel">₱0</b><span>Lugaw Delights delivery</span><small id="sFees" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Rider fees ₱0</small></div>
       <div class="stat"><b id="sOpen">0</b><span>In progress</span></div>
       <div class="stat"><b id="sCancel">0</b><span>Cancelled</span></div>
     </div>
@@ -290,7 +290,10 @@ function render(force){
   $("#sPlat").textContent=peso(done.filter(o=>platformName(o)).reduce((s,o)=>s+shopAmount(o),0));
   $("#sOrders").textContent=done.length;
   $("#sAvg").textContent=peso(own.length?Math.round(sales/own.length):0);
-  $("#sFees").textContent=peso(done.reduce((s,o)=>s+(o.deliveryFee||0),0));
+  // Lugaw Delights' own delivery: the shop's sales (food and boxes), and the riders' fees on them
+  const dels=done.filter(o=>o.mode==="Delivery");
+  $("#sDel").textContent=peso(dels.reduce((s,o)=>s+shopAmount(o),0));
+  $("#sFees").textContent=`Rider fees ${peso(dels.reduce((s,o)=>s+(o.deliveryFee||0),0))} · ${plural(dels.length,"order")}`;
   $("#sOpen").textContent=orders.filter(o=>ACTIVE.includes(o.status)).length;
   $("#sCancel").textContent=orders.filter(o=>o.status==="cancelled").length;
   const pending=sellers.filter(s=>s.status==="pending").length+kitchen.filter(k=>k.status==="pending").length+riders.filter(r=>r.status==="pending").length;
