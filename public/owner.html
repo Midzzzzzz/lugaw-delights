@@ -117,7 +117,7 @@ import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot,
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
 import { findShifts, pastSummary } from "./pastshifts.js";
-import { saved, prepMinutes, orderType, businessDate, DAY_START, platformName, boxRow, SHOP, PLATFORMS, shiftSummary, salesRows } from "./common.js";
+import { saved, prepMinutes, orderType, businessDate, DAY_START, platformName, boxRow, SHOP, PLATFORMS, shiftSummary, salesRows, isPreorderSection } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
@@ -915,6 +915,7 @@ function renderMenu(){
     ${c?`<div class="msec">
       <div class="mhead"><input data-s="${menuCat}" data-f="name" value="${esc(c.name)}" maxlength="60" aria-label="Category name">
         <label class="chk"><input type="checkbox" data-s="${menuCat}" data-f="box"${c.box?" checked":""}> Take-out box fee</label>
+        <label class="chk" title="Customers are told it's a pre-order, delivered 1 day after they order"><input type="checkbox" data-s="${menuCat}" data-f="preorder"${isPreorderSection(c)?" checked":""}> Pre-order (1 day)</label>
         <button class="mini" data-mact="sup" data-s="${menuCat}" aria-label="Move category left"${menuCat?"":" disabled"}>←</button>
         <button class="mini" data-mact="sdown" data-s="${menuCat}" aria-label="Move category right"${menuCat<m.length-1?"":" disabled"}>→</button>
         ${c.items.length?"":`<button class="mini" data-mact="sdel" data-s="${menuCat}">Delete category</button>`}</div>
@@ -1008,7 +1009,7 @@ async function saveMenu(b){
   if(bad.length){ menuMsg="Can't save yet: "+[...new Set(bad)].slice(0,3).join("; ")+"."; return render(true); }
   // Remember earlier prices so orders placed before the change still pass the price check
   const old=new Map(); savedMenu().forEach(c=>(c.items||[]).forEach(it=>old.set(it.id,it)));
-  const sections=m.map(c=>({ id:c.id, name:String(c.name).trim(), box:!!c.box, note:c.note||"",
+  const sections=m.map(c=>({ id:c.id, name:String(c.name).trim(), box:!!c.box, preorder:isPreorderSection(c), note:c.note||"",
     items:c.items.map(it=>{
       const o=old.get(it.id); let was=[...(it.was||[])];
       if(o && o.price!==it.price && !was.includes(o.price)) was=[o.price,...was].slice(0,5);

@@ -114,6 +114,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
 import { onAuthStateChanged, signInAnonymously } from "./fb/auth.js";
 import { collection, doc, getDoc, getDocs, setDoc, onSnapshot, updateDoc, writeBatch, serverTimestamp } from "./fb/firestore.js";
 import { compressPhoto } from "./common.js";
+import { preorderItems, PREORDER_DAYS } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, shortItem, servingsLeft, MAX_LINES, MAX_QTY, REPORT_REASONS, phoneKey, DELIVERY_ZONES, ZONES, zoneLabel, peso, esc, STATUS, FLOW, stepLabel, calcTotals, boxRow, itemsHTML, fmtTime, orderCode, friendlyError, setupNotice } from "./common.js";
 import { notify, setupAlerts, statusLabel } from "./common.js";
 setupAlerts();
@@ -130,15 +131,24 @@ const zoneFee = ()=>fees && zone() in fees ? fees[zone()] : null;
 $("#hoursPill").textContent = "Open " + SHOP.hours;
 $("#foot").innerHTML = `${esc(SHOP.deliveryNote)} Questions? Call or text ${esc(SHOP.phone)}.<br>
   <a href="rider.html#register">Ride with us</a>`;
+// Platters and party packages are pre-orders: delivered a day after the order
+const PRE_WHEN = PREORDER_DAYS===1 ? "1 day" : `${PREORDER_DAYS} days`;
+const preDate = d => new Date(d.getTime()+PREORDER_DAYS*86400000).toLocaleDateString("en-PH",{weekday:"long",month:"short",day:"numeric"});
+function preNote(items, when){
+  const pre=preorderItems(items); if(!pre.length) return "";
+  return `<div class="flag" style="margin:0"><b>Pre-order:</b> ${esc(pre.map(it=>ITEMS[it.id]?.name||it.name).join(", "))} ${pre.length===1?"is":"are"} made to order and ${pre.length===1?"takes":"take"} ${PRE_WHEN} to deliver.
+    ${when?`We'll deliver ${pre.length===1?"it":"them"} on <b>${esc(preDate(when))}</b>.`:"We'll deliver your order the day after you order."}</div>`;
+}
 // Best sellers first: every item the owner marked "best seller", repeated from its own category
 const BEST=MENU.flatMap(c=>c.items.map(([id])=>id)).filter(id=>ITEMS[id]?.best);
 const SECTIONS=BEST.length?[{id:"best",name:"Best sellers",note:"Our customers' favourites",items:BEST.map(id=>[id])},...MENU]:MENU;
 $("#cats").innerHTML = SECTIONS.map((c,i)=>`<a href="#${c.id}" class="${i?"":"on"}">${esc(c.name.replace(" Series",""))}</a>`).join("");
 $("#menu").innerHTML = SECTIONS.map(c => `
   <section class="cat" id="${c.id}"><h2>${esc(c.name)}${c.note?`<small>${esc(c.note)}</small>`:""}</h2>
+  ${c.id!=="best"&&c.items.some(([id])=>ITEMS[id]?.pre)?`<p class="flag" style="margin:0 0 8px">Pre-order: these are made to order and delivered ${PRE_WHEN} after you order.</p>`:""}
   ${c.items.map(([id])=>{const it=ITEMS[id];return `
     <div class="item${it.best?" best":""}" data-item="${id}"><img class="ph" data-ph="${id}" alt="${esc(it.name)}" hidden><div class="meta"><div class="name">${esc(it.name.replace("Add-on: ",""))}</div>
-    ${it.inc?`<div class="inc">${esc(it.inc)}</div>`:""}<div class="price">${peso(it.price)}</div></div>
+    ${it.inc?`<div class="inc">${esc(it.inc)}</div>`:""}${it.pre?`<div class="inc" style="color:var(--brand-deep);font-weight:700">Pre-order · delivered ${PRE_WHEN} later</div>`:""}<div class="price">${peso(it.price)}</div></div>
     <div class="ctl" data-id="${id}"></div></div>`}).join("")}</section>`).join("");
 
 // Items sold out because an ingredient ran out (settings/stock, kept up to date by the shop)
@@ -187,7 +197,7 @@ function renderCart(){
     <div class="totals"><div><span>Subtotal</span><span>${peso(t.subtotal)}</span></div>
     ${mode()==="Delivery"?`<div><span>Delivery fee</span><span>${zoneFee()!=null?peso(t.deliveryFee):"Choose your barangay"}</span></div>`:""}
     ${boxRow(t)}
-    <div class="grand"><span>Total</span><span>${peso(t.total)}</span></div></div>`
+    <div class="grand"><span>Total</span><span>${peso(t.total)}</span></div></div>${preNote(items,new Date())}`
     : `<p class="empty">Your bowl is empty. Tap <b>Add</b> on anything from the menu to start your order.</p>`;
   $("#submit").disabled = !items.length || !storeOpen || !isConfigured;
   $("#submit").textContent = !storeOpen ? "Closed right now" : pay()==="GCash" ? "Place order & pay by QR" : "Place order";
@@ -332,7 +342,7 @@ function renderTrack(){
     return `<div style="border-top:2px dashed var(--line);padding-top:10px;display:grid;gap:6px">
       <div class="btnrow" style="justify-content:space-between"><b class="num">${esc(o.code)}</b><span class="muted">${fmtTime(o.createdAt)} · ${peso(o.total)}</span></div>
       ${payingId===o.id&&o.payment==="GCash"&&o.status!=="cancelled"&&!o.paymentConfirmed&&((!o.gcashRef&&!o.payShotAt)||payDraft[o.id]?.editing)?payStep(o):""}
-      ${steps}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
+      ${steps}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${FINAL.includes(o.status)?"":preNote(o.items,o.createdAt?.toDate?.()||new Date())}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
   }).join("");
   if(focusKey){ const el=document.querySelector(`[data-focus-key="${CSS.escape(focusKey)}"]`); if(el){ el.focus(); if(el.tagName==="TEXTAREA") el.setSelectionRange(el.value.length,el.value.length); } }
 }

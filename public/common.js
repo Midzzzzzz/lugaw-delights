@@ -43,10 +43,15 @@ export const MENU_SECTIONS = await loadMenu();
 // What the menus show: [id, name, price, inc, best] per item, sold-out items left off
 export const MENU = MENU_SECTIONS.map(c => ({ ...c, items: (c.items || []).filter(it => !it.off).map(it => [it.id, it.name, it.price, it.inc, it.best]) }))
   .filter(c => c.items.length);
+// Pre-order categories (platters, party packages): made to order, delivered a day after ordering.
+// The owner ticks "Pre-order" on the category; categories saved before that follow their name.
+export const PREORDER_DAYS = 1;
+export const isPreorderSection = c => c.preorder ?? /platter|package|bilao/i.test(c.name || "");
+export const preorderItems = items => (items || []).filter(it => ITEMS[it.id]?.pre);
 // Every item, sold out or not (names and prices for older orders)
 export const ITEMS = Object.create(null);
 MENU_SECTIONS.forEach(c => (c.items || []).forEach(it => {
-  ITEMS[it.id] = { id: it.id, name: it.name, price: it.price, inc: it.inc || "", best: !!it.best, cat: c.id, box: !!c.box, off: !!it.off, was: it.was || [],
+  ITEMS[it.id] = { id: it.id, name: it.name, price: it.price, inc: it.inc || "", best: !!it.best, cat: c.id, box: !!c.box, pre: isPreorderSection(c), off: !!it.off, was: it.was || [],
     recipe: it.recipe || {}, // ingredient id -> amount one serving uses
     takeout: it.takeout || {} }; // ingredient id -> amount used only when it's packed to go (e.g. its take-out box)
 }));
@@ -62,7 +67,7 @@ export function applyMenu(sections) {
   sections.forEach(c => (c.items || []).forEach(it => {
     live.add(it.id);
     const t = ITEMS[it.id] || (ITEMS[it.id] = { id: it.id });
-    Object.assign(t, { name: it.name, price: it.price, inc: it.inc || "", best: !!it.best, cat: c.id, box: !!c.box,
+    Object.assign(t, { name: it.name, price: it.price, inc: it.inc || "", best: !!it.best, cat: c.id, box: !!c.box, pre: isPreorderSection(c),
       off: !!it.off, was: it.was || [], recipe: it.recipe || {}, takeout: it.takeout || {} });
   }));
   Object.values(ITEMS).forEach(t => { if (!live.has(t.id)) t.off = true; }); // deleted: kept for older orders, not sold
