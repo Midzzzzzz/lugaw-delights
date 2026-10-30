@@ -1,4 +1,5 @@
-// An online GCash order can't be accepted (cooked) until the customer sends their GCash reference number.
+// An online GCash order can't be accepted (cooked) until the customer uploads the screenshot of their
+// payment; a reference number alone isn't enough (payshot.test.mjs covers the screenshot).
 import { readFileSync } from "node:fs";
 import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebase/rules-unit-testing";
 import { doc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
@@ -24,7 +25,11 @@ await t("seller can't cook a delivery order that has no rider yet", () => assert
 await t("seller can't accept a GCash order before the customer pays", () => assertFails(accept("g1")));
 await t("seller can still cancel an unpaid GCash order", () => assertSucceeds(updateDoc(doc(s1, "orders/g2"), { status: "cancelled", cancelledAt: serverTimestamp(), cancelledBy: "shop", cancelReason: "Not paid" })));
 await t("customer sends their reference number", () => assertSucceeds(updateDoc(doc(as("cust", "anonymous"), "orders/g1"), { gcashRef: "1234567890123", gcashSender: "Juan", gcashSentAt: serverTimestamp() })));
-await t("seller accepts it once the reference is in", () => assertSucceeds(accept("g1")));
+await t("seller still can't cook it with only the reference", () => assertFails(accept("g1")));
+await t("seller cooks it once they confirmed the money arrived", async () => {
+  await updateDoc(doc(s1, "orders/g1"), { paymentConfirmed: true });
+  await assertSucceeds(accept("g1"));
+});
 await t("cash orders can be accepted right away", () => assertSucceeds(accept("c1")));
 console.log(`\n${pass} passed, ${fail} failed`);
 await env.cleanup(); process.exit(fail ? 1 : 0);

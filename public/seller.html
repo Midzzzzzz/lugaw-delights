@@ -748,7 +748,8 @@ function orderCard(o){
   let acts=[];
   const avail=riders.filter(r=>r.status==="approved"&&r.online);
   // can't be accepted until the customer pays; a pre-order only once the seller confirmed the full payment arrived
-  const pre=isPreorder(o), unpaidGcash=o.payment==="GCash" && !dineIn && (pre ? !o.paymentConfirmed : !paymentSent(o));
+  // an online GCash order needs the customer's payment screenshot (a reference number alone isn't enough)
+  const pre=isPreorder(o), unpaidGcash=o.payment==="GCash" && !dineIn && !o.paymentConfirmed && (pre || !o.payShotAt || !paymentSent(o));
   // Pickup orders are cooked right away; delivery orders once a rider has accepted
   const waitLabel=pre?"Pre-order: confirm the full payment first":"Waiting for GCash payment";
   // a scheduled pre-order goes to riders by itself on its day once paid; the seller can send it earlier
