@@ -403,6 +403,11 @@ service cloud.firestore {
     function needsRider(d) {
       return d.mode == 'Delivery' && d.riderUid == null && d.status in ['new', 'preparing', 'ready'];
     }
+    // An online GCash order goes no further until the customer uploads the screenshot of their
+    // payment (payShotAt), or the shop has confirmed the money arrived.
+    function payShotIn(d) {
+      return d.get('payment', '') != 'GCash' || ('payShotAt' in d) || d.get('paymentConfirmed', false) == true;
+    }
 
     // Savings book: money the owner sets aside from sales, and expenses paid from it.
     // Owner only. Entries are added or deleted, never edited.
@@ -598,10 +603,9 @@ service cloud.firestore {
             // A pre-order isn't accepted until the seller has confirmed the full payment arrived
             && !(resource.data.get('preorder', false) == true && resource.data.status in ['new', 'assigned']
                  && request.resource.data.status == 'preparing' && resource.data.get('paymentConfirmed', false) != true)
-            // An online GCash order isn't cooked until the customer sends their GCash reference number
+            // An online GCash order isn't cooked until the customer uploads the screenshot of their payment
             && !(resource.data.status in ['new', 'assigned'] && request.resource.data.status == 'preparing'
-                 && resource.data.payment == 'GCash' && resource.data.mode != 'Dine-in'
-                 && !('gcashRef' in resource.data) && !('payShotAt' in resource.data))
+                 && resource.data.mode != 'Dine-in' && !payShotIn(resource.data))
             // ... nor while the payment the customer sent was marked not received (until they send another)
             && !(resource.data.status in ['new', 'assigned'] && request.resource.data.status == 'preparing'
                  && ('payRejectedAt' in resource.data) && resource.data.get('paymentConfirmed', false) != true
@@ -713,7 +717,7 @@ service cloud.firestore {
         // Rider accepts an order that is waiting for a rider (only after signing the agreement)
         || (isApprovedRider() && exists(/databases/$(database)/documents/agreements/$(uid()))
             && 'payMethod' in get(/databases/$(database)/documents/riders/$(uid())).data
-            && needsRider(resource.data)
+            && needsRider(resource.data) && payShotIn(resource.data)
             && changed().hasOnly(['status','riderUid','riderName','riderPhone','assignedAt'])
             // a new order becomes "rider found"; one the store is already cooking keeps its status
             && request.resource.data.status == (resource.data.status == 'new' ? 'assigned' : resource.data.status)
