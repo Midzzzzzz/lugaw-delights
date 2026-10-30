@@ -462,6 +462,20 @@ export function notify(title, body = "") {
   if (n && document.visibilityState === "hidden")
     n.schedule({ notifications: [{ id: (Date.now() % 1e8) + alertId++, title, body, channelId: "orders" }] }).catch(() => {});
 }
+// Ringing for orders nobody has accepted yet (like Foodpanda): the page calls ring() every few
+// seconds until they're accepted, then stopRing(). In the Android app in the background, one
+// notification is shown again each time, so the phone keeps alerting.
+const RING_ID = 999001;
+export function ring(title, body = "") {
+  chime();
+  try { navigator.vibrate?.([400, 150, 400]); } catch (_) {}
+  const n = notifier();
+  if (n && document.visibilityState === "hidden")
+    n.schedule({ notifications: [{ id: RING_ID, title, body, channelId: "orders" }] }).catch(() => {});
+}
+export function stopRing() {
+  try { notifier()?.cancel({ notifications: [{ id: RING_ID }] }).catch(() => {}); } catch (_) {}
+}
 function showAlert(title, body) {
   if (typeof document === "undefined") return;
   let box = document.getElementById("alerts");

@@ -15,6 +15,11 @@
 .rider-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 transparent}50%{box-shadow:0 0 0 6px var(--sunk)}}
 @media (prefers-reduced-motion:no-preference){.order.alert{animation:pulse 1.6s ease-in-out 3}}
+/* Ringing banner: stays until every waiting order is accepted */
+#ringing{position:fixed;left:8px;right:8px;bottom:max(8px,env(safe-area-inset-bottom));z-index:190;max-width:520px;margin:0 auto;display:grid;gap:2px;text-align:left;border:0;border-radius:14px;padding:12px 14px;background:var(--brand,#e0284f);color:var(--on-brand,#fff);box-shadow:0 6px 20px rgba(0,0,0,.28);font:inherit;cursor:pointer}
+#ringing b{font-size:1.05rem}
+@keyframes ringing{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+@media (prefers-reduced-motion:no-preference){#ringing{animation:ringing 1s ease-in-out infinite}}
 /* Dine-in sale screen (tap-first, like a POS): menu tiles on the left, the ticket on the right */
 .dine-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px}
 .dine-grid{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}
@@ -150,7 +155,7 @@ import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, o
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
 import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder, preorderWhen, preorderReleaseAt, PREORDER_PAY_MINUTES, preorderItems, paymentSent, paymentRejected, saleAt, ymdOf } from "./common.js";
 import { shiftSummary } from "./common.js";
-import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
+import { notify, setupAlerts, orderSummary, inApp, ring, stopRing } from "./common.js";
 import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, belowStandard, ingredientsLeft, servingsLeft, soldOutFrom, shortItem, MAX_LINES, MAX_QTY, peso, esc, STATUS, ACTIVE, statusLabel, calcTotals, mergedLines, shopAmount, boxRow, orderCode, fmtTime, isToday, todayKey, mapsLink, priceCheck, itemsHTML, CANCEL_REASONS, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, hasPayout, payoutText, friendlyError, setupNotice, enableSound, chime } from "./common.js";
 
 const $=s=>document.querySelector(s);
@@ -312,6 +317,26 @@ setInterval(()=>{
     updateDoc(doc(db,"orders",o.id),{status:"cancelled",cancelledBy:"shop",cancelReason:`Not paid within ${PREORDER_PAY_MINUTES} minutes`}).catch(()=>releasing.delete(o.id));
   });
 },30000);
+// Orders nobody has accepted keep ringing, like Foodpanda, until a seller taps Accept (on any phone)
+let ringing=false;
+setInterval(()=>{
+  const waiting=me?orders.filter(toAccept):[];
+  ringBanner(waiting);
+  if(waiting.length){ ringing=true; ring(waiting.length>1?`${waiting.length} orders waiting`:`Order ${orderCode(waiting[0].id)} waiting`,"Accept it to stop the alert."); }
+  else if(ringing){ ringing=false; stopRing(); }
+},3000);
+function ringBanner(waiting){
+  let b=document.getElementById("ringing");
+  if(!waiting.length){ b?.remove(); return; }
+  if(!b){
+    b=document.createElement("button"); b.type="button"; b.id="ringing"; document.body.append(b);
+    // a tap also turns the sound on (browsers need one), then shows the first waiting order
+    b.onclick=()=>{ enableSound(); const o=orders.find(toAccept); if(!o) return;
+      tab=isDel(o)?"delivery":"new"; render(true);
+      document.querySelector(`[data-set="preparing"][data-id="${CSS.escape(o.id)}"]`)?.scrollIntoView({behavior:"smooth",block:"center"}); };
+  }
+  b.innerHTML=`<b>${waiting.length>1?`${waiting.length} orders waiting`:`New order ${esc(orderCode(waiting[0].id))} waiting`}</b><span>The alert rings until the order is accepted. Tap to see it.</span>`;
+}
 function merge(){
   const m=new Map(); Object.values(lists).forEach(l=>l.forEach(o=>m.set(o.id,o)));
   const t=o=>o.createdAt?.toMillis?.()??Infinity; // just-placed orders have no server time yet
@@ -621,6 +646,11 @@ const unsettled=o=>o.status==="delivered"&&o.settled===false;
 // Orders the store must act on now: pickup orders just placed, and delivery
 // orders a rider has accepted (delivery orders find a rider before the store cooks)
 const needsStore=o=>(o.status==="new"&&o.mode!=="Delivery")||(o.status==="assigned"&&o.mode==="Delivery");
+// can't be accepted until the customer pays; a pre-order only once the seller confirmed the full payment arrived;
+// an online GCash order needs the customer's payment screenshot (a reference number alone isn't enough)
+const unpaidGcash=o=>o.payment==="GCash" && o.mode!=="Dine-in" && !o.paymentConfirmed && (isPreorder(o) || !o.payShotAt || !paymentSent(o));
+// Waiting for the seller to tap Accept: these keep ringing
+const toAccept=o=>needsStore(o) && !unpaidGcash(o);
 // A dine-in order has a payment once cash received is recorded, or GCash is marked received.
 // It can still be changed afterwards: paidTotal is what the payment covered, settledTotal the
 // total once a later difference was settled, and the balance is what's left (+ collect, - give back).
@@ -747,15 +777,13 @@ function orderCard(o){
   const del=o.mode==="Delivery", dineIn=o.mode==="Dine-in", c=dineIn?null:contactFor(o.id);
   let acts=[];
   const avail=riders.filter(r=>r.status==="approved"&&r.online);
-  // can't be accepted until the customer pays; a pre-order only once the seller confirmed the full payment arrived
-  // an online GCash order needs the customer's payment screenshot (a reference number alone isn't enough)
-  const pre=isPreorder(o), unpaidGcash=o.payment==="GCash" && !dineIn && !o.paymentConfirmed && (pre || !o.payShotAt || !paymentSent(o));
+  const pre=isPreorder(o), unpaid=unpaidGcash(o);
   // Pickup orders are cooked right away; delivery orders once a rider has accepted
   const waitLabel=pre?"Pre-order: confirm the full payment first":"Waiting for GCash payment";
   // a scheduled pre-order goes to riders by itself on its day once paid; the seller can send it earlier
   if(o.status==="scheduled") acts.push(o.paymentConfirmed?["release",o.mode==="Pickup"?"Start it now":"Send to riders now","btn ghost small"]:["waitpay",waitLabel,"btn"]);
-  if(o.status==="new" && !del) acts.push(unpaidGcash ? ["waitpay",waitLabel,"btn"] : ["preparing","Accept & start cooking","btn"]);
-  if(o.status==="assigned" && del) acts.push(unpaidGcash ? ["waitpay",waitLabel,"btn"] : ["preparing","Rider found: start cooking","btn"]);
+  if(o.status==="new" && !del) acts.push(unpaid ? ["waitpay",waitLabel,"btn"] : ["preparing","Accept & start cooking","btn"]);
+  if(o.status==="assigned" && del) acts.push(unpaid ? ["waitpay",waitLabel,"btn"] : ["preparing","Rider found: start cooking","btn"]);
   if(o.status==="preparing") acts.push(dineIn ? ["completed","Served","btn ok"]
     : [del?"ready":"ready_pickup", del?"Food ready":"Ready for pickup","btn ok"]);
   if(o.status==="ready_pickup") acts.push(["completed","Customer picked up","btn ok"]);
