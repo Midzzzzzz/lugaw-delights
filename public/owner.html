@@ -270,7 +270,9 @@ let preSub=null, preDone=[], upcomingPre=[];
 function salesDone(){
   const [a,b]=rangeDates(), inRange=o=>{ const t=saleAt(o)?.toMillis?.(); return t!=null && t>=a.getTime() && t<b.getTime(); };
   const pre=new Map([...orders.filter(o=>o.preorder&&!o.deliverOn),...preDone].map(o=>[o.id,o])); // older pre-orders have no delivery day
-  return [...orders.filter(o=>isDone(o)&&!o.preorder), ...[...pre.values()].filter(o=>isDone(o)&&inRange(o))];
+  // a Foodpanda / Grab order is paid by the platform once it's entered: it counts even if nobody tapped Served
+  const counted=o=>isDone(o)||(platformName(o)&&o.status!=="cancelled");
+  return [...orders.filter(o=>counted(o)&&!o.preorder), ...[...pre.values()].filter(o=>isDone(o)&&inRange(o))];
 }
 
 // ---------- Numbers ----------
