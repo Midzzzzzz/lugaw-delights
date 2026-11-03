@@ -101,7 +101,7 @@ table.inv input{width:90px;text-align:right;padding:5px 8px}
       <div class="stat"><b id="sDel">₱0</b><span>Lugaw Delights delivery</span><small id="sFees" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Rider fees ₱0</small></div>
       <div class="stat"><b id="sPre">₱0</b><span>Pre-orders</span><small id="sPreN" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Platters &amp; packages</small></div>
       <div class="stat"><b id="sSales">₱0</b><span>Total sales</span><small class="muted" style="display:block;font-size:.78rem;margin-top:2px">Dine-in + delivery + pre-orders</small></div>
-      <div class="stat"><b id="sPlat">₱0</b><span>Foodpanda / Grab</span></div>
+      <div class="stat"><b id="sPlat">₱0</b><span>Payout: Foodpanda / Grab</span><small id="sPlatN" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Paid out weekly</small></div>
       <div class="stat"><b id="sOrders">0</b><span>Completed orders</span></div>
       <div class="stat"><b id="sAll">₱0</b><span>All sales</span><small class="muted" style="display:block;font-size:.78rem;margin-top:2px">Dine-in + all delivery, incl. Foodpanda / Grab</small></div>
       <div class="stat"><b id="sOpen">0</b><span>In progress</span></div>
@@ -303,7 +303,10 @@ function render(force){
   // Sales: what the shop took in (cash, GCash). Foodpanda and Grab pay out weekly, so they're counted apart.
   const done=salesDone(), own=done.filter(o=>!platformName(o)), sales=own.reduce((s,o)=>s+shopAmount(o),0);
   $("#sSales").textContent=peso(sales);
-  $("#sPlat").textContent=peso(done.filter(o=>platformName(o)).reduce((s,o)=>s+shopAmount(o),0));
+  // what Foodpanda and Grab owe the shop (paid out weekly), at menu prices
+  const pf=done.filter(o=>o.source==="foodpanda"), pg=done.filter(o=>o.source==="grab"), psum=l=>l.reduce((s,o)=>s+shopAmount(o),0);
+  $("#sPlat").textContent=peso(psum(pf)+psum(pg));
+  $("#sPlatN").textContent=`Foodpanda ${peso(psum(pf))} · Grab ${peso(psum(pg))} · ${plural(pf.length+pg.length,"order")}`;
   $("#sOrders").textContent=done.length;
   // everything sold: dine-in, Lugaw Delights delivery and Foodpanda / Grab (riders' fees not included)
   $("#sAll").textContent=peso(done.reduce((s,o)=>s+shopAmount(o),0));
@@ -367,16 +370,7 @@ function renderSales(done){
   time.sort((x,y)=>x.k<y.k?-1:x.k>y.k?1:0);
   if(oneDay) time=time.filter(r=>r.value>0);
   const money=r=>peso(r.value);
-  // Payout summary: what Foodpanda and Grab owe the shop (paid out weekly) and the delivery fees that go to riders
-  const sum=l=>l.reduce((t,o)=>t+food(o),0), fp=plat.filter(o=>o.source==="foodpanda"), gb=plat.filter(o=>o.source==="grab");
-  const riderFees=done.filter(o=>o.mode==="Delivery").reduce((t,o)=>t+(o.deliveryFee||0),0);
-  const prow=(l,v,n,b)=>`<div${b?' class="grand"':""}><span>${l}${n!=null?` <span class="muted" style="font-weight:400">(${plural(n,"order")})</span>`:""}</span><span>${peso(v)}</span></div>`;
-  const payout=`<section class="card panel" style="grid-column:1/-1"><h2>Payout summary</h2><p class="sub">For the dates picked above. Platform amounts are at menu prices: the payout is lower after their commission.</p>
-    <div class="totals" style="max-width:460px">
-      ${prow("Foodpanda",sum(fp),fp.length)}${prow("Grab",sum(gb),gb.length)}${prow("Total from Foodpanda / Grab",sum(plat),null,true)}
-      <div style="border-top:1px dashed var(--line);margin:6px 0"></div>
-      ${prow("Delivery fees for riders",riderFees,done.filter(o=>o.mode==="Delivery").length,true)}</div></section>`;
-  $("#view").innerHTML=`<div class="panels">${payout}
+  $("#view").innerHTML=`<div class="panels">
     <section class="card panel"><h2>Sellers</h2><p class="sub">Food sales from completed orders each seller accepted or recorded (not Foodpanda / Grab)</p>
       ${rank(bySeller,{main:money,sub:r=>plural(r.count,"order"),empty:"No completed orders in this range yet."})}</section>
     <section class="card panel"><h2>Best-selling items</h2><p class="sub">Top 10 by quantity</p>
