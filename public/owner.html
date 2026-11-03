@@ -406,8 +406,7 @@ function renderSales(done){
   const bars=(title,rows)=>`<div class="o bars"><span class="k">${title}</span>${rows.map(([l,pct,extra])=>`<div class="bar2"><span>${esc(l)}${extra?` <small class="muted">· ${extra}</small>`:""}</span><span class="t"><i style="width:${pct}%"></i></span><b>${pct}%</b></div>`).join("")}</div>`;
   const overview=all.length?`<section class="card panel" style="grid-column:1/-1"><h2>Overview</h2><p class="sub">${esc(plural(all.length,"order"))} in the dates picked above</p>
     <div class="ov">
-      ${best?card("Busiest time",`${hName(best.h)} – ${hName((best.h+3)%24)}`,`${plural(best.n,"order")} in these 3 hours`):""}
-      ${busyHours[0]?card("Busiest hour",hSpan(busyHours[0][0]),`${plural(busyHours[0][1],"order")}${busyHours[1]?` · next: ${hSpan(busyHours[1][0])} (${busyHours[1][1]})`:""}`):""}
+      ${best?card("Busiest time",`${hName(best.h)} – ${hName((best.h+3)%24)}`,`${plural(best.n,"order")} in these 3 hours${busyHours[0]?` · most at ${hSpan(busyHours[0][0])} (${busyHours[0][1]})`:""}`):""}
       ${spanDays>=7&&busyDay?card("Busiest day",DAYS[busyDay[0]],`${plural(busyDay[1],"order")} · quietest: ${DAYS[slowDay[0]]} (${slowDay[1]})`):""}
       ${top3[0]?card("Most bought",esc(top3[0].label),`${plural(top3[0].count,"pc")}${top3.slice(1).length?` · then ${top3.slice(1).map(r=>`${esc(r.label)} (${r.count})`).join(", ")}`:""}`):""}
       ${card("Average order",peso(avg),"what a customer spends per order: total sales ÷ orders")}
