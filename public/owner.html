@@ -373,16 +373,7 @@ function renderSales(done){
     r.count+=Number(it.qty)||0; r.value+=(Number(it.price)||0)*(Number(it.qty)||0); items.set(k,r);
   }));
   const topItems=[...items.values()].sort((x,y)=>y.count-x.count||y.value-x.value).slice(0,10).map(r=>({...r,value:r.count,sales:r.value}));
-  // Sales over time: by hour for a single day, by day for longer ranges
-  const [a,b]=rangeDates(), oneDay=b-a<=86400000, buckets=new Map();
-  if(oneDay){ done.forEach(o=>{ const h=saleAt(o)?.toDate?.().getHours(); if(h!=null) buckets.set(h,(buckets.get(h)||0)+food(o)); }); }
-  else {
-    for(let d=new Date(a); d<b; d=addDays(d,1)) buckets.set(ymd(d),0); // every day shows, even with no sales
-    done.forEach(o=>{ const d=saleAt(o)?.toDate?.(); if(d){ const k=ymd(businessDate(d)); buckets.set(k,(buckets.get(k)||0)+food(o)); } });
-  }
-  let time=[...buckets.entries()].map(([k,v])=>({label:oneDay?new Date(2000,0,1,k).toLocaleTimeString("en-PH",{hour:"numeric"}):new Date(k+"T00:00").toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"}),value:v,k:oneDay?(k-DAY_START()+24)%24:k})); // a day's hours run from opening (5 AM) to 4 AM
-  time.sort((x,y)=>x.k<y.k?-1:x.k>y.k?1:0);
-  if(oneDay) time=time.filter(r=>r.value>0);
+  const [a,b]=rangeDates();
   const money=r=>peso(r.value);
   // ---------- Overview: when customers buy, what they buy, how they order and pay ----------
   const hourOf=o=>saleAt(o)?.toDate?.()?.getHours(), dayOf=o=>{ const d=saleAt(o)?.toDate?.(); return d?businessDate(d).getDay():null; };
@@ -415,8 +406,6 @@ function renderSales(done){
       ${rank(bySeller,{main:money,sub:r=>plural(r.count,"order"),empty:"No completed orders in this range yet."})}</section>
     <section class="card panel"><h2>Best-selling items</h2><p class="sub">Top 10 by quantity</p>
       ${rank(topItems,{main:r=>plural(r.count,"pc"),sub:r=>peso(r.sales),empty:"Nothing sold in this range yet."})}</section>
-    <section class="card panel"><h2>${oneDay?"Sales by hour":"Sales by day"}</h2><p class="sub">Food sales from completed orders (not Foodpanda / Grab)</p>
-      ${rank(time,{main:money,sub:()=>"",numbered:false,empty:"No sales in this range yet."})}</section>
     <section class="card panel"><h2>Foodpanda &amp; Grab payouts</h2><p class="sub">At menu prices, by payout period. Foodpanda pays each period within 5 working days after it ends (holidays may push it later); Grab by week. Their payout is less after commission.</p>
       ${rank(platWeeks,{main:money,sub:r=>`${plural(r.count,"order")} · ${r.when}`,numbered:false,empty:"No Foodpanda or Grab orders in this range."})}</section>
     <section class="card panel"><h2>Riders</h2><p class="sub">Delivery fees earned on completed deliveries</p>
