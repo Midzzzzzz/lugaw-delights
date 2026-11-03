@@ -131,7 +131,7 @@ import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndP
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, runTransaction, serverTimestamp } from "./fb/firestore.js";
 import { CONTRACT_VERSION, riderContract, agreementHTML } from "./contract.js";
 import { auth, db, isConfigured, SHOP, phoneKey, hasPayout, payoutText, readPayout, shopAmount, peso, esc, STATUS, statusLabel, fmtTime, todayKey, mapsLink, itemsHTML, compressPhoto, PROOF_KINDS, friendlyError, setupNotice, enableSound, chime } from "./common.js";
-import { notify, setupAlerts } from "./common.js";
+import { notify, setupAlerts, ring, stopRing } from "./common.js";
 
 const $=s=>document.querySelector(s);
 $("#shopPhone").textContent=SHOP.phone;
@@ -369,6 +369,28 @@ function startWork(){
   }, e=>{ $("#open").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; }));
 }
 
+// While a delivery is waiting for a rider and this rider is available, the phone keeps ringing,
+// with a full-screen alert, until a rider accepts it (this one or another).
+let rRinging=false, rSnoozeUntil=0;
+setInterval(()=>{
+  const list=rider?.online&&rider?.status==="approved"?openOrders:[];
+  riderAlert(list);
+  if(list.length){ rRinging=true; ring(list.length>1?`${list.length} deliveries waiting`:"A delivery is waiting",list.length>1?"Open the app and accept one.":`Earn ${peso(list[0].deliveryFee)} · accept it in the app`); }
+  else if(rRinging){ rRinging=false; stopRing(); }
+},3000);
+function riderAlert(list){
+  let el=document.getElementById("riderAlert");
+  if(!list.length || Date.now()<rSnoozeUntil){ el?.remove(); return; }
+  if(!el){ el=document.createElement("div"); el.id="riderAlert"; el.setAttribute("role","alertdialog"); el.setAttribute("aria-modal","true");
+    el.style.cssText="position:fixed;inset:0;z-index:200;overflow:auto;background:var(--brand,#e0284f);color:var(--on-brand,#fff);padding:24px 18px;display:grid;align-content:center;gap:14px;text-align:center";
+    document.body.append(el);
+    el.addEventListener("click",e=>{ enableSound(); if(e.target.closest("[data-ra-see]")){ rSnoozeUntil=Date.now()+45000; el.remove(); $("#open")?.scrollIntoView({behavior:"smooth",block:"start"}); } }); }
+  const html=`<h2 style="margin:0;font-size:1.8rem;color:inherit">${list.length>1?`${list.length} deliveries waiting`:"New delivery waiting"}</h2>
+    ${list.slice(0,3).map(o=>`<div style="background:rgba(0,0,0,.18);border-radius:14px;padding:12px"><b style="font-size:1.2rem">Earn ${peso(o.deliveryFee)}</b><br>${esc(o.zoneName||"")}</div>`).join("")}
+    <p style="margin:0;font-size:1.05rem">Tap below and <b>Accept</b> it. The alert stops once a rider accepts.</p>
+    <button type="button" data-ra-see style="justify-self:center;background:#fff;color:var(--brand-deep,#b0183a);border:0;border-radius:99px;padding:14px 28px;font:inherit;font-weight:800;font-size:1.1rem;cursor:pointer">See the delivery</button>`;
+  if(el.dataset.html!==html){ el.dataset.html=html; el.innerHTML=html; }
+}
 // Customer name and number, readable only after this rider accepts the order
 function loadContact(id){
   if(contacts[id]) return;
