@@ -1,0 +1,4 @@
+# the app build (lugaw-mobile/sync-from-website.mjs) matches these files line by line: keep them LF on Windows too
+public/*.html text eol=lf
+public/*.js text eol=lf
+public/*.css text eol=lf
