@@ -358,7 +358,8 @@ function startWork(){
   watchMine("today", where("deliveredDate","==",day));
   watchMine("unsettled", where("settled","==",false));
   workSubs.push(onSnapshot(query(collection(db,"orders"),where("mode","==","Delivery"),where("riderUid","==",null),where("status","in",["new","preparing","ready"])), s=>{
-    openOrders=s.docs.map(d=>({id:d.id,...d.data()})).filter(o=>!o.riderUid)
+    // a GCash order waits for the customer's payment screenshot (or the shop's confirmation)
+    openOrders=s.docs.map(d=>({id:d.id,...d.data()})).filter(o=>!o.riderUid && (o.payment!=="GCash" || o.payShotAt || o.paymentConfirmed))
       .sort((a,b)=>(a.createdAt?.seconds||0)-(b.createdAt?.seconds||0));
     const fresh=openOrders.filter(o=>!seenOpen.has(o.id));
     openOrders.forEach(o=>seenOpen.add(o.id));

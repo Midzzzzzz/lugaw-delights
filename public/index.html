@@ -121,7 +121,7 @@ aside h2{font-size:1.4rem;color:var(--brand)}
               <input type="radio" name="pay" id="p-qr" value="GCash"><label for="p-qr">Pay now: GCash or bank app (QR)</label>
             </div>
             <p class="flag" id="prePay" hidden style="margin:0">Your order has a pre-order (platter or package): it must be paid in full by QR before we accept it.</p>
-            <p class="muted" id="qrNote" hidden style="margin:0;font-size:.88rem">After you place your order, we show a QR code. Pay with GCash, Maya or your bank app, then type the reference number.</p>
+            <p class="muted" id="qrNote" hidden style="margin:0;font-size:.88rem">After you place your order, we show a QR code. Pay with GCash, Maya or your bank app, then upload a screenshot of your payment receipt. Your order is on hold until the screenshot is uploaded.</p>
           </div>
           <label class="f" for="f-notes">Notes (optional)<input id="f-notes" maxlength="300" placeholder="Extra spicy, no spring onion, etc."></label>
           <p class="err" id="err" hidden></p>
@@ -467,7 +467,7 @@ function trackCard(o){
     const hide = finished ? `<button class="btn ghost small" data-hide="${o.id}" style="justify-self:start">Hide</button>` : "";
     return `<div style="border-top:2px dashed var(--line);padding-top:10px;display:grid;gap:6px">
       <div class="btnrow" style="justify-content:space-between"><b class="num">${esc(o.code)}</b><span class="muted">${fmtTime(o.createdAt)} · ${peso(o.total)}</span></div>
-      ${(payingId===o.id||o.preorder)&&o.payment==="GCash"&&o.status!=="cancelled"&&!o.paymentConfirmed&&(!paymentSent(o)||payDraft[o.id]?.editing)?payStep(o):""}
+      ${(payingId===o.id||o.preorder||!o.payShotAt)&&o.payment==="GCash"&&o.status!=="cancelled"&&!o.paymentConfirmed&&(!paymentSent(o)||payDraft[o.id]?.editing)?payStep(o):""}
       ${steps}${o.status==="scheduled"?`<p class="muted" style="margin:0;font-size:.88rem">${o.paymentConfirmed?"Paid, thank you! ":""}${o.mode==="Pickup"?"On the day we cook it fresh and have it ready for you.":"On the delivery day we cook it fresh and send it with a rider."}
 </p>`:""}${o.mode==="Delivery"&&o.status==="new"?`<p class="muted" style="margin:0;font-size:.88rem">We're finding a rider for you. Your food is cooked as soon as a rider accepts, so it's hot when it reaches you.</p>`:""}${cancelNote}${doneNote}${FINAL.includes(o.status)?"":preNote(o.items,o)}${orderSummary(o)}${payBox(o)}${pinBox(o)}${rider}${cancel}${reportBox(o)}${hide}</div>`;
 }
@@ -506,7 +506,7 @@ function payStep(o){
     ${paymentRejected(o)?`<p class="flag" style="margin:0;background:var(--brand);color:var(--on-brand)"><b>The shop didn't receive your payment.</b> The picture you sent isn't a payment receipt for this order, or the money hasn't arrived. Please pay ${peso(o.total)} and upload the screenshot of your payment receipt.</p>`:""}
     ${o.preorder?`<p class="flag" style="margin:0">Order <b class="num">${esc(o.code)}</b> is a pre-order: it's <b>not confirmed until you pay the full amount</b>.
       Please pay within ${PREORDER_PAY_MINUTES} minutes, or it's cancelled.</p>`
-      :`<p class="muted" style="margin:0">Order <b class="num">${esc(o.code)}</b>. The shop starts cooking once you pay.</p>`}
+      :`<p class="muted" style="margin:0">Order <b class="num">${esc(o.code)}</b> is <b>on hold</b> until you upload the screenshot of your payment: it isn't sent to the kitchen or to riders before then.</p>`}
     ${SHOP.payQr?`<img src="${esc(SHOP.payQr)}" alt="QR code to pay Lugaw Delights" style="width:100%;max-width:360px;justify-self:center;border-radius:12px;background:#fff">
     <p class="muted" style="margin:0;text-align:center;font-size:.85rem">Pays to ${esc(SHOP.payQrName||SHOP.name)}</p>
     ${appView?"":`<a class="btn small" href="${esc(SHOP.payQr)}" download="lugaw-delights-pay-qr" style="justify-self:center">Save QR code</a>`}
@@ -523,7 +523,7 @@ function payStep(o){
     ${d.err?`<p class="err" style="margin:0">${esc(d.err)}</p>`:""}
     ${shotDraft[o.id]?`<button class="btn big" data-shot-send="${id}">Send screenshot</button>`:""}
     ${o.preorder?`<button class="btn ghost small" data-cancel="${id}" style="justify-self:center">Cancel this pre-order</button>`
-      :`<button class="btn ghost small" data-pay-later="${id}" style="justify-self:center">I'll pay later</button>`}
+      :`<button class="btn ghost small" data-cancel="${id}" style="justify-self:center">Cancel this order</button>`}
   </div></div>`:`<ol class="paysteps">
       <li><b>Open your GCash app</b> and choose <b>Send Money</b>.</li>
       <li>Send <b class="num">${peso(o.total)}</b> to <b class="num">${esc(SHOP.gcashNumber)}</b> (${esc(SHOP.gcashName)}).
@@ -539,7 +539,7 @@ function payStep(o){
     ${d.err?`<p class="err" style="margin:0">${esc(d.err)}</p>`:""}
     <button class="btn big" data-pay-send="${id}">Send reference number</button>
     ${o.preorder?`<button class="btn ghost small" data-cancel="${id}" style="justify-self:center">Cancel this pre-order</button>`
-      :`<button class="btn ghost small" data-pay-later="${id}" style="justify-self:center">I'll pay later</button>`}
+      :`<button class="btn ghost small" data-cancel="${id}" style="justify-self:center">Cancel this order</button>`}
   </div></div>`}`;
 }
 function payBox(o){
@@ -551,8 +551,10 @@ function payBox(o){
     <button class="btn small" data-pay-open="${id}" style="justify-self:start;background:#fff;color:var(--brand-deep)">Pay now</button></div>`;
   if(o.payShotAt && paymentSent(o) && !d.editing) return payingId===o.id ? "" : `<div class="notice" style="margin:0;font-size:.9rem">Payment screenshot sent.
     Waiting for the shop to confirm your payment.<br><button class="btn ghost small" data-pay-edit="${id}" style="margin-top:6px">Send a different screenshot</button></div>`;
-  if(!o.gcashRef && !d.editing) return `<div class="notice closed" style="margin:0;display:grid;gap:6px">
-    <div>Not paid yet. The shop starts cooking once you pay ${peso(o.total)}${SHOP.payQr?"":" by GCash"}.</div>
+  // QR payments need the screenshot; a reference number alone doesn't move the order along
+  if((SHOP.payQr ? !o.payShotAt : !o.gcashRef) && !d.editing) return `<div class="notice closed" style="margin:0;display:grid;gap:6px">
+    <div>${SHOP.payQr?`<b>On hold:</b> pay ${peso(o.total)} by QR and upload the screenshot of your payment. Your order isn't sent to the kitchen or riders until then.`
+      :`Not paid yet. The shop starts cooking once you pay ${peso(o.total)} by GCash.`}</div>
     <button class="btn small" data-pay-open="${id}" style="justify-self:start;background:#fff;color:var(--brand-deep)">Pay now</button></div>`;
   if(payingId===o.id) return ""; // the pay step is open
   if(o.gcashRef && !d.editing) return `<div class="notice" style="margin:0;font-size:.9rem">GCash reference <b class="num">${esc(o.gcashRef)}</b> sent.
@@ -653,7 +655,6 @@ onTrack("click", async e=>{
   const ps=e.target.closest("[data-pay-send]"); if(ps){ ps.disabled=true; await sendPayRef(ps.dataset.paySend); return; }
   const pe=e.target.closest("[data-pay-edit]"); if(pe){ payDraft[pe.dataset.payEdit].editing=true; payingId=pe.dataset.payEdit; renderTrack(); return; }
   const po=e.target.closest("[data-pay-open]"); if(po){ payingId=po.dataset.payOpen; renderTrack(); return; }
-  const pl=e.target.closest("[data-pay-later]"); if(pl){ payingId=null; if(payDraft[pl.dataset.payLater]) payDraft[pl.dataset.payLater].editing=false; renderTrack(); return; }
   const cp=e.target.closest("[data-copy]"); if(cp){
     navigator.clipboard?.writeText(cp.dataset.copy).then(()=>{ const t=cp.textContent; cp.textContent="Copied"; setTimeout(()=>cp.textContent=t,1500); }).catch(()=>{});
     return; }
