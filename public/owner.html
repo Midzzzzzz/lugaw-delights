@@ -10,6 +10,17 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&display=swap">
 <link rel="stylesheet" href="style.css">
 <style>
+/* Overview: one card per fact, big value first */
+.ov{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-top:8px}
+.ov .o{background:var(--bg);border:2px solid var(--line);border-radius:14px;padding:12px;display:grid;gap:2px;align-content:start}
+.ov .k{font-size:.72rem;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.ov .v{font-family:var(--display);font-size:1.45rem;line-height:1.15;color:var(--brand-deep)}
+.ov .d{font-size:.82rem;color:var(--muted)}
+.ov .wide{grid-column:1/-1}
+.ov .bars{grid-column:span 2}@media (max-width:640px){.ov .bars{grid-column:1/-1}}
+.ov .bar2{display:grid;grid-template-columns:minmax(8rem,auto) 1fr 3rem;gap:8px;align-items:center;font-size:.88rem;margin-top:4px}
+.ov .bar2 .t{height:10px;border-radius:99px;background:var(--line);overflow:hidden}.ov .bar2 .t i{display:block;height:100%;background:var(--brand)}
+.ov .bar2 b{text-align:right;font-variant-numeric:tabular-nums}
 .sumgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px;margin:12px 0}
 .sum{background:var(--surface);border:2px solid var(--line);border-radius:14px;padding:12px 14px;display:grid;gap:2px;align-content:start}
 .sum h2{margin:0 0 4px;font-size:1.05rem;color:var(--brand-deep)}
@@ -391,16 +402,18 @@ function renderSales(done){
   const ways=SALE_KINDS.map(([k,l])=>[l,bdAll.kinds[k].count,bdAll.kinds[k].amount]).filter(r=>r[1]).sort((x,y)=>y[2]-x[2]);
   const pays=[["cash",bdAll.money.cash],["GCash / QR",bdAll.money.gcash],["Foodpanda / Grab",bdAll.money.platform]].filter(r=>r[1]).sort((x,y)=>y[1]-x[1]);
   const top3=topItems.slice(0,3);
-  const li=t=>`<li style="margin:4px 0">${t}</li>`;
+  const card=(k,v,d,cls="")=>`<div class="o ${cls}"><span class="k">${k}</span><span class="v">${v}</span>${d?`<span class="d">${d}</span>`:""}</div>`;
+  const bars=(title,rows)=>`<div class="o bars"><span class="k">${title}</span>${rows.map(([l,pct,extra])=>`<div class="bar2"><span>${esc(l)}${extra?` <small class="muted">· ${extra}</small>`:""}</span><span class="t"><i style="width:${pct}%"></i></span><b>${pct}%</b></div>`).join("")}</div>`;
   const overview=all.length?`<section class="card panel" style="grid-column:1/-1"><h2>Overview</h2><p class="sub">${esc(plural(all.length,"order"))} in the dates picked above</p>
-    <ul style="margin:6px 0 0;padding-left:18px;line-height:1.45">
-      ${best?li(`<b>Busiest time:</b> ${hName(best.h)} to ${hName((best.h+3)%24)} (${plural(best.n,"order")}). Busiest single hour: <b>${hSpan(busyHours[0][0])}</b> (${plural(busyHours[0][1],"order")})${busyHours[1]?`, then ${hSpan(busyHours[1][0])} (${busyHours[1][1]})`:""}${busyHours[2]?` and ${hSpan(busyHours[2][0])} (${busyHours[2][1]})`:""}.`):""}
-      ${spanDays>=7&&busyDay?li(`<b>Busiest day of the week:</b> ${DAYS[busyDay[0]]} (${plural(busyDay[1],"order")}); quietest: ${DAYS[slowDay[0]]} (${slowDay[1]}).`):""}
-      ${top3.length?li(`<b>Most bought:</b> ${top3.map((r,i)=>`${i===0?"<b>":""}${esc(r.label)}${i===0?"</b>":""} (${plural(r.count,"pc")})`).join(", ")}.`):""}
-      ${ways.length?li(`<b>How customers order:</b> ${ways.map(([l,n,v])=>`${esc(l)} ${share(v)}% (${plural(n,"order")})`).join(" · ")}.`):""}
-      ${pays.length?li(`<b>How they pay:</b> ${pays.map(([l,v])=>`${l} ${share(v)}%`).join(" · ")}.`):""}
-      ${li(`<b>Average order:</b> ${peso(avg)}.`)}
-    </ul></section>`:"";
+    <div class="ov">
+      ${best?card("Busiest time",`${hName(best.h)} – ${hName((best.h+3)%24)}`,`${plural(best.n,"order")} in these 3 hours`):""}
+      ${busyHours[0]?card("Busiest hour",hSpan(busyHours[0][0]),`${plural(busyHours[0][1],"order")}${busyHours[1]?` · next: ${hSpan(busyHours[1][0])} (${busyHours[1][1]})`:""}`):""}
+      ${spanDays>=7&&busyDay?card("Busiest day",DAYS[busyDay[0]],`${plural(busyDay[1],"order")} · quietest: ${DAYS[slowDay[0]]} (${slowDay[1]})`):""}
+      ${top3[0]?card("Most bought",esc(top3[0].label),`${plural(top3[0].count,"pc")}${top3.slice(1).length?` · then ${top3.slice(1).map(r=>`${esc(r.label)} (${r.count})`).join(", ")}`:""}`):""}
+      ${card("Average order",peso(avg),"what a customer spends per order: total sales ÷ orders")}
+      ${ways.length?bars("How customers order",ways.map(([l,n,v])=>[l.replace(" (platters & packages)",""),share(v),plural(n,"order")])):""}
+      ${pays.length?bars("How they pay",pays.map(([l,v])=>[l==="cash"?"Cash":l,share(v)])):""}
+    </div></section>`:"";
   $("#view").innerHTML=`<div class="panels">${overview}
     <section class="card panel"><h2>Sellers</h2><p class="sub">Food sales from completed orders each seller accepted or recorded (not Foodpanda / Grab)</p>
       ${rank(bySeller,{main:money,sub:r=>plural(r.count,"order"),empty:"No completed orders in this range yet."})}</section>
