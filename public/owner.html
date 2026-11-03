@@ -1447,7 +1447,6 @@ function renderShifts(){
   // A shift in one short list: its orders, how they were paid, then the seller's cash count
   const detail=x=>{ const s=x.summary, o=x.overview;
     const r=(l,v,b)=>`<div${b?' class="grand"':""}><span>${l}</span><span>${v}</span></div>`, gap=`<div style="border-top:1px dashed var(--line);margin:6px 0"></div>`;
-    const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((t,m)=>t+(m.amount||0),0);
     return `<div class="totals" style="max-width:420px">
       ${o?r("Orders",o.count)+gap
         +r("Cash <small class=\"muted\">(dine-in and delivery sales)</small>",peso(o.money.cash))
@@ -1455,11 +1454,15 @@ function renderShifts(){
         +r("Foodpanda / Grab",peso(o.money.platform))
         +(o.money.unpaid?r("Not paid yet",peso(o.money.unpaid)):"")
         +r("Total sales",peso(o.total),true):""}
-      ${r("Starting cash",peso(s?.startCash??x.startCash??0))}${r("Pay out","− "+peso(payOut))}
       ${gap}
       ${x.past?`<div class="muted">Recorded from the order timeline: no drawer was counted then.</div>`
-        :s&&x.closedAt?r("Expected cash",peso(s.expected),true)+r("Counted",s.counted!=null?peso(s.counted):"—")
-        :`<div class="muted">Still open: the drawer is counted when the seller closes the shift.</div>`}</div>
+        :s&&x.closedAt?(()=>{ // the drawer: what the shift earned in cash, then the starting cash that was already there
+          const taken=s.cashSales+s.riderCash+s.adjustIn-s.adjustOut, earned=taken-s.payOut;
+          return r("Cash sales <small class=\"muted\">(into the drawer)</small>",peso(taken))+r("Pay out","− "+peso(s.payOut))
+            +r("Cash earned",peso(earned),true)
+            +r("Starting cash <small class=\"muted\">(not a sale)</small>","+ "+peso(s.startCash))+(s.payIn?r("Pay in <small class=\"muted\">(not a sale)</small>","+ "+peso(s.payIn)):"")
+            +r("Expected cash in drawer",peso(s.expected),true)+r("Counted",s.counted!=null?peso(s.counted):"—"); })()
+        :r("Starting cash <small class=\"muted\">(not a sale)</small>",peso(x.startCash??0))+`<div class="muted">Still open: the drawer is counted when the seller closes the shift.</div>`}</div>
       ${(x.moves||[]).length?`<b style="display:block;margin-top:10px">Pay in / pay out</b><ul class="lines">${x.moves.map(m=>`<li><span class="q">${m.type==="in"?"In":"Out"}</span><span>${esc(m.note)} · ${esc(m.byName)} · ${new Date(m.at).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"})}</span><span class="amt">${peso(m.amount)}</span></li>`).join("")}</ul>`:""}
       <div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-shdel="${esc(x.id)}">Delete shift</button></div>`; };
   $("#view").innerHTML=`<div class="card" style="margin-top:12px">
