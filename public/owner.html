@@ -308,11 +308,8 @@ function render(force){
   const [ra,rb]=rangeDates(), outs=allShifts.flatMap(x=>x.moves||[]).filter(m=>m.type==="out" && m.at>=ra.getTime() && m.at<rb.getTime());
   const bd=salesBreakdown(done, outs.reduce((t,m)=>t+(m.amount||0),0)), up=upcomingPre.filter(o=>o.paymentConfirmed);
   const ln=(label,count,amount,key,cls="")=>`<${key?`button type="button" data-kind="${key}"`:"div"} class="ln ${cls}"><span>${label}</span><span class="c">${count!=null?plural(count,"order"):""}</span><b>${amount}</b></${key?"button":"div"}>`;
-  const note=t=>`<p class="sub">${t}</p>`;
   $("#summary").innerHTML=`<section class="sum"><h2>Sold through</h2>
-      ${SALE_KINDS.map(([k,l])=>ln(l,bd.kinds[k].count,peso(bd.kinds[k].amount),k)
-        +(k==="delivery"&&bd.riderFees?note(`Riders' delivery fees, not shop sales: ${peso(bd.riderFees)}`):"")
-        +(k==="preorder"&&up.length?note(`Paid, not delivered yet (counted on their day): ${up.length} · ${peso(up.reduce((t,o)=>t+shopAmount(o),0))}`):"")).join("")}
+      ${SALE_KINDS.map(([k,l])=>ln(l,bd.kinds[k].count,peso(bd.kinds[k].amount),k)).join("")}
       ${ln("Total sales",bd.count,peso(bd.total),"all","tot")}</section>
     <section class="sum"><h2>Money</h2>
       ${ln("Cash",null,peso(bd.money.cash),"m-cash")}
