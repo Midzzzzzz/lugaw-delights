@@ -169,7 +169,7 @@ function start(){
   subs.push(onSnapshot(query(collection(db,"ledger"),orderBy("date","desc")), s=>{
     // newest first: by date, then by when it was recorded
     const t=e=>e.createdAt?.toMillis?.()??Infinity;
-    ledger=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.date===b.date?t(b)-t(a):(a.date<b.date?1:-1)); ledgerErr=""; if(tab==="savings") render();
+    ledger=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.date===b.date?t(b)-t(a):(a.date<b.date?1:-1)); ledgerErr=""; ledgerLoaded=true; autoSave(); if(tab==="savings") render();
   }, e=>{ ledgerErr="Couldn't load savings: "+friendlyError(e)+""; if(tab==="savings") render(); }));
   subs.push(onSnapshot(collection(db,"sellers"), s=>{ sellers=s.docs.map(d=>({id:d.id,...d.data()})); teamErr=""; render(); }, e=>{ teamErr="Couldn't load sellers: "+friendlyError(e)+""; render(); }));
   subs.push(onSnapshot(collection(db,"kitchen"), s=>{ kitchen=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
@@ -193,7 +193,7 @@ function start(){
   }, x=>{ feesErr="Couldn't load the delivery fees: "+friendlyError(x); if(tab==="settings") render(); }));
   // Cashier shifts, newest first
   subs.push(onSnapshot(query(collection(db,"shifts"),orderBy("openedAt","desc"),limit(90)), s=>{
-    allShifts=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})); shiftsErr=""; render();
+    allShifts=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})); shiftsErr=""; shiftsLoaded=true; autoSave(); render();
   }, e=>{ shiftsErr="Couldn't load shifts: "+friendlyError(e)+""; if(tab==="shifts") render(); }));
   // The owner's menu (settings/menu) and inventory counts
   // Saved menu changes (recipes, prices) count right away, without a refresh
@@ -545,6 +545,41 @@ const todayStr=()=>ymd(new Date());
 const monthOf=d=>String(d||"").slice(0,7);
 let savMonth=todayStr().slice(0,7), salesHint={};
 // Sales (food and boxes, not rider fees) from completed orders placed on a given day
+// ---------- Auto-save: half of each day's money into the savings book ----------
+// After a business day ends (5 AM the next day), 50% of that day's Money total (the dashboard's
+// Money table: cash after pay outs + GCash + Foodpanda / Grab + not paid yet) is added as a saving,
+// once, as ledger/auto-<date>. It's done when the owner dashboard is open; days missed are caught
+// up (up to 31 days back) the next time it opens. A day already saved by hand is left alone.
+const AUTO_SAVE_PCT=50, AUTO_SAVE_FROM="2026-11-03";
+let ledgerLoaded=false, shiftsLoaded=false, autoSaving=false;
+setInterval(autoSave, 10*60000); // a dashboard left open saves the day that just ended
+async function dayMoney(day){
+  const a=new Date(day+"T00:00"); a.setHours(DAY_START()); const b=addDays(a,1);
+  const [q,p]=await Promise.all([
+    getDocs(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<",Timestamp.fromDate(b)))),
+    getDocs(query(collection(db,"orders"),where("preorder","==",true),where("deliverOn",">=",ymdOf(addDays(a,-1))),where("deliverOn","<=",day)))]);
+  const inDay=o=>{ const t=saleAt(o)?.toMillis?.(); return t!=null && t>=a.getTime() && t<b.getTime(); };
+  const list=[...new Map([...q.docs,...p.docs].map(d=>[d.id,{id:d.id,...d.data()}])).values()]
+    .filter(o=>o.preorder ? isDone(o)&&inDay(o) : isDone(o)||(platformName(o)&&o.status!=="cancelled"));
+  const payOut=allShifts.flatMap(x=>x.moves||[]).filter(m=>m.type==="out"&&m.at>=a.getTime()&&m.at<b.getTime()).reduce((t,m)=>t+(m.amount||0),0);
+  const bd=salesBreakdown(list,payOut);
+  return bd.total-bd.payOut;
+}
+async function autoSave(){
+  if(autoSaving || !ledgerLoaded || !shiftsLoaded || !auth.currentUser) return;
+  autoSaving=true;
+  try{
+    const last=businessDate(new Date()); last.setDate(last.getDate()-1); // the last finished business day
+    for(let d=new Date(Math.max(new Date(AUTO_SAVE_FROM+"T00:00"),addDays(last,-30))); d<=last; d=addDays(d,1)){
+      const day=ymd(d);
+      if(ledger.some(e=>e.id==="auto-"+day || (e.type==="saving"&&e.date===day))) continue;
+      const total=await dayMoney(day), amount=Math.floor(total*AUTO_SAVE_PCT/100);
+      if(amount<=0) continue;
+      try{ await setDoc(doc(db,"ledger","auto-"+day),{type:"saving",amount,date:day,note:`Auto ${AUTO_SAVE_PCT}% of the day's money total (${peso(total)})`,createdAt:serverTimestamp(),createdBy:auth.currentUser.uid}); }
+      catch(_){} // another owner screen saved it first
+    }
+  }finally{ autoSaving=false; }
+}
 async function salesOn(day){
   if(salesHint[day]!==undefined) return salesHint[day];
   const a=new Date(day+"T00:00"), b=addDays(a,1);
@@ -567,6 +602,7 @@ function renderSavings(){
     <div class="stat"><b>${peso(saved)}</b><span>Total saved</span></div>
     <div class="stat"><b>${peso(spent)}</b><span>Total spent</span></div>
   </div>
+  <p class="notice" style="margin:12px 0 0">Every day, <b>${AUTO_SAVE_PCT}% of the day's money total</b> (the Money table: cash after pay out + GCash + Foodpanda / Grab) is saved here automatically after the day ends at 5 AM, marked <b>Auto</b>. It's added when this dashboard is open; days missed are caught up. A day you already saved by hand is skipped.</p>
   <div class="panels">
     <form class="card panel" id="savForm" novalidate style="display:grid;gap:10px">
       <h2>Add savings</h2>
