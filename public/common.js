@@ -39,7 +39,21 @@ async function loadMenu() {
   try { const m = JSON.parse(localStorage.getItem("lugaw-menu")); if (Array.isArray(m)) return m; } catch (_) {}
   return startMenu();
 }
-export const MENU_SECTIONS = await loadMenu();
+// The shop's phone number and address, as the owner set them (Shop settings, Receipt: settings/receipt).
+// They replace the ones in config.js everywhere: receipts, the customer page, the apps. Read once when
+// a page opens (the last one seen is kept on the phone for when it's offline).
+async function loadShopInfo() {
+  let r = null;
+  if (db) try {
+    const s = await Promise.race([getDoc(doc(db, "settings", "receipt")), new Promise((_, no) => setTimeout(() => no(new Error("timeout")), 4000))]);
+    r = s.exists() ? s.data() : {};
+    try { localStorage.setItem("lugaw-shopinfo", JSON.stringify({ phone: r.phone || "", address: r.address || "" })); } catch (_) {}
+  } catch (_) { try { r = JSON.parse(localStorage.getItem("lugaw-shopinfo")); } catch (_) {} }
+  if (r?.phone) { SHOP.phone = r.phone; SHOP.receiptPhone = r.phone; }
+  if (r?.address) SHOP.receiptAddress = r.address;
+}
+const [MENU_LOADED] = await Promise.all([loadMenu(), loadShopInfo()]);
+export const MENU_SECTIONS = MENU_LOADED;
 // What the menus show: [id, name, price, inc, best] per item, sold-out items left off
 export const MENU = MENU_SECTIONS.map(c => ({ ...c, items: (c.items || []).filter(it => !it.off).map(it => [it.id, it.name, it.price, it.inc, it.best]) }))
   .filter(c => c.items.length);

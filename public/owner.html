@@ -785,10 +785,10 @@ const rcNow=()=>rcDraft||{address:receiptDoc?.address??(SHOP.receiptAddress||SHO
 function receiptCard(){
   const r=rcNow();
   return `<div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
-    <h2 style="color:var(--brand-deep);font-size:1.2rem">Receipt</h2>
-    <p style="margin:0">What the printed receipt shows. Changes show on the next receipt the sellers print; no app update is needed.</p>
-    <label class="f" for="rcAddr">Address under the shop name<input id="rcAddr" maxlength="150" value="${esc(r.address)}"></label>
-    <label class="f" for="rcPhone">Phone number<input id="rcPhone" maxlength="40" value="${esc(r.phone)}"></label>
+    <h2 style="color:var(--brand-deep);font-size:1.2rem">Shop contact &amp; receipt</h2>
+    <p style="margin:0">The shop's address and phone number, and what the printed receipt shows. No app update is needed: receipts change on the next one printed, and the customer page and the apps show the new number and address the next time they're opened or refreshed.</p>
+    <label class="f" for="rcAddr">Shop address <small class="muted" style="text-transform:none;letter-spacing:0">(receipts, and where customers pick up pre-orders)</small><input id="rcAddr" maxlength="150" value="${esc(r.address)}"></label>
+    <label class="f" for="rcPhone">Shop phone number <small class="muted" style="text-transform:none;letter-spacing:0">(receipts, the customer page and the apps)</small><input id="rcPhone" maxlength="40" value="${esc(r.phone)}"></label>
     <label class="f" for="rcFoot">Message at the bottom (one line each)<textarea id="rcFoot" rows="4" maxlength="300" placeholder="Salamat po! Come again.&#10;Order online: lugawdelights.com">${esc(r.footer)}</textarea></label>
     <div style="background:#fff;color:#000;font-family:ui-monospace,Consolas,monospace;font-size:12px;border-radius:10px;padding:10px;max-width:300px;text-align:center;line-height:1.35">
       <b>${esc(SHOP.name)}</b><br>${esc(r.address)}<br>${esc(r.phone)}<br>- - - order - - -<br>${r.footer.split("\n").filter(l=>l.trim()).map(esc).join("<br>")}<br><small>Order slip only. Not an official receipt.</small></div>
