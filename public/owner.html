@@ -102,6 +102,7 @@ table.inv input{width:90px;text-align:right;padding:5px 8px}
       <div class="stat"><b id="sPre">₱0</b><span>Pre-orders</span><small id="sPreN" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Platters &amp; packages</small></div>
       <div class="stat"><b id="sSales">₱0</b><span>Total sales</span><small class="muted" style="display:block;font-size:.78rem;margin-top:2px">Dine-in + delivery + pre-orders</small></div>
       <div class="stat"><b id="sPlat">₱0</b><span>Foodpanda / Grab</span><small id="sPlatN" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Paid out weekly</small></div>
+      <div class="stat" style="grid-column:span 2"><b id="sMoney">₱0</b><span>Money summary</span><small id="sMoneyN" class="muted" style="display:block;font-size:.8rem;margin-top:2px"></small></div>
       <div class="stat"><b id="sOut">₱0</b><span>Pay out</span><small id="sOutN" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Cash taken from the drawer</small></div>
       <div class="stat"><b id="sOrders">0</b><span>Completed orders</span></div>
       <div class="stat"><b id="sAll">₱0</b><span>All sales</span><small class="muted" style="display:block;font-size:.78rem;margin-top:2px">Dine-in + all delivery, incl. Foodpanda / Grab</small></div>
@@ -311,6 +312,14 @@ function render(force){
   // Pay out: cash sellers took from the drawer during their shifts (supplies and the like), in the range
   const [ra,rb]=rangeDates(), outs=allShifts.flatMap(x=>x.moves||[]).filter(m=>m.type==="out" && m.at>=ra.getTime() && m.at<rb.getTime());
   $("#sOut").textContent=peso(outs.reduce((t,m)=>t+(m.amount||0),0));
+  // Money summary: worked out like the shift report, over the chosen dates. Cash = what came into the
+  // drawer (cash sales, riders' cash, extra collected minus given back) minus the pay outs; the starting
+  // cash and pay ins aren't income. GCash / QR received. Foodpanda / Grab owed by the platforms.
+  const ms=shiftSummary({openedAt:Timestamp.fromDate(ra),closedAt:Timestamp.fromMillis(rb.getTime()-1),startCash:0,moves:outs},
+    [...new Map([...orders,...preDone].map(o=>[o.id,o])).values()]);
+  const cashNet=ms.cashSales+ms.riderCash+ms.adjustIn-ms.adjustOut-ms.payOut;
+  $("#sMoney").textContent=peso(cashNet+ms.gcashSales+ms.platformSales);
+  $("#sMoneyN").innerHTML=`Cash in drawer (after pay out) <b>${peso(cashNet)}</b> · GCash <b>${peso(ms.gcashSales)}</b> · Foodpanda / Grab <b>${peso(ms.platformSales)}</b>`;
   $("#sOutN").textContent=outs.length?`${plural(outs.length,"time")} · latest: ${outs.sort((a,b)=>b.at-a.at)[0].note||"no note"}`:"Cash taken from the drawer";
   $("#sOrders").textContent=done.length;
   // everything sold: dine-in, Lugaw Delights delivery and Foodpanda / Grab (riders' fees not included)
