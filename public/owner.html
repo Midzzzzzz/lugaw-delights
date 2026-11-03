@@ -1426,35 +1426,53 @@ function liveSummary(x){
     return pastSummary(liveOrders.filter(o=>{ const t=o.createdAt?.toMillis?.(); return t!=null && t>=a && t<=b; })); }
   const s=shiftSummary(x,liveOrders); s.counted=x.summary.counted??x.countedCash; return s;
 }
+// A shift's overview: every finished order of its time (also the ones added from the owner dashboard,
+// e.g. Foodpanda), worked out with salesBreakdown like the dashboard's tables; its pay outs come off.
+function shiftOverview(x){
+  if(!liveOrders) return null;
+  const a=x.openedAt?.toMillis?.(), b=x.closedAt?.toMillis?.()??Date.now(); if(a==null) return null;
+  const inside=t=>t!=null && t>=a && t<=b;
+  const list=liveOrders.filter(o=>o.preorder ? isDone(o)&&inside(saleAt(o)?.toMillis?.())
+    : inside(o.createdAt?.toMillis?.()) && (isDone(o)||(platformName(o)&&o.status!=="cancelled")));
+  const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((t,m)=>t+(m.amount||0),0);
+  return { ...salesBreakdown(list,payOut), byOwner:list.filter(o=>o.manual).length };
+}
 function renderShifts(){
   watchShiftOrders();
-  const shown=allShifts.map(x=>({...x,saved:x.summary,summary:liveSummary(x)}));
-  const changed=x=>x.saved && x.summary && x.closedAt && (x.saved.sales!==x.summary.sales || x.saved.orders!==x.summary.orders);
+  const shown=allShifts.map(x=>({...x,saved:x.summary,summary:liveSummary(x),overview:shiftOverview(x)}));
   const t=v=>v?.toDate?.()?.toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"—";
   const diffCell=x=>{ const s=x.summary; if(x.past) return `<span class="pill">From orders</span>`; if(!s||s.counted==null) return `<span class="muted">—</span>`; const d=s.counted-s.expected;
     return d===0?`<span class="pill go">Exact</span>`:d>0?`<span class="pill work">Over ${peso(d)}</span>`:`<span class="pill new">Short ${peso(-d)}</span>`; };
-  const row=(l,v,b)=>`<div${b?' class="grand"':""}><span>${l}</span><span>${v}</span></div>`;
-  const detail=x=>{ const s=x.summary;
-    return `<div class="totals" style="max-width:420px">${s?row("Orders",s.orders)+salesRows(s).map(([l,v],i,a)=>row(l,peso(v),a.length>1&&i===a.length-1)).join("")+row("GCash received",peso(s.gcashSales))+(s.platformSales?row("Foodpanda / Grab",peso(s.platformSales)):"")
-        +(s.unpaidCount?row(`Not paid at closing (${s.unpaidCount})`,peso(s.unpaid)):"")+(s.cancelled?row("Cancelled orders",s.cancelled):"")
-        +row("Starting cash",peso(s.startCash))+row("Cash sales",peso(s.cashSales))+(s.riderCash?row("Cash from riders",peso(s.riderCash)):"")
-        +(s.adjustIn?row("Extra collected",peso(s.adjustIn)):"")+(s.adjustOut?row("Given back","−"+peso(s.adjustOut)):"")
-        +(s.payIn?row("Pay in",peso(s.payIn)):"")+(s.payOut?row("Pay out","−"+peso(s.payOut)):"")
-        +(x.past?row("Cash taken",peso(s.cashSales),true)+(s.deliveryFees?row("Delivery fees (riders)",peso(s.deliveryFees)):"")+`<div class="muted">Recorded from the order timeline: no drawer was counted then.</div>`
-          :row("Expected cash",peso(s.expected),true)+row("Counted",peso(s.counted)))
-      :row("Starting cash",peso(x.startCash))+`<div class="muted">Still open: the totals are saved when the seller closes the shift.</div>`}</div>
-      ${(x.moves||[]).length?`<b style="display:block;margin-top:8px">Pay in / pay out</b><ul class="lines">${x.moves.map(m=>`<li><span class="q">${m.type==="in"?"In":"Out"}</span><span>${esc(m.note)} · ${esc(m.byName)} · ${new Date(m.at).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"})}</span><span class="amt">${peso(m.amount)}</span></li>`).join("")}</ul>`:""}
-      ${changed(x)?`<p class="muted" style="font-size:.85rem;margin:6px 0 0">Orders changed after this shift was ${x.past?"recorded":"closed"} (it showed ${plural(x.saved.orders,"order")}, ${peso(x.saved.sales)} then). These totals are from its orders now.</p>`:""}
+  const ln=(label,count,amount,cls="")=>`<div class="ln ${cls}"><span>${label}</span><span class="c">${count!=null?plural(count,"order"):""}</span><b>${amount}</b></div>`;
+  const detail=x=>{ const s=x.summary, o=x.overview;
+    const sold=o?`<section class="sum"><h2>Sold through</h2>
+        ${SALE_KINDS.map(([k,l])=>ln(l,o.kinds[k].count,peso(o.kinds[k].amount))).join("")}${ln("Total sales",o.count,peso(o.total),"tot")}</section>
+      <section class="sum"><h2>Money</h2>
+        ${ln("Cash",null,peso(o.money.cash))}${ln("Pay out",null,"− "+peso(o.payOut),"minus")}${ln("Cash left after pay out",null,peso(o.cashLeft))}
+        ${ln("GCash / QR",null,peso(o.money.gcash))}${ln("Foodpanda / Grab",null,peso(o.money.platform))}${o.money.unpaid?ln("Not paid yet",null,peso(o.money.unpaid)):""}
+        ${ln("Total",null,peso(o.total-o.payOut),"tot")}</section>`:"";
+    // the cash count: only what went through this seller's drawer
+    const drawer=s&&!x.past?`<section class="sum"><h2>Drawer check</h2>
+        ${ln("Starting cash",null,peso(s.startCash))}
+        ${ln("Cash taken in",null,"+ "+peso(s.cashSales+s.riderCash+s.adjustIn-s.adjustOut))}
+        ${s.payIn?ln("Pay in",null,"+ "+peso(s.payIn)):""}${ln("Pay out",null,"− "+peso(s.payOut),"minus")}
+        ${ln("Expected cash in drawer",null,peso(s.expected),"tot")}
+        ${s.counted!=null?ln("Counted",null,peso(s.counted))+ln(s.counted===s.expected?"Exact":s.counted>s.expected?"Over":"Short",null,peso(Math.abs(s.counted-s.expected))):""}</section>`
+      :x.past?`<section class="sum"><h2>Drawer check</h2><p class="sub">Recorded from the order timeline: no drawer was counted then.</p></section>`
+      :`<section class="sum"><h2>Drawer check</h2>${ln("Starting cash",null,peso(x.startCash))}<p class="sub">Still open: the drawer is counted when the seller closes the shift.</p></section>`;
+    return `<div class="sumgrid" style="margin:4px 0">${sold}${drawer}</div>
+      ${o?.byOwner?`<p class="muted" style="font-size:.85rem;margin:0 0 6px">Includes ${plural(o.byOwner,"order")} added from the owner dashboard (e.g. Foodpanda): counted in the sales, not in the seller's drawer.</p>`:""}
+      ${(x.moves||[]).length?`<b style="display:block;margin-top:4px">Pay in / pay out</b><ul class="lines">${x.moves.map(m=>`<li><span class="q">${m.type==="in"?"In":"Out"}</span><span>${esc(m.note)} · ${esc(m.byName)} · ${new Date(m.at).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"})}</span><span class="amt">${peso(m.amount)}</span></li>`).join("")}</ul>`:""}
       <div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-shdel="${esc(x.id)}">Delete shift</button></div>`; };
   $("#view").innerHTML=`<div class="card" style="margin-top:12px">
     <h2 style="color:var(--brand-deep)">Shifts</h2>
     <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Sellers open a shift with the cash in the drawer and close it by counting the drawer. Tap a shift for its details.</p>
     ${pastPanel()}
     ${shiftsErr?`<div class="flag">${esc(shiftsErr)}</div>`:""}
-    <div class="tablewrap"><table class="orders"><thead><tr><th>Opened</th><th>Closed</th><th>Cashier</th><th class="n">Orders</th><th class="n">Sales</th><th class="n">Expected cash</th><th class="n">Counted</th><th>Cash</th></tr></thead>
+    <div class="tablewrap"><table class="orders"><thead><tr><th>Opened</th><th>Closed</th><th>Cashier</th><th class="n">Orders</th><th class="n">Total sales</th><th class="n">Expected cash</th><th class="n">Counted</th><th>Cash</th></tr></thead>
     <tbody>${shown.map(x=>`<tr class="row" data-shopen="${esc(x.id)}"><td>${t(x.openedAt)}</td><td>${x.closedAt?t(x.closedAt):`<span class="pill go">Open now</span>`}</td>
       <td>${esc(x.openedByName||"")}${x.closedByName&&x.closedByName!==x.openedByName?` → ${esc(x.closedByName)}`:""}</td>
-      <td class="n">${x.summary?x.summary.orders:"—"}</td><td class="n">${x.summary?peso(x.summary.sales):"—"}</td>
+      <td class="n">${x.overview?x.overview.count:x.summary?x.summary.orders:"—"}</td><td class="n">${x.overview?peso(x.overview.total):x.summary?peso(x.summary.sales):"—"}</td>
       <td class="n">${x.summary?peso(x.summary.expected):"—"}</td><td class="n">${x.summary&&x.summary.counted!=null?peso(x.summary.counted):"—"}</td><td>${diffCell(x)}</td></tr>
       ${shiftOpen===x.id?`<tr class="detail"><td colspan="8">${detail(x)}</td></tr>`:""}`).join("")||`<tr><td colspan="8" class="muted">No shifts yet. Sellers open one on the seller dashboard.</td></tr>`}</tbody></table></div></div>`;
 }
