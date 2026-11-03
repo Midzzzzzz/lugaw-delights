@@ -1249,7 +1249,7 @@ const diffText=d=>d==null?"":d===0?`<span style="color:var(--ok)">Cash is exact<
 function shiftTable(s){
   const row=(l,v,b)=>`<div${b?' class="grand"':""}><span>${l}</span><span>${v}</span></div>`;
   return `<div class="totals" style="margin-top:8px;max-width:420px">
-    ${row("Expected cash in drawer",peso(s.expected),true)}${row("Expected GCash",peso(s.gcashSales),true)}${row("Foodpanda / Grab sales",peso(s.platformSales||0))}<div class="muted" style="font-size:.8rem">Paid out weekly by the platforms, not in the drawer or GCash.</div>
+    ${row("Starting cash",peso(s.startCash||0))}${row(`Expected cash in drawer <small class="muted">(incl. the ${peso(s.startCash||0)} starting cash)</small>`,peso(s.expected),true)}${row("Expected GCash",peso(s.gcashSales),true)}${row("Foodpanda / Grab sales",peso(s.platformSales||0))}<div class="muted" style="font-size:.8rem">Paid out weekly by the platforms, not in the drawer or GCash.</div>
     ${s.counted!=null?row("Counted cash",peso(s.counted))+`<div>${diffText(s.counted-s.expected)}</div>`:""}</div>`;
 }
 $("#shiftCard").addEventListener("input",e=>{
