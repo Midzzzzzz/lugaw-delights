@@ -316,10 +316,10 @@ function render(force){
       ${ln("Total sales",bd.count,peso(bd.total),"all","tot")}</section>
     <section class="sum"><h2>Money</h2>
       ${ln("Cash",null,peso(bd.money.cash),"m-cash")}
+      ${ln("GCash / QR",null,peso(bd.money.gcash),"m-gcash")}
       ${ln(`Pay out${outs.length?` (${outs.length}×, latest: ${esc(outs.slice().sort((x,y)=>y.at-x.at)[0].note||"no note")})`:""}`,null,"− "+peso(bd.payOut),null,"minus")}
       ${ln("Cash left after pay out",null,peso(bd.cashLeft))}
       ${note("Starting cash and pay ins aren't counted: they were already the shop's money.")}
-      ${ln("GCash / QR",null,peso(bd.money.gcash),"m-gcash")}
       ${ln("Foodpanda / Grab",null,peso(bd.money.platform),"m-platform")}
       ${note("Paid out weekly by the platforms, at menu prices (less after their commission).")}
       ${bd.money.unpaid?ln("Not paid yet",null,peso(bd.money.unpaid),"m-unpaid"):""}
