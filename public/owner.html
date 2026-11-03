@@ -547,28 +547,47 @@ let savMonth=todayStr().slice(0,7), salesHint={};
 // Sales (food and boxes, not rider fees) from completed orders placed on a given day
 // ---------- Auto-save: half of each closed shift's money into the savings book ----------
 // When a seller closes a shift, 50% of that shift's money total is added as a saving, once, as
-// ledger/auto-shift-<shift id>. The money total is what the shift took in, as its report shows:
-// total sales (cash, GCash and not paid yet) + Foodpanda / Grab − pay outs. Sellers can't write to
-// the savings book, so the owner dashboard adds it: right away when it's open, otherwise the next
-// time it opens (shifts closed from Nov 3 2026, the most recent 90 shifts).
+// ledger/auto-shift-<shift id>. The money total is worked out from the orders and pay outs of the
+// shift's time, exactly like the dashboard's Money table (salesBreakdown): sales + Foodpanda / Grab
+// − pay outs. Sellers can't write to the savings book, so the owner dashboard adds it: right away
+// when it's open, otherwise the next time it opens. settings/autosave.done remembers the shifts
+// already handled, so an entry the owner deletes doesn't come back.
 const AUTO_SAVE_PCT=50, AUTO_SAVE_FROM=new Date(2026,10,3).getTime();
 let ledgerLoaded=false, shiftsLoaded=false, autoSaving=false;
-const shiftMoney=x=>{ const s=x.summary||{}; return (s.sales||0)+(s.platformSales||0)-(s.payOut||0); };
+async function moneyBetween(a,b,payOut){
+  const [q,p]=await Promise.all([
+    getDocs(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<=",Timestamp.fromDate(b)))),
+    getDocs(query(collection(db,"orders"),where("preorder","==",true),where("deliverOn",">=",ymdOf(addDays(a,-1))),where("deliverOn","<=",ymdOf(b))))]);
+  const inside=o=>{ const t=saleAt(o)?.toMillis?.(); return t!=null && t>=a.getTime() && t<=b.getTime(); };
+  const list=[...new Map([...q.docs,...p.docs].map(d=>[d.id,{id:d.id,...d.data()}])).values()]
+    .filter(o=>o.preorder ? isDone(o)&&inside(o) : isDone(o)||(platformName(o)&&o.status!=="cancelled"));
+  const bd=salesBreakdown(list,payOut);
+  return { total:bd.total-bd.payOut, sales:bd.total, payOut };
+}
 async function autoSave(){
   if(autoSaving || !ledgerLoaded || !shiftsLoaded || !auth.currentUser) return;
   autoSaving=true;
   try{
+    const ref=doc(db,"settings","autosave"), st=await getDoc(ref);
+    let done=st.exists()?st.data().done||[]:null;
+    // first run of this version: entries saved from the shift's closing summary are worked out again
+    if(done===null){ done=[]; for(const e of ledger.filter(e=>e.id.startsWith("auto-shift-")||e.id.startsWith("auto-20"))) await deleteDoc(doc(db,"ledger",e.id)).catch(()=>{}); }
     const t=v=>v?.toDate?.()?.toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"";
+    let added=false;
     for(const x of allShifts){
       const closed=x.closedAt?.toMillis?.();
-      if(x.past || !closed || closed<AUTO_SAVE_FROM || !x.summary || ledger.some(e=>e.id==="auto-shift-"+x.id)) continue;
-      const total=shiftMoney(x), amount=Math.floor(total*AUTO_SAVE_PCT/100);
-      if(amount<=0) continue;
-      try{ await setDoc(doc(db,"ledger","auto-shift-"+x.id),{type:"saving",amount,date:ymd(businessDate(x.closedAt.toDate())),
-        note:`Auto ${AUTO_SAVE_PCT}% of shift ${t(x.openedAt)} – ${t(x.closedAt)}${x.closedByName?` (${x.closedByName})`:""}: ${peso(total)}`.slice(0,120),
-        createdAt:serverTimestamp(),createdBy:auth.currentUser.uid}); }
-      catch(_){} // another owner screen saved it first
+      if(x.past || !closed || closed<AUTO_SAVE_FROM || done.includes(x.id)) continue;
+      const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((s,m)=>s+(m.amount||0),0);
+      const m=await moneyBetween(x.openedAt.toDate(),x.closedAt.toDate(),payOut), amount=Math.floor(m.total*AUTO_SAVE_PCT/100);
+      if(amount>0){
+        try{ await setDoc(doc(db,"ledger","auto-shift-"+x.id),{type:"saving",amount,date:ymd(businessDate(x.closedAt.toDate())),
+          note:`Auto ${AUTO_SAVE_PCT}% of shift ${t(x.openedAt)} – ${t(x.closedAt)}${x.closedByName?` (${x.closedByName})`:""}: ${peso(m.total)}`.slice(0,120),
+          createdAt:serverTimestamp(),createdBy:auth.currentUser.uid}); }
+        catch(_){} // another owner screen saved it first
+      }
+      done.push(x.id); added=true;
     }
+    if(added||!st.exists()) await setDoc(ref,{done:done.slice(-300)});
   }finally{ autoSaving=false; }
 }
 async function salesOn(day){
@@ -593,7 +612,7 @@ function renderSavings(){
     <div class="stat"><b>${peso(saved)}</b><span>Total saved</span></div>
     <div class="stat"><b>${peso(spent)}</b><span>Total spent</span></div>
   </div>
-  <p class="notice" style="margin:12px 0 0">Every time a seller <b>closes a shift</b>, <b>${AUTO_SAVE_PCT}% of that shift's money total</b> (its sales + Foodpanda / Grab − pay outs) is saved here automatically, marked <b>Auto</b>. It's added as soon as this dashboard sees the shift close; if it isn't open then, it's added the next time it opens.</p>
+  <p class="notice" style="margin:12px 0 0">Every time a seller <b>closes a shift</b>, <b>${AUTO_SAVE_PCT}% of that shift's money total</b> (worked out from its orders like the Money table: sales + Foodpanda / Grab − pay outs) is saved here automatically, marked <b>Auto</b>. It's added as soon as this dashboard sees the shift close; if it isn't open then, it's added the next time it opens.</p>
   <div class="panels">
     <form class="card panel" id="savForm" novalidate style="display:grid;gap:10px">
       <h2>Add savings</h2>
