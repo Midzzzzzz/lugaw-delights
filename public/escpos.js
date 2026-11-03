@@ -135,36 +135,38 @@ export function refillBytes(rows, when = new Date()) {
 }
 
 // Shift report: s = shiftSummary(...), shift = the shift record
+// The shift report, in the same order as the owner's Shifts tab: what came in (cash, GCash,
+// Foodpanda / Grab) and their total, then the drawer: cash sales - pay outs = cash earned,
+// + the starting cash (not a sale) = the cash that should be in the drawer, and the count.
 export function shiftBytes(s, shift, shop) {
   const L = [], lr = (l, r) => leftRight(l, r).forEach(x => L.push(x)), rule = () => L.push("-".repeat(WIDTH));
   const t = v => (v?.toDate?.() || (v ? new Date(v) : new Date())).toLocaleString("en-PH", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const cashIn = (s.cashSales || 0) + (s.riderCash || 0) + (s.adjustIn || 0) - (s.adjustOut || 0); // all the cash that went into the drawer
+  const unpaid = s.unpaidCount ? s.unpaid || 0 : 0, total = cashIn + (s.gcashSales || 0) + (s.platformSales || 0) + unpaid;
   lr("Opened", t(shift.openedAt)); lr("by", shift.openedByName || "");
   if (shift.closedAt !== null && shift.closedAt !== undefined) { lr("Closed", t(shift.closedAt)); lr("by", shift.closedByName || ""); }
   rule();
   lr("Orders", String(s.orders));
-  if (s.dineSales != null) {
-    lr("Dine-in sales", money(s.dineSales)); lr("Delivery sales", money(s.deliverySales));
-    if (s.preSales) lr(`Pre-orders (${s.preCount || 0})`, money(s.preSales)); // platters and packages
-    lr("TOTAL SALES", money(s.sales));
-  }
-  else lr("Sales", money(s.sales));
-  lr("GCash", money(s.gcashSales));
-  if (s.platformSales) lr("Foodpanda / Grab", money(s.platformSales));
-  if (s.unpaidCount) lr(`Unpaid (${s.unpaidCount})`, money(s.unpaid));
+  lr("Cash", money(cashIn)); lr("GCash", money(s.gcashSales || 0)); lr("Foodpanda / Grab", money(s.platformSales || 0));
+  if (unpaid) lr(`Not paid yet (${s.unpaidCount})`, money(unpaid));
+  const sales = L.splice(0);
+  lr("TOTAL SALES", money(total));
+  const salesTotal = L.splice(0);
   rule();
-  lr("Starting cash", money(s.startCash)); lr("Cash sales", money(s.cashSales));
-  if (s.riderCash) lr("Cash from riders", money(s.riderCash));
-  if (s.adjustIn) lr("Extra collected", money(s.adjustIn));
-  if (s.adjustOut) lr("Given back", "-" + money(s.adjustOut));
-  if (s.payIn) lr("Pay in", money(s.payIn));
-  if (s.payOut) lr("Pay out", "-" + money(s.payOut));
-  const body = L.splice(0);
+  lr("Cash sales", money(cashIn));
+  lr("Pay out", "-" + money(s.payOut || 0));
+  (shift.moves || []).filter(m => m.type !== "in").forEach(m => lr("* " + m.note, money(m.amount))); // what each pay out was for
+  const drawer = L.splice(0);
+  lr("CASH EARNED", money(cashIn - (s.payOut || 0)));
+  const earned = L.splice(0);
+  lr("Starting cash (not sale)", "+" + money(s.startCash || 0));
+  if (s.payIn) { lr("Pay in (not sale)", "+" + money(s.payIn)); (shift.moves || []).filter(m => m.type === "in").forEach(m => lr("* " + m.note, money(m.amount))); }
+  const extra = L.splice(0);
   lr("EXPECTED CASH", money(s.expected));
   if (s.counted != null) { lr("COUNTED", money(s.counted)); const d = s.counted - s.expected; lr(d === 0 ? "EXACT" : d > 0 ? "OVER" : "SHORT", money(Math.abs(d))); }
   const totals = L.splice(0);
-  (shift.moves || []).forEach(m => lr(`${m.type === "in" ? "In" : "Out"}: ${m.note}`, money(m.amount)));
-  const moves = L.splice(0);
   const nl = a => a.map(x => x + "\n");
   return bytes(CMD.init, CMD.center, CMD.boldOn, nl(wrap(shop.name)), "SHIFT REPORT\n", CMD.boldOff, CMD.left,
-    nl(body), CMD.boldOn, nl(totals), CMD.boldOff, moves.length ? ["-".repeat(WIDTH) + "\n", nl(moves)] : [], CMD.feed(4));
+    nl(sales), CMD.boldOn, nl(salesTotal), CMD.boldOff, nl(drawer), CMD.boldOn, nl(earned), CMD.boldOff, nl(extra),
+    CMD.boldOn, nl(totals), CMD.boldOff, CMD.feed(4));
 }
