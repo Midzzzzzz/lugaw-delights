@@ -367,7 +367,16 @@ function renderSales(done){
   time.sort((x,y)=>x.k<y.k?-1:x.k>y.k?1:0);
   if(oneDay) time=time.filter(r=>r.value>0);
   const money=r=>peso(r.value);
-  $("#view").innerHTML=`<div class="panels">
+  // Payout summary: what Foodpanda and Grab owe the shop (paid out weekly) and the delivery fees that go to riders
+  const sum=l=>l.reduce((t,o)=>t+food(o),0), fp=plat.filter(o=>o.source==="foodpanda"), gb=plat.filter(o=>o.source==="grab");
+  const riderFees=done.filter(o=>o.mode==="Delivery").reduce((t,o)=>t+(o.deliveryFee||0),0);
+  const prow=(l,v,n,b)=>`<div${b?' class="grand"':""}><span>${l}${n!=null?` <span class="muted" style="font-weight:400">(${plural(n,"order")})</span>`:""}</span><span>${peso(v)}</span></div>`;
+  const payout=`<section class="card panel" style="grid-column:1/-1"><h2>Payout summary</h2><p class="sub">For the dates picked above. Platform amounts are at menu prices: the payout is lower after their commission.</p>
+    <div class="totals" style="max-width:460px">
+      ${prow("Foodpanda",sum(fp),fp.length)}${prow("Grab",sum(gb),gb.length)}${prow("Total from Foodpanda / Grab",sum(plat),null,true)}
+      <div style="border-top:1px dashed var(--line);margin:6px 0"></div>
+      ${prow("Delivery fees for riders",riderFees,done.filter(o=>o.mode==="Delivery").length,true)}</div></section>`;
+  $("#view").innerHTML=`<div class="panels">${payout}
     <section class="card panel"><h2>Sellers</h2><p class="sub">Food sales from completed orders each seller accepted or recorded (not Foodpanda / Grab)</p>
       ${rank(bySeller,{main:money,sub:r=>plural(r.count,"order"),empty:"No completed orders in this range yet."})}</section>
     <section class="card panel"><h2>Best-selling items</h2><p class="sub">Top 10 by quantity</p>
