@@ -552,7 +552,7 @@ let savMonth=todayStr().slice(0,7), salesHint={};
 // − pay outs. Sellers can't write to the savings book, so the owner dashboard adds it: right away
 // when it's open, otherwise the next time it opens. settings/autosave.done remembers the shifts
 // already handled, so an entry the owner deletes doesn't come back.
-const AUTO_SAVE_PCT=50, AUTO_SAVE_FROM=new Date(2026,10,3).getTime();
+const AUTO_SAVE_PCT=50;
 let ledgerLoaded=false, shiftsLoaded=false, autoSaving=false;
 async function moneyBetween(a,b,payOut){
   const [q,p]=await Promise.all([
@@ -574,9 +574,11 @@ async function autoSave(){
     if(done===null){ done=[]; for(const e of ledger.filter(e=>e.id.startsWith("auto-shift-")||e.id.startsWith("auto-20"))) await deleteDoc(doc(db,"ledger",e.id)).catch(()=>{}); }
     const t=v=>v?.toDate?.()?.toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"";
     let added=false;
-    for(const x of allShifts){
+    // every shift, also the past ones recorded from the order timeline (not just the 90 the Shifts tab shows)
+    const everyShift=(await getDocs(collection(db,"shifts"))).docs.map(d=>({id:d.id,...d.data()}));
+    for(const x of everyShift){
       const closed=x.closedAt?.toMillis?.();
-      if(x.past || !closed || closed<AUTO_SAVE_FROM || done.includes(x.id)) continue;
+      if(!closed || !x.openedAt || done.includes(x.id)) continue;
       const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((s,m)=>s+(m.amount||0),0);
       const m=await moneyBetween(x.openedAt.toDate(),x.closedAt.toDate(),payOut), amount=Math.floor(m.total*AUTO_SAVE_PCT/100);
       if(amount>0){
@@ -587,7 +589,7 @@ async function autoSave(){
       }
       done.push(x.id); added=true;
     }
-    if(added||!st.exists()) await setDoc(ref,{done:done.slice(-300)});
+    if(added||!st.exists()) await setDoc(ref,{done:done.slice(-3000)});
   }finally{ autoSaving=false; }
 }
 async function salesOn(day){
@@ -612,7 +614,7 @@ function renderSavings(){
     <div class="stat"><b>${peso(saved)}</b><span>Total saved</span></div>
     <div class="stat"><b>${peso(spent)}</b><span>Total spent</span></div>
   </div>
-  <p class="notice" style="margin:12px 0 0">Every time a seller <b>closes a shift</b>, <b>${AUTO_SAVE_PCT}% of that shift's money total</b> (worked out from its orders like the Money table: sales + Foodpanda / Grab − pay outs) is saved here automatically, marked <b>Auto</b>. It's added as soon as this dashboard sees the shift close; if it isn't open then, it's added the next time it opens.</p>
+  <p class="notice" style="margin:12px 0 0">Every <b>shift</b> (when a seller closes it, and past shifts recorded from the order timeline), <b>${AUTO_SAVE_PCT}% of that shift's money total</b> (worked out from its orders like the Money table: sales + Foodpanda / Grab − pay outs) is saved here automatically, marked <b>Auto</b>. It's added as soon as this dashboard sees the shift close; if it isn't open then, it's added the next time it opens.</p>
   <div class="panels">
     <form class="card panel" id="savForm" novalidate style="display:grid;gap:10px">
       <h2>Add savings</h2>
