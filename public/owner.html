@@ -545,37 +545,28 @@ const todayStr=()=>ymd(new Date());
 const monthOf=d=>String(d||"").slice(0,7);
 let savMonth=todayStr().slice(0,7), salesHint={};
 // Sales (food and boxes, not rider fees) from completed orders placed on a given day
-// ---------- Auto-save: half of each day's money into the savings book ----------
-// After a business day ends (5 AM the next day), 50% of that day's Money total (the dashboard's
-// Money table: cash after pay outs + GCash + Foodpanda / Grab + not paid yet) is added as a saving,
-// once, as ledger/auto-<date>. It's done when the owner dashboard is open; days missed are caught
-// up (up to 31 days back) the next time it opens. A day already saved by hand is left alone.
-const AUTO_SAVE_PCT=50, AUTO_SAVE_FROM="2026-11-03";
+// ---------- Auto-save: half of each closed shift's money into the savings book ----------
+// When a seller closes a shift, 50% of that shift's money total is added as a saving, once, as
+// ledger/auto-shift-<shift id>. The money total is what the shift took in, as its report shows:
+// total sales (cash, GCash and not paid yet) + Foodpanda / Grab − pay outs. Sellers can't write to
+// the savings book, so the owner dashboard adds it: right away when it's open, otherwise the next
+// time it opens (shifts closed from Nov 3 2026, the most recent 90 shifts).
+const AUTO_SAVE_PCT=50, AUTO_SAVE_FROM=new Date(2026,10,3).getTime();
 let ledgerLoaded=false, shiftsLoaded=false, autoSaving=false;
-setInterval(autoSave, 10*60000); // a dashboard left open saves the day that just ended
-async function dayMoney(day){
-  const a=new Date(day+"T00:00"); a.setHours(DAY_START()); const b=addDays(a,1);
-  const [q,p]=await Promise.all([
-    getDocs(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<",Timestamp.fromDate(b)))),
-    getDocs(query(collection(db,"orders"),where("preorder","==",true),where("deliverOn",">=",ymdOf(addDays(a,-1))),where("deliverOn","<=",day)))]);
-  const inDay=o=>{ const t=saleAt(o)?.toMillis?.(); return t!=null && t>=a.getTime() && t<b.getTime(); };
-  const list=[...new Map([...q.docs,...p.docs].map(d=>[d.id,{id:d.id,...d.data()}])).values()]
-    .filter(o=>o.preorder ? isDone(o)&&inDay(o) : isDone(o)||(platformName(o)&&o.status!=="cancelled"));
-  const payOut=allShifts.flatMap(x=>x.moves||[]).filter(m=>m.type==="out"&&m.at>=a.getTime()&&m.at<b.getTime()).reduce((t,m)=>t+(m.amount||0),0);
-  const bd=salesBreakdown(list,payOut);
-  return bd.total-bd.payOut;
-}
+const shiftMoney=x=>{ const s=x.summary||{}; return (s.sales||0)+(s.platformSales||0)-(s.payOut||0); };
 async function autoSave(){
   if(autoSaving || !ledgerLoaded || !shiftsLoaded || !auth.currentUser) return;
   autoSaving=true;
   try{
-    const last=businessDate(new Date()); last.setDate(last.getDate()-1); // the last finished business day
-    for(let d=new Date(Math.max(new Date(AUTO_SAVE_FROM+"T00:00"),addDays(last,-30))); d<=last; d=addDays(d,1)){
-      const day=ymd(d);
-      if(ledger.some(e=>e.id==="auto-"+day || (e.type==="saving"&&e.date===day))) continue;
-      const total=await dayMoney(day), amount=Math.floor(total*AUTO_SAVE_PCT/100);
+    const t=v=>v?.toDate?.()?.toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"";
+    for(const x of allShifts){
+      const closed=x.closedAt?.toMillis?.();
+      if(x.past || !closed || closed<AUTO_SAVE_FROM || !x.summary || ledger.some(e=>e.id==="auto-shift-"+x.id)) continue;
+      const total=shiftMoney(x), amount=Math.floor(total*AUTO_SAVE_PCT/100);
       if(amount<=0) continue;
-      try{ await setDoc(doc(db,"ledger","auto-"+day),{type:"saving",amount,date:day,note:`Auto ${AUTO_SAVE_PCT}% of the day's money total (${peso(total)})`,createdAt:serverTimestamp(),createdBy:auth.currentUser.uid}); }
+      try{ await setDoc(doc(db,"ledger","auto-shift-"+x.id),{type:"saving",amount,date:ymd(businessDate(x.closedAt.toDate())),
+        note:`Auto ${AUTO_SAVE_PCT}% of shift ${t(x.openedAt)} – ${t(x.closedAt)}${x.closedByName?` (${x.closedByName})`:""}: ${peso(total)}`.slice(0,120),
+        createdAt:serverTimestamp(),createdBy:auth.currentUser.uid}); }
       catch(_){} // another owner screen saved it first
     }
   }finally{ autoSaving=false; }
@@ -602,7 +593,7 @@ function renderSavings(){
     <div class="stat"><b>${peso(saved)}</b><span>Total saved</span></div>
     <div class="stat"><b>${peso(spent)}</b><span>Total spent</span></div>
   </div>
-  <p class="notice" style="margin:12px 0 0">Every day, <b>${AUTO_SAVE_PCT}% of the day's money total</b> (the Money table: cash after pay out + GCash + Foodpanda / Grab) is saved here automatically after the day ends at 5 AM, marked <b>Auto</b>. It's added when this dashboard is open; days missed are caught up. A day you already saved by hand is skipped.</p>
+  <p class="notice" style="margin:12px 0 0">Every time a seller <b>closes a shift</b>, <b>${AUTO_SAVE_PCT}% of that shift's money total</b> (its sales + Foodpanda / Grab − pay outs) is saved here automatically, marked <b>Auto</b>. It's added as soon as this dashboard sees the shift close; if it isn't open then, it's added the next time it opens.</p>
   <div class="panels">
     <form class="card panel" id="savForm" novalidate style="display:grid;gap:10px">
       <h2>Add savings</h2>
