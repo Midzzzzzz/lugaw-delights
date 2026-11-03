@@ -66,7 +66,7 @@ export function rasterBytes(logo) {
   return out;
 }
 
-// The receipt for an order. shop: { name, pickupAddress, phone, logo? (see rasterBytes) }. extra: { customer, mobile,
+// The receipt for an order. shop: { name, pickupAddress, phone, footer? (lines at the bottom), logo? (see rasterBytes) }. extra: { customer, mobile,
 // itemName(id) -> name, lines (merged order lines), cashFirst, adjust, balance, notPaid,
 // finished? { paid, title ("Delivered Oct 21, 3:05 PM"), rider, payText } for a delivered order }
 export function receiptBytes(o, shop, extra = {}) {
@@ -116,7 +116,7 @@ export function receiptBytes(o, shop, extra = {}) {
     nl(body), CMD.boldOn, nl(total), CMD.boldOff, nl(pay), CMD.boldOn, nl(change), CMD.boldOff, nl(after), nl(tail),
     extra.finished ? [CMD.center, CMD.boldOn, CMD.big, extra.finished.paid ? "PAID\n" : "NOT PAID YET\n", CMD.normal, CMD.boldOff,
       nl(wrap(extra.finished.title || "")), extra.finished.rider ? nl(wrap("Rider: " + extra.finished.rider)) : [], "-".repeat(WIDTH) + "\n"] : [],
-    CMD.center, "Salamat po! Come again.\n", "Order slip only.\nNot an official receipt.\n", CMD.left, CMD.feed(4)
+    CMD.center, nl((shop.footer ?? "Salamat po! Come again.").split("\n").flatMap(s => s.trim() ? wrap(s.trim()) : [])), "Order slip only.\nNot an official receipt.\n", CMD.left, CMD.feed(4)
   );
 }
 

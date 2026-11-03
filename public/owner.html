@@ -217,6 +217,7 @@ function start(){
   // pre-orders not delivered or picked up yet, for the Pre-orders tile
   subs.push(onSnapshot(query(collection(db,"orders"),where("preorder","==",true),where("status","in",["scheduled","new","assigned","preparing","ready","ready_pickup","picked_up"])),
     s=>{ upcomingPre=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{}));
+  subs.push(onSnapshot(doc(db,"settings","receipt"), s=>{ receiptDoc=s.exists()?s.data():null; if(tab==="settings"&&!rcDraft) render(); }, ()=>{}));
   subs.push(onSnapshot(doc(db,"settings","payqr"), s=>{ payQrDoc=s.exists()?s.data():null; if(tab==="settings") render(); }, ()=>{}));
   subs.push(onSnapshot(doc(db,"settings","menu"), s=>{
     menuDoc=s.exists()?s.data():null; if(menuDoc) applyMenu(menuDoc.sections);
@@ -774,8 +775,39 @@ $("#view").addEventListener("click",async e=>{
     return render(true);
   }
 });
+// ---------- Receipt ----------
+// What the printed receipt shows (settings/receipt): the address and number under the shop name, and
+// the lines at the bottom (e.g. "Order online: lugawdelights.com"). "Order slip only. Not an official
+// receipt." is always printed below them.
+let receiptDoc=null, rcDraft=null, rcMsg="";
+const rcNow=()=>rcDraft||{address:receiptDoc?.address??(SHOP.receiptAddress||SHOP.pickupAddress||""),phone:receiptDoc?.phone??(SHOP.receiptPhone||SHOP.phone||""),
+  footer:receiptDoc?.footer??"Salamat po! Come again."};
+function receiptCard(){
+  const r=rcNow();
+  return `<div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
+    <h2 style="color:var(--brand-deep);font-size:1.2rem">Receipt</h2>
+    <p style="margin:0">What the printed receipt shows. Changes show on the next receipt the sellers print; no app update is needed.</p>
+    <label class="f" for="rcAddr">Address under the shop name<input id="rcAddr" maxlength="150" value="${esc(r.address)}"></label>
+    <label class="f" for="rcPhone">Phone number<input id="rcPhone" maxlength="40" value="${esc(r.phone)}"></label>
+    <label class="f" for="rcFoot">Message at the bottom (one line each)<textarea id="rcFoot" rows="4" maxlength="300" placeholder="Salamat po! Come again.&#10;Order online: lugawdelights.com">${esc(r.footer)}</textarea></label>
+    <div style="background:#fff;color:#000;font-family:ui-monospace,Consolas,monospace;font-size:12px;border-radius:10px;padding:10px;max-width:300px;text-align:center;line-height:1.35">
+      <b>${esc(SHOP.name)}</b><br>${esc(r.address)}<br>${esc(r.phone)}<br>- - - order - - -<br>${r.footer.split("\n").filter(l=>l.trim()).map(esc).join("<br>")}<br><small>Order slip only. Not an official receipt.</small></div>
+    <div class="btnrow"><button class="btn" data-rc="save"${rcDraft?"":" disabled"}>Save receipt</button>${rcDraft?`<button class="btn ghost small" data-rc="cancel">Cancel</button>`:""}<span class="muted">${esc(rcMsg)}</span></div></div>`;
+}
+$("#view").addEventListener("input",e=>{ if(tab!=="settings") return; const m={rcAddr:"address",rcPhone:"phone",rcFoot:"footer"}[e.target.id]; if(!m) return;
+  rcDraft={...rcNow(),[m]:e.target.value}; rcMsg="Not saved yet."; const b=document.querySelector('[data-rc="save"]'); if(b) b.disabled=false; });
+$("#view").addEventListener("change",e=>{ if(tab==="settings" && ["rcAddr","rcPhone","rcFoot"].includes(e.target.id)) render(true); }); // show it in the preview
+$("#view").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-rc]"); if(!b || tab!=="settings") return;
+  if(b.dataset.rc==="cancel"){ rcDraft=null; rcMsg=""; return render(true); }
+  const r=rcNow(); b.disabled=true; rcMsg="Saving…";
+  try{ await saved(setDoc(doc(db,"settings","receipt"),{address:r.address.trim().slice(0,150),phone:r.phone.trim().slice(0,40),footer:r.footer.split("\n").map(l=>l.trim()).filter(Boolean).slice(0,6).join("\n").slice(0,300),updatedAt:serverTimestamp()}));
+    rcDraft=null; rcMsg="Saved. The next receipts show it."; }
+  catch(x){ rcMsg="Couldn't save: "+friendlyError(x); b.disabled=false; }
+  render(true);
+});
 function renderSettings(){
-  $("#view").innerHTML=accountCard()+payQrCard()+`<div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
+  $("#view").innerHTML=accountCard()+receiptCard()+payQrCard()+`<div class="card" style="margin-top:12px;max-width:620px;display:grid;gap:10px">
     <h2 style="color:var(--brand-deep);font-size:1.2rem">Delivery areas and fees</h2>
     <p style="margin:0">Customers can only order delivery to the barangays ticked here, and pay that barangay's fee.
       Set higher fees for barangays farther from the stall. The fee goes to the rider.</p>

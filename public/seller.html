@@ -308,6 +308,7 @@ function start(){
   subs.push(()=>{ stopCountOrders?.(); stopCountOrders=null; countSince=null; });
   subs.push(onSnapshot(doc(db,"settings","ingredients"), s=>{ ingredients=s.exists()?s.data().list||[]:[]; }, ()=>{}));
   // Menu changes the owner saves (recipes, prices) count right away, without a refresh
+  subs.push(onSnapshot(doc(db,"settings","receipt"), s=>{ receiptSet=s.exists()?s.data():{}; }, ()=>{}));
   subs.push(onSnapshot(doc(db,"settings","menu"), s=>{ if(s.exists()){ applyMenu(s.data().sections); updateStock(); if(!$("#dinePanel").hidden) renderDine(); } }, ()=>{}));
   // The sold-out list as last published (by this or another seller, or the owner)
   // What's published now: read once, so a page that just opened doesn't save the same thing again
@@ -1042,7 +1043,10 @@ function finishedInfo(o){
     payText: qr ? `${o.payShotAt?"QR":"GCash"}, ${paid?"paid (confirmed by the shop)":"waiting for the shop to confirm"}` : "Cash, paid on delivery" };
 }
 // Shop details as printed on receipts
-const receiptShop=()=>({ name:SHOP.name, pickupAddress:SHOP.receiptAddress||SHOP.pickupAddress, phone:SHOP.receiptPhone||SHOP.phone, logo:receiptLogoDots });
+// What the receipt shows at the top and bottom: the owner sets it in Shop settings (settings/receipt)
+let receiptSet={};
+const receiptShop=()=>({ name:SHOP.name, pickupAddress:receiptSet.address||SHOP.receiptAddress||SHOP.pickupAddress, phone:receiptSet.phone||SHOP.receiptPhone||SHOP.phone,
+  footer:receiptSet.footer??"Salamat po! Come again.", logo:receiptLogoDots });
 function receiptHTML(o){
   const c=o.mode==="Dine-in"?null:contacts[o.id], when=o.createdAt?.toDate?.()||new Date(), fin=finishedInfo(o);
   const row=(l,r,cls="")=>`<tr class="${cls}"><td>${l}</td><td class="r">${r}</td></tr>`;
@@ -1074,7 +1078,7 @@ hr{border:0;border-top:1px dashed #000;margin:6px 0}.big td{font-weight:bold;fon
 ${fin?row("Payment",esc(fin.payText)):row("Payment",esc(o.payment)+(o.mode==="Dine-in"&&o.status!=="cancelled"&&!hasPayment(o)?" · NOT PAID":""))}${o.gcashRef?row("GCash Ref",esc(o.gcashRef)):""}${change}</table>
 ${o.notes?`<hr><div>Notes: ${esc(o.notes)}</div>`:""}<hr>
 ${fin?`<div class="c"><div class="stamp">${fin.paid?"PAID":"NOT PAID YET"}</div><div>${esc(fin.title)}</div>${fin.rider?`<div>Rider: ${esc(fin.rider)}</div>`:""}</div><hr>`:""}
-<div class="c">Salamat po! Come again.<br><small>Order slip only. Not an official receipt.</small></div>
+<div class="c">${receiptShop().footer.split("\n").filter(l=>l.trim()).map(esc).join("<br>")}${receiptShop().footer.trim()?"<br>":""}<small>Order slip only. Not an official receipt.</small></div>
 <div class="noprint"><button onclick="print()">Print</button><button onclick="close()">Close</button></div>
 <script>addEventListener("load",()=>setTimeout(print,300))<\/script>
 </body></html>`;
