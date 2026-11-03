@@ -273,6 +273,22 @@ export const salesRows = s => s.dineSales == null ? [["Sales", s.sales]]
   : [["Dine-in sales", s.dineSales], ["Lugaw Delights delivery sales", s.deliverySales],
      ...(s.preSales ? [[`Pre-orders: platters & packages (${s.preCount || 0})`, s.preSales]] : []), ["Total sales", s.sales]];
 
+// ---------- Foodpanda payout periods ----------
+// Foodpanda pays Lugaw Delights for each sales period within 5 working days after it ends:
+// 1st–7th, 8th–15th, 16th–22nd, and 23rd–end of the month (that last one after the Order
+// Statement is accepted). Working days here are Monday to Friday; public holidays may push it later.
+export function addWorkingDays(d, n) {
+  const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  while (n > 0) { x.setDate(x.getDate() + 1); if (x.getDay() !== 0 && x.getDay() !== 6) n--; }
+  return x;
+}
+export function foodpandaPeriod(d) {
+  const y = d.getFullYear(), m = d.getMonth(), day = d.getDate(), last = new Date(y, m + 1, 0).getDate();
+  const [a, b] = day <= 7 ? [1, 7] : day <= 15 ? [8, 15] : day <= 22 ? [16, 22] : [23, last];
+  const start = new Date(y, m, a), end = new Date(y, m, b);
+  return { start, end, payBy: addWorkingDays(end, 5), monthEnd: a === 23, key: `${y}-${m + 1}-${a}` };
+}
+
 // ---------- Sales breakdown (owner dashboard) ----------
 // One calculation for every number on the owner dashboard, from the finished orders of a date range.
 // Each order counts once: its sale (food + take-out boxes, never the rider's delivery fee) goes on

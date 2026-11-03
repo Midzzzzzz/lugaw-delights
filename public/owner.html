@@ -118,6 +118,7 @@ import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot,
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
 import { findShifts, pastSummary } from "./pastshifts.js";
+import { foodpandaPeriod } from "./common.js";
 import { saved, prepMinutes, orderType, businessDate, DAY_START, platformName, boxRow, SHOP, PLATFORMS, shiftSummary, salesRows, isPreorderSection, isPreorder, preorderWhen, saleAt, ymdOf, salesBreakdown, salePayment, saleKindOf, SALE_KINDS } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
@@ -353,11 +354,18 @@ function renderSales(done){
   const kindName=o=>SALE_KINDS.find(([k])=>k===saleKindOf(o))[1];
   const byMode=group(all,kindName,kindName,food); // the same lines as "Sold through" above
   const byPay=group(all,o=>o.payment,o=>o.payment,food);
-  // Foodpanda / Grab by week (Monday to Sunday), as the platforms pay out weekly
-  const weekOf=d=>{ const x=businessDate(d); x.setDate(x.getDate()-(x.getDay()+6)%7); return x; }, byWeek=new Map();
-  plat.forEach(o=>{ const d=saleAt(o)?.toDate?.(); if(!d) return; const w=weekOf(d), k=ymd(w)+"|"+o.source;
-    const r=byWeek.get(k)||{key:k,w,label:`${platformName(o)} · ${w.toLocaleDateString("en-PH",{month:"short",day:"numeric"})} – ${addDays(w,6).toLocaleDateString("en-PH",{month:"short",day:"numeric"})}`,count:0,value:0};
-    r.count++; r.value+=food(o); byWeek.set(k,r); });
+  // Payout periods. Foodpanda: 1st–7th, 8th–15th, 16th–22nd, 23rd–end of month, each paid within 5
+  // working days after it ends (foodpandaPeriod). Grab: by week, Monday to Sunday.
+  const md=d=>d.toLocaleDateString("en-PH",{month:"short",day:"numeric"});
+  const weekOf=d=>{ const x=new Date(d); x.setDate(x.getDate()-(x.getDay()+6)%7); return x; }, byWeek=new Map();
+  plat.forEach(o=>{ const t=saleAt(o)?.toDate?.(); if(!t) return; const d=businessDate(t);
+    let r;
+    if(o.source==="foodpanda"){ const p=foodpandaPeriod(d), k="fp|"+p.key, due=Date.now()>p.payBy.getTime()+86400000;
+      r=byWeek.get(k)||{key:k,w:p.start,label:`Foodpanda · ${md(p.start)} – ${md(p.end)}`,
+        when:`payout ${p.monthEnd?"after the Order Statement is accepted, ":""}by ${md(p.payBy)}${due?" · check it arrived":""}`,count:0,value:0}; }
+    else { const w=weekOf(d), k="gr|"+ymd(w);
+      r=byWeek.get(k)||{key:k,w,label:`Grab · ${md(w)} – ${md(addDays(w,6))}`,when:"weekly payout",count:0,value:0}; }
+    r.count++; r.value+=food(o); byWeek.set(r.key,r); });
   const platWeeks=[...byWeek.values()].sort((x,y)=>y.w-x.w||x.label.localeCompare(y.label));
   const items=new Map();
   all.forEach(o=>(o.items||[]).forEach(it=>{
@@ -383,8 +391,8 @@ function renderSales(done){
       ${rank(topItems,{main:r=>plural(r.count,"pc"),sub:r=>peso(r.sales),empty:"Nothing sold in this range yet."})}</section>
     <section class="card panel"><h2>${oneDay?"Sales by hour":"Sales by day"}</h2><p class="sub">Food sales from completed orders (not Foodpanda / Grab)</p>
       ${rank(time,{main:money,sub:()=>"",numbered:false,empty:"No sales in this range yet."})}</section>
-    <section class="card panel"><h2>Foodpanda &amp; Grab</h2><p class="sub">At menu prices, by week (Monday to Sunday): what each platform owes for the week's orders</p>
-      ${rank(platWeeks,{main:money,sub:r=>plural(r.count,"order"),numbered:false,empty:"No Foodpanda or Grab orders in this range."})}</section>
+    <section class="card panel"><h2>Foodpanda &amp; Grab payouts</h2><p class="sub">At menu prices, by payout period. Foodpanda pays each period within 5 working days after it ends (holidays may push it later); Grab by week. Their payout is less after commission.</p>
+      ${rank(platWeeks,{main:money,sub:r=>`${plural(r.count,"order")} · ${r.when}`,numbered:false,empty:"No Foodpanda or Grab orders in this range."})}</section>
     <section class="card panel"><h2>Riders</h2><p class="sub">Delivery fees earned on completed deliveries</p>
       ${rank(byRider,{main:money,sub:r=>r.count===1?"1 delivery":`${r.count} deliveries`,empty:"No deliveries in this range yet."})}</section>
     <section class="card panel"><h2>Order type</h2><p class="sub">Food sales by delivery, pickup and dine-in</p>

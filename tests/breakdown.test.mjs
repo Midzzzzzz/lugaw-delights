@@ -1,7 +1,7 @@
 // Owner dashboard numbers: every sale on one "sold through" line and one "money" line, and they add up.
 globalThis.document ??= { querySelector: () => null, addEventListener() {}, hidden: false };
 globalThis.location ??= { hostname: "localhost", origin: "http://localhost", search: "", href: "http://localhost/" };
-const { salesBreakdown, salePayment } = await import("../public/common.js");
+const { salesBreakdown, salePayment, foodpandaPeriod } = await import("../public/common.js");
 
 let pass = 0, fail = 0;
 const t = (n, ok) => { if (ok) { pass++; console.log("  ok  ", n); } else { fail++; console.log("  FAIL", n); } };
@@ -37,5 +37,12 @@ t("not paid yet ₱230 (served unpaid 100 + 20 balance + QR not confirmed 110)",
 t("total sales = cash + GCash + Foodpanda / Grab + not paid yet", b.total === b.money.cash + b.money.gcash + b.money.platform + b.money.unpaid);
 t("cash left after the ₱150 pay out", b.cashLeft === 460);
 t("a payment never counts twice", orders.every(o => { const p = salePayment(o); return p.cash + p.gcash + p.platform + p.unpaid === (o.total - (o.deliveryFee || 0)); }));
+console.log("Foodpanda payout periods");
+const fmt = d => `${d.getMonth() + 1}/${d.getDate()}`;
+let p = foodpandaPeriod(new Date(2026, 10, 2)); t("Nov 2 is in Nov 1–7, paid by Fri Nov 13 (5 working days after Sat Nov 7)", fmt(p.start) === "11/1" && fmt(p.end) === "11/7" && fmt(p.payBy) === "11/13");
+p = foodpandaPeriod(new Date(2026, 10, 15)); t("Nov 15 is in Nov 8–15, paid by Fri Nov 20", fmt(p.start) === "11/8" && fmt(p.end) === "11/15" && fmt(p.payBy) === "11/20");
+p = foodpandaPeriod(new Date(2026, 10, 16)); t("Nov 16 is in Nov 16–22, paid by Fri Nov 27", fmt(p.start) === "11/16" && fmt(p.end) === "11/22" && fmt(p.payBy) === "11/27");
+p = foodpandaPeriod(new Date(2026, 10, 30)); t("Nov 30 is in Nov 23–30 (month end, after the Order Statement), paid by Mon Dec 7", fmt(p.start) === "11/23" && fmt(p.end) === "11/30" && p.monthEnd && fmt(p.payBy) === "12/7");
+p = foodpandaPeriod(new Date(2027, 1, 28)); t("February's last period ends on the 28th", fmt(p.end) === "2/28");
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
