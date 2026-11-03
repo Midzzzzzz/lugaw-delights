@@ -640,6 +640,10 @@ service cloud.firestore {
             // (items, prices, box fees and the removal log only change through the dine-in change rule below)
             && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','boxFee','total','payment','createdAt','source','platformRef','preorder','deliverOn','deliverTime',
                                   'addedAt','removed','editedAt','editedBy','editedByName'])
+            // the rider can only be taken off here (Send back to riders); giving an order to a rider is the assign rule below
+            && (!changed().hasAny(['riderUid','riderName','riderPhone','assignedBy','assignedByName'])
+                || (request.resource.data.riderUid == null && request.resource.data.get('riderName', null) == null
+                    && request.resource.data.get('riderPhone', null) == null && request.resource.data.get('assignedBy', null) == null))
             && (!changed().hasAny(['cancelReason']) || str(request.resource.data.cancelReason, 150))
             && (!changed().hasAny(['sellerUid','sellerName'])
                 || (request.resource.data.sellerUid == uid() && str(request.resource.data.sellerName, 80)
@@ -714,6 +718,20 @@ service cloud.firestore {
             && request.resource.data.unconfirmedBy == uid()
             && request.resource.data.unconfirmedByName == get(/databases/$(database)/documents/riders/$(uid())).data.name)
 
+        // The seller (or owner) gives a waiting delivery to a rider: the same as the rider accepting it,
+        // for an approved rider who signed the agreement and has a payout account; marked assignedBy
+        || ((isSeller() || isAdmin()) && needsRider(resource.data) && payShotIn(resource.data)
+            && changed().hasOnly(['status','riderUid','riderName','riderPhone','assignedAt','assignedBy','assignedByName'])
+            && request.resource.data.status == (resource.data.status == 'new' ? 'assigned' : resource.data.status)
+            && request.resource.data.riderUid is string
+            && get(/databases/$(database)/documents/riders/$(request.resource.data.riderUid)).data.status == 'approved'
+            && exists(/databases/$(database)/documents/agreements/$(request.resource.data.riderUid))
+            && 'payMethod' in get(/databases/$(database)/documents/riders/$(request.resource.data.riderUid)).data
+            && request.resource.data.riderName == get(/databases/$(database)/documents/riders/$(request.resource.data.riderUid)).data.name
+            && request.resource.data.riderPhone == get(/databases/$(database)/documents/riders/$(request.resource.data.riderUid)).data.phone
+            && request.resource.data.assignedAt == request.time
+            && request.resource.data.assignedBy == uid() && str(request.resource.data.assignedByName, 80))
+
         // Rider accepts an order that is waiting for a rider (only after signing the agreement)
         || (isApprovedRider() && exists(/databases/$(database)/documents/agreements/$(uid()))
             && 'payMethod' in get(/databases/$(database)/documents/riders/$(uid())).data
@@ -747,7 +765,8 @@ service cloud.firestore {
            || (resource.data.status in ['assigned', 'preparing', 'ready']
                 && request.resource.data.status == (resource.data.status == 'assigned' ? 'new' : resource.data.status)
                 && request.resource.data.riderUid == null
-                && changed().hasOnly(['status','riderUid','riderName','riderPhone','assignedAt']))
+                && changed().hasOnly(['status','riderUid','riderName','riderPhone','assignedAt','assignedBy','assignedByName'])
+                && request.resource.data.get('assignedBy', null) == null)
            ));
 
       // The owner can delete orders (for example test orders) on owner.html → Orders

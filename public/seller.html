@@ -21,6 +21,7 @@
 #findRider .fr-card{background:rgba(0,0,0,.18);border-radius:14px;padding:12px 14px;display:grid;gap:4px}
 #findRider .fr-riders{display:grid;gap:8px}
 #findRider .fr-rider{display:flex;justify-content:space-between;align-items:center;gap:10px;background:#fff;color:#222;border-radius:12px;padding:10px 12px}
+#findRider .fr-assign{background:#1a7f37;color:#fff;border:0;border-radius:99px;padding:8px 16px;font:inherit;font-weight:800;cursor:pointer}
 #findRider .fr-rider a{background:var(--brand,#e0284f);color:#fff;border-radius:99px;padding:8px 16px;font-weight:800;text-decoration:none;white-space:nowrap}
 #findRider .fr-later{justify-self:start;background:transparent;color:inherit;border:2px solid currentColor;border-radius:99px;padding:8px 16px;font:inherit;font-weight:700;cursor:pointer}
 @keyframes frpulse{0%,100%{opacity:1}50%{opacity:.75}}
@@ -344,7 +345,13 @@ function findRiderScreen(list){
   let el=document.getElementById("findRider");
   if(!list.length || Date.now()<frSnoozeUntil){ el?.remove(); return; }
   if(!el){ el=document.createElement("div"); el.id="findRider"; el.setAttribute("role","alertdialog"); el.setAttribute("aria-modal","true"); document.body.append(el);
-    el.addEventListener("click",e=>{ if(e.target.closest("[data-fr-later]")){ enableSound(); frSnoozeUntil=Date.now()+60000; el.remove();
+    el.addEventListener("click",async e=>{ const as=e.target.closest("[data-fr-assign]");
+      if(as){ enableSound(); const o=orders.find(findingRider); if(!o) return;
+        if(as.dataset.sure!=="1"){ as.dataset.sure="1"; as.textContent="Sure?"; return; }
+        as.disabled=true; const msg=el.querySelector(".fr-msg");
+        try{ await assignRider(o,as.dataset.frAssign); }catch(x){ as.disabled=false; as.dataset.sure=""; as.textContent="Assign"; if(msg) msg.textContent=friendlyError(x); }
+        return; }
+      if(e.target.closest("[data-fr-later]")){ enableSound(); frSnoozeUntil=Date.now()+60000; el.remove();
       tab="delivery"; render(true); const o=orders.find(findingRider); if(o) document.querySelector(`[data-id="${CSS.escape(o.id)}"]`)?.scrollIntoView({behavior:"smooth",block:"center"}); }
       else enableSound(); }); }
   const online=riders.filter(r=>r.status==="approved"&&r.online), call=online.length?online:riders.filter(r=>r.status==="approved");
@@ -355,8 +362,11 @@ function findRiderScreen(list){
       <span>${esc(o.zoneName||o.address||"")}${o.deliveryFee?` · rider earns ${peso(o.deliveryFee)}`:""}</span>
       <span>Waiting ${mins(o)} min${o.payment==="GCash"?" · paid by QR":" · cash on delivery"}</span></div>`).join("")}
     <b>${online.length?`Riders available now (${online.length})`:"No rider is online right now. Call your riders:"}</b>
-    <div class="fr-riders">${call.length?call.map(r=>`<div class="fr-rider"><span><b>${esc(r.name)}</b><br><span style="font-size:.9rem">${esc(r.phone||"")}</span></span>${r.phone?`<a href="${esc(telLink(r.phone))}">Call</a>`:""}</div>`).join("")
+    <div class="fr-riders">${call.length?call.map(r=>`<div class="fr-rider"><span><b>${esc(r.name)}</b>${r.online?' <span style="color:#1a7f37;font-size:.85rem">· available</span>':""}<br><span style="font-size:.9rem">${esc(r.phone||"")}</span></span>
+      <span style="display:flex;gap:6px">${r.phone?`<a href="${esc(telLink(r.phone))}">Call</a>`:""}${canAssign(r)&&list.length===1?`<button type="button" class="fr-assign" data-fr-assign="${esc(r.id)}">Assign</button>`:""}</span></div>`).join("")
       :`<div class="fr-rider">No riders registered yet.</div>`}</div>
+    ${list.length>1?`<p style="margin:0;font-size:.9rem">To give an order to a rider, go to the order and use <b>Assign a rider</b>.</p>`:`<p style="margin:0;font-size:.9rem">Tap <b>Assign</b> after the rider agrees on the phone: the order goes to their app.</p>`}
+    <p class="fr-msg" style="margin:0;font-weight:700"></p>
     <p style="margin:0;font-size:.9rem">If no rider can take it, go to the order and cancel it, then tell the customer.</p>
     <button type="button" class="fr-later" data-fr-later>Go to the order</button>`;
   if(el.dataset.html!==html){ el.dataset.html=html; el.innerHTML=html; }
@@ -687,6 +697,16 @@ const needsStore=o=>(o.status==="new"&&o.mode!=="Delivery")||(o.status==="assign
 const unpaidGcash=o=>o.payment==="GCash" && o.mode!=="Dine-in" && !o.paymentConfirmed && (isPreorder(o) || !o.payShotAt || !paymentSent(o));
 // Waiting for the seller to tap Accept: these keep ringing
 const toAccept=o=>needsStore(o) && !unpaidGcash(o);
+// Giving a waiting delivery to a rider (after they agreed on the phone): the same as the rider accepting
+// it in their app. Only riders who signed the rider agreement and added a payout account can take
+// orders; sellers can't see the agreements, so the server checks that one.
+const canAssign=r=>r.status==="approved" && !!r.payMethod;
+async function assignRider(o,riderId){
+  const r=riders.find(x=>x.id===riderId); if(!r) throw new Error("Rider not found.");
+  try{ await updateDoc(doc(db,"orders",o.id),{status:o.status==="new"?"assigned":o.status,riderUid:r.id,riderName:r.name,riderPhone:r.phone,
+    assignedAt:serverTimestamp(),assignedBy:me.uid,assignedByName:myName}); }
+  catch(x){ if(String(x?.code).includes("permission")) throw new Error(`${r.name} can't take orders yet: they need to sign the rider agreement in the rider app (or another rider just took this order).`); throw x; }
+}
 // A delivery no rider has taken yet (new, or given back by a rider), once it's paid if it's paid by QR
 const findingRider=o=>o.mode==="Delivery" && !o.riderUid && ["new","preparing","ready"].includes(o.status) && !unpaidGcash(o);
 // A dine-in order has a payment once cash received is recorded, or GCash is marked received.
@@ -810,6 +830,14 @@ function removedHTML(o){
   if(!o.removed?.length) return "";
   return `<div class="muted" style="font-size:.82rem"><b>Removed:</b> ${o.removed.map(r=>`${esc(r.qty)}× ${esc(r.name)} ${peso(r.price*r.qty)} (by ${esc(r.by)}, ${new Date(r.at).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"})})`).join("; ")}</div>`;
 }
+// "Assign a rider" on a delivery card that's waiting for one: pick a rider who agreed on the phone
+function assignBox(o){
+  if(!findingRider(o)) return "";
+  const ok=riders.filter(canAssign).sort((a,b)=>(b.online?1:0)-(a.online?1:0));
+  if(!ok.length) return `<br><span class="muted">No rider can be assigned yet (they need to add a payout account and sign the agreement in the rider app).</span>`;
+  return `<span class="btnrow" style="margin-top:6px"><select data-assign-pick="${esc(o.id)}" aria-label="Rider" style="width:auto">${ok.map(r=>`<option value="${esc(r.id)}">${esc(r.name)}${r.online?" (available)":""}</option>`).join("")}</select>
+    <button class="btn small" data-set="assignrider" data-id="${esc(o.id)}">Assign a rider</button></span>`;
+}
 function orderCard(o){
   const st=STATUS[o.status]||{label:o.status,tone:"off"};
   const del=o.mode==="Delivery", dineIn=o.mode==="Dine-in", c=dineIn?null:contactFor(o.id);
@@ -841,7 +869,7 @@ function orderCard(o){
     (del&&["preparing","ready"].includes(o.status)?`<b>Rider</b><span style="color:var(--brand-deep)">No rider yet: finding a new one (${avail.length} available)</span>`
     : o.status==="new"&&del?`<b>Riders</b><span>${avail.length?`<span class="pill go">${avail.length} available now</span> ${avail.map(r=>esc(r.name)).join(", ")}`
       :`<b style="color:var(--brand-deep)">No rider is available right now.</b> Call a rider, or call the customer to let them know.`}
-      <br><span class="muted">Finding a rider for ${waitedMin(o)} min. The order comes to the kitchen once a rider accepts.</span></span>`:"");
+      <br><span class="muted">Finding a rider for ${waitedMin(o)} min. The order comes to the kitchen once a rider accepts.</span>${assignBox(o)}</span>`:"");
   const payAtPickup=o.status==="ready"&&del&&o.riderUid&&o.payment==="Cash"?`<b>Pickup</b><span>Hand over the food only after the rider pays you <b>${peso(shopAmount(o))}</b>. The rider then collects ${peso(o.total)} from the customer and keeps the ${peso(o.deliveryFee)} fee.</span>`:"";
   const settle=unsettled(o)?`<b>Settle</b><span>${o.payment==="Cash"
     ? `Older cash order: the rider collected ${peso(o.total)} cash, keeps the ${peso(o.deliveryFee)} fee and owes you ${peso(shopAmount(o))}.`
@@ -1284,7 +1312,7 @@ $("#shiftCard").addEventListener("click",async e=>{
   }
 });
 
-const CONFIRM=new Set(["reassign","release","notpaid"]);
+const CONFIRM=new Set(["reassign","release","notpaid","assignrider"]);
 $("#board").addEventListener("click", async e=>{
   const b=e.target.closest("button"); if(!b) return;
   if(b.dataset.settleBal){
@@ -1363,13 +1391,14 @@ $("#board").addEventListener("click", async e=>{
     if(set==="paid") await updateDoc(ref,{paymentConfirmed:true,paymentConfirmedAt:now});
     else if(set==="release") await updateDoc(ref,{status:"new",releasedAt:now});
     else if(set==="notpaid") await updateDoc(ref,{payRejectedAt:now});
+    else if(set==="assignrider"){ const o=orders.find(x=>x.id===b.dataset.id), pick=document.querySelector(`[data-assign-pick="${CSS.escape(b.dataset.id)}"]`)?.value; if(o&&pick) await assignRider(o,pick); }
     else if(set==="settle"){
       const o=orders.find(x=>x.id===b.dataset.id);
       await updateDoc(ref,{...(o?.payment==="Cash"?{cashReceived:true}:{feePaid:true}),settled:true,settledAt:now});
     }
     else if(set==="reassign"){
       const o=orders.find(x=>x.id===b.dataset.id);
-      await updateDoc(ref,{status:o?.status==="assigned"?"new":o?.status,riderUid:null,riderName:null,riderPhone:null,assignedAt:null});
+      await updateDoc(ref,{status:o?.status==="assigned"?"new":o?.status,riderUid:null,riderName:null,riderPhone:null,assignedAt:null,...(o?.assignedBy?{assignedBy:null,assignedByName:null}:{})});
     }
     else if(set==="riderpaid") await updateDoc(ref,{status:"picked_up",pickedUpAt:now,riderPaid:true,riderPaidAt:now,cashReceived:true});
     else if(set==="showpin"){

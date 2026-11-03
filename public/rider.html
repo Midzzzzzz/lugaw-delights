@@ -346,7 +346,11 @@ let workSubs=[], mineBy={}, day=null, contacts={};
 const myOrders=()=>{ const m=new Map(); Object.values(mineBy).forEach(l=>l.forEach(o=>m.set(o.id,o))); return [...m.values()]; };
 function watchMine(key, ...filters){
   workSubs.push(onSnapshot(query(collection(db,"orders"),where("riderUid","==",me.uid),...filters), s=>{
-    mineBy[key]=s.docs.map(d=>({id:d.id,...d.data()})); render();
+    mineBy[key]=s.docs.map(d=>({id:d.id,...d.data()}));
+    // the shop gave this rider a delivery: ring full screen until the rider taps Got it
+    if(key==="assigned") mineBy[key].filter(o=>o.assignedBy && o.status==="assigned" && !shopGave.has(o.id) && !gotIt.has(o.id)).forEach(o=>{ shopGave.add(o.id);
+      notify("The shop gave you a delivery",`${o.code||""} · earn ${peso(o.deliveryFee)}`); });
+    render();
   }, e=>{ $("#mine").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; }));
 }
 function stopWork(){ workSubs.forEach(f=>f()); workSubs=[]; mineBy={}; }
@@ -372,20 +376,30 @@ function startWork(){
 // While a delivery is waiting for a rider and this rider is available, the phone keeps ringing,
 // with a full-screen alert, until a rider accepts it (this one or another).
 let rRinging=false, rSnoozeUntil=0;
+// deliveries the shop assigned to this rider, and the ones the rider has seen (Got it)
+const shopGave=new Set(), gotIt=new Set((()=>{ try{ return JSON.parse(localStorage.getItem("ld_gotit")||"[]"); }catch(_){ return []; } })());
 setInterval(()=>{
+  const given=(mineBy.assigned||[]).filter(o=>o.assignedBy && o.status==="assigned" && !gotIt.has(o.id));
+  if(given.length){ riderAlert([],given); rRinging=true; ring("The shop gave you a delivery",`${given[0].code||""} · open the app`); return; }
   const list=rider?.online&&rider?.status==="approved"?openOrders:[];
   riderAlert(list);
   if(list.length){ rRinging=true; ring(list.length>1?`${list.length} deliveries waiting`:"A delivery is waiting",list.length>1?"Open the app and accept one.":`Earn ${peso(list[0].deliveryFee)} · accept it in the app`); }
   else if(rRinging){ rRinging=false; stopRing(); }
 },3000);
-function riderAlert(list){
+function riderAlert(list,given=[]){
   let el=document.getElementById("riderAlert");
-  if(!list.length || Date.now()<rSnoozeUntil){ el?.remove(); return; }
+  if(!given.length && (!list.length || Date.now()<rSnoozeUntil)){ el?.remove(); return; }
   if(!el){ el=document.createElement("div"); el.id="riderAlert"; el.setAttribute("role","alertdialog"); el.setAttribute("aria-modal","true");
     el.style.cssText="position:fixed;inset:0;z-index:200;overflow:auto;background:var(--brand,#e0284f);color:var(--on-brand,#fff);padding:24px 18px;display:grid;align-content:center;gap:14px;text-align:center";
     document.body.append(el);
-    el.addEventListener("click",e=>{ enableSound(); if(e.target.closest("[data-ra-see]")){ rSnoozeUntil=Date.now()+45000; el.remove(); $("#open")?.scrollIntoView({behavior:"smooth",block:"start"}); } }); }
-  const html=`<h2 style="margin:0;font-size:1.8rem;color:inherit">${list.length>1?`${list.length} deliveries waiting`:"New delivery waiting"}</h2>
+    el.addEventListener("click",e=>{ enableSound();
+      const g=e.target.closest("[data-ra-got]"); if(g){ gotIt.add(g.dataset.raGot); try{ localStorage.setItem("ld_gotit",JSON.stringify([...gotIt].slice(-50))); }catch(_){} el.remove(); $("#mine")?.scrollIntoView({behavior:"smooth",block:"start"}); return; }
+      if(e.target.closest("[data-ra-see]")){ rSnoozeUntil=Date.now()+45000; el.remove(); $("#open")?.scrollIntoView({behavior:"smooth",block:"start"}); } }); }
+  const html=given.length?`<h2 style="margin:0;font-size:1.8rem;color:inherit">The shop gave you a delivery</h2>
+    ${given.slice(0,3).map(o=>`<div style="background:rgba(0,0,0,.18);border-radius:14px;padding:12px"><b style="font-size:1.2rem">${esc(o.code||"")} · earn ${peso(o.deliveryFee)}</b><br>${esc(o.zoneName||"")}${o.assignedByName?`<br>Assigned by ${esc(o.assignedByName)}`:""}</div>`).join("")}
+    <p style="margin:0;font-size:1.05rem">It's yours now: go to the shop to pick it up. If you can't take it, tap <b>I can't take this</b> on the order and call the shop.</p>
+    <button type="button" data-ra-got="${esc(given[0].id)}" style="justify-self:center;background:#fff;color:var(--brand-deep,#b0183a);border:0;border-radius:99px;padding:14px 28px;font:inherit;font-weight:800;font-size:1.1rem;cursor:pointer">Got it</button>`
+  :`<h2 style="margin:0;font-size:1.8rem;color:inherit">${list.length>1?`${list.length} deliveries waiting`:"New delivery waiting"}</h2>
     ${list.slice(0,3).map(o=>`<div style="background:rgba(0,0,0,.18);border-radius:14px;padding:12px"><b style="font-size:1.2rem">Earn ${peso(o.deliveryFee)}</b><br>${esc(o.zoneName||"")}</div>`).join("")}
     <p style="margin:0;font-size:1.05rem">Tap below and <b>Accept</b> it. The alert stops once a rider accepts.</p>
     <button type="button" data-ra-see style="justify-self:center;background:#fff;color:var(--brand-deep,#b0183a);border:0;border-radius:99px;padding:14px 28px;font:inherit;font-weight:800;font-size:1.1rem;cursor:pointer">See the delivery</button>`;
@@ -547,7 +561,7 @@ $("#riderView").addEventListener("click", async e=>{
     }
     if(act==="release"){
       const o=myOrders().find(x=>x.id===id);
-      await updateDoc(ref,{status:o?.status==="assigned"?"new":o?.status,riderUid:null,riderName:null,riderPhone:null,assignedAt:null});
+      await updateDoc(ref,{status:o?.status==="assigned"?"new":o?.status,riderUid:null,riderName:null,riderPhone:null,assignedAt:null,...(o?.assignedBy?{assignedBy:null,assignedByName:null}:{})});
     }
   }catch(x){ fail(x.code?friendlyError(x):x.message); }
 });
