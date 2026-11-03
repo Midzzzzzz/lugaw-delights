@@ -384,7 +384,33 @@ function renderSales(done){
   time.sort((x,y)=>x.k<y.k?-1:x.k>y.k?1:0);
   if(oneDay) time=time.filter(r=>r.value>0);
   const money=r=>peso(r.value);
-  $("#view").innerHTML=`<div class="panels">
+  // ---------- Overview: when customers buy, what they buy, how they order and pay ----------
+  const hourOf=o=>saleAt(o)?.toDate?.()?.getHours(), dayOf=o=>{ const d=saleAt(o)?.toDate?.(); return d?businessDate(d).getDay():null; };
+  const hrs=new Map(); all.forEach(o=>{ const h=hourOf(o); if(h!=null) hrs.set(h,(hrs.get(h)||0)+1); });
+  const hName=h=>new Date(2000,0,1,h).toLocaleTimeString("en-PH",{hour:"numeric"}), hSpan=h=>`${hName(h)}–${hName((h+1)%24)}`;
+  const busyHours=[...hrs.entries()].sort((x,y)=>y[1]-x[1]).slice(0,3);
+  // the busiest stretch: the 3 hours in a row with the most orders
+  let best=null; for(let h=0;h<24;h++){ const n=[0,1,2].reduce((t,k)=>t+(hrs.get((h+k)%24)||0),0); if(n&&(!best||n>best.n)) best={h,n}; }
+  const DAYS=["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"], dys=new Map();
+  all.forEach(o=>{ const d=dayOf(o); if(d!=null) dys.set(d,(dys.get(d)||0)+1); });
+  const busyDay=[...dys.entries()].sort((x,y)=>y[1]-x[1])[0], slowDay=[...dys.entries()].sort((x,y)=>x[1]-y[1])[0];
+  const spanDays=Math.round((b-a)/86400000);
+  const bdAll=salesBreakdown(all), avg=all.length?Math.round(bdAll.total/all.length):0;
+  const share=n=>bdAll.total?Math.round(n/bdAll.total*100):0;
+  const ways=SALE_KINDS.map(([k,l])=>[l,bdAll.kinds[k].count,bdAll.kinds[k].amount]).filter(r=>r[1]).sort((x,y)=>y[2]-x[2]);
+  const pays=[["cash",bdAll.money.cash],["GCash / QR",bdAll.money.gcash],["Foodpanda / Grab",bdAll.money.platform]].filter(r=>r[1]).sort((x,y)=>y[1]-x[1]);
+  const top3=topItems.slice(0,3);
+  const li=t=>`<li style="margin:4px 0">${t}</li>`;
+  const overview=all.length?`<section class="card panel" style="grid-column:1/-1"><h2>Overview</h2><p class="sub">${esc(plural(all.length,"order"))} in the dates picked above</p>
+    <ul style="margin:6px 0 0;padding-left:18px;line-height:1.45">
+      ${best?li(`<b>Busiest time:</b> ${hName(best.h)} to ${hName((best.h+3)%24)} (${plural(best.n,"order")}). Busiest single hour: <b>${hSpan(busyHours[0][0])}</b> (${plural(busyHours[0][1],"order")})${busyHours[1]?`, then ${hSpan(busyHours[1][0])} (${busyHours[1][1]})`:""}${busyHours[2]?` and ${hSpan(busyHours[2][0])} (${busyHours[2][1]})`:""}.`):""}
+      ${spanDays>=7&&busyDay?li(`<b>Busiest day of the week:</b> ${DAYS[busyDay[0]]} (${plural(busyDay[1],"order")}); quietest: ${DAYS[slowDay[0]]} (${slowDay[1]}).`):""}
+      ${top3.length?li(`<b>Most bought:</b> ${top3.map((r,i)=>`${i===0?"<b>":""}${esc(r.label)}${i===0?"</b>":""} (${plural(r.count,"pc")})`).join(", ")}.`):""}
+      ${ways.length?li(`<b>How customers order:</b> ${ways.map(([l,n,v])=>`${esc(l)} ${share(v)}% (${plural(n,"order")})`).join(" · ")}.`):""}
+      ${pays.length?li(`<b>How they pay:</b> ${pays.map(([l,v])=>`${l} ${share(v)}%`).join(" · ")}.`):""}
+      ${li(`<b>Average order:</b> ${peso(avg)}.`)}
+    </ul></section>`:"";
+  $("#view").innerHTML=`<div class="panels">${overview}
     <section class="card panel"><h2>Sellers</h2><p class="sub">Food sales from completed orders each seller accepted or recorded (not Foodpanda / Grab)</p>
       ${rank(bySeller,{main:money,sub:r=>plural(r.count,"order"),empty:"No completed orders in this range yet."})}</section>
     <section class="card panel"><h2>Best-selling items</h2><p class="sub">Top 10 by quantity</p>
