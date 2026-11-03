@@ -316,16 +316,12 @@ function render(force){
       ${ln("Total sales",bd.count,peso(bd.total),"all","tot")}</section>
     <section class="sum"><h2>Money</h2>
       ${ln("Cash",null,peso(bd.money.cash),"m-cash")}
-      ${ln("GCash / QR",null,peso(bd.money.gcash),"m-gcash")}
       ${ln(`Pay out${outs.length?` (${outs.length}×, latest: ${esc(outs.slice().sort((x,y)=>y.at-x.at)[0].note||"no note")})`:""}`,null,"− "+peso(bd.payOut),null,"minus")}
       ${ln("Cash left after pay out",null,peso(bd.cashLeft))}
-      ${note("Starting cash and pay ins aren't counted: they were already the shop's money.")}
+      ${ln("GCash / QR",null,peso(bd.money.gcash),"m-gcash")}
       ${ln("Foodpanda / Grab",null,peso(bd.money.platform),"m-platform")}
-      ${note("Paid out weekly by the platforms, at menu prices (less after their commission).")}
       ${bd.money.unpaid?ln("Not paid yet",null,peso(bd.money.unpaid),"m-unpaid"):""}
-      ${ln("Total",null,peso(bd.total-bd.payOut),null,"tot")}
-      ${note(`= total sales ${peso(bd.total)} − pay out ${peso(bd.payOut)}`)}
-      <p class="sub" style="margin-top:6px">${orders.filter(o=>ACTIVE.includes(o.status)).length} in progress · ${orders.filter(o=>o.status==="cancelled").length} cancelled (not counted)</p></section>`;
+      ${ln("Total",null,peso(bd.total-bd.payOut),null,"tot")}</section>`;
   const pending=sellers.filter(s=>s.status==="pending").length+kitchen.filter(k=>k.status==="pending").length+riders.filter(r=>r.status==="pending").length;
   $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Staff & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["shifts","Shifts",allShifts.filter(x=>!x.closedAt).length],["savings","Savings"],["menu","Menu"],["inventory","Inventory"],["settings","Shop settings"]]
     .map(([id,l,n])=>`<button class="${tab===id?"on":""}" data-tab="${id}">${l}${n?`<span class="count">${n}</span>`:""}</button>`).join("");
