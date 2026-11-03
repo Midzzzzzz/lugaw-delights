@@ -273,6 +273,42 @@ export const salesRows = s => s.dineSales == null ? [["Sales", s.sales]]
   : [["Dine-in sales", s.dineSales], ["Lugaw Delights delivery sales", s.deliverySales],
      ...(s.preSales ? [[`Pre-orders: platters & packages (${s.preCount || 0})`, s.preSales]] : []), ["Total sales", s.sales]];
 
+// ---------- Sales breakdown (owner dashboard) ----------
+// One calculation for every number on the owner dashboard, from the finished orders of a date range.
+// Each order counts once: its sale (food + take-out boxes, never the rider's delivery fee) goes on
+// exactly one "sold through" line, and the same amount goes on exactly one "money" line, so
+//   total sales = cash + GCash + Foodpanda / Grab + not paid yet   (always)
+// Pay outs (cash taken from the drawer) are then taken off the cash.
+export const SALE_KINDS = [["dine", "Dine-in & take-out"], ["delivery", "Lugaw Delights delivery"], ["preorder", "Pre-orders (platters & packages)"], ["foodpanda", "Foodpanda"], ["grab", "Grab"]];
+export const saleKindOf = o => o.source === "foodpanda" ? "foodpanda" : o.source === "grab" ? "grab" : o.preorder ? "preorder" : o.mode === "Delivery" ? "delivery" : "dine";
+// How much of an order's sale is paid, and how: { cash, gcash, platform, unpaid }
+export function salePayment(o) {
+  const amt = shopAmount(o), r = { cash: 0, gcash: 0, platform: 0, unpaid: 0 };
+  if (PLATFORMS[o.source]) { r.platform = amt; return r; }
+  const gc = o.payment === "GCash";
+  let paid;
+  if (o.manual) paid = amt; // added by the owner or imported: recorded as paid
+  else if (o.mode === "Dine-in") {
+    const has = o.cashGiven != null || o.paid === true;
+    paid = has ? Math.min(amt, o.settledTotal ?? o.paidTotal ?? amt) : 0; // a later change may leave a balance
+  } else if (gc) paid = o.paymentConfirmed ? amt : 0; // delivery / pickup paid by QR: once the seller confirmed it
+  else paid = amt; // cash delivery (the rider paid the shop at pickup) or cash pickup (paid when collected)
+  r[gc ? "gcash" : "cash"] = paid; r.unpaid = amt - paid;
+  return r;
+}
+export function salesBreakdown(orders, payOut = 0) {
+  const kinds = Object.fromEntries(SALE_KINDS.map(([k]) => [k, { amount: 0, count: 0 }]));
+  const money = { cash: 0, gcash: 0, platform: 0, unpaid: 0 };
+  let total = 0, count = 0, riderFees = 0;
+  orders.forEach(o => {
+    const amt = shopAmount(o), k = kinds[saleKindOf(o)];
+    k.amount += amt; k.count++; total += amt; count++;
+    if (o.mode === "Delivery") riderFees += o.deliveryFee || 0;
+    const p = salePayment(o); Object.keys(money).forEach(m => money[m] += p[m]);
+  });
+  return { kinds, total, count, riderFees, money, payOut, cashLeft: money.cash - payOut };
+}
+
 // The "Take-out boxes" line for an order's totals (empty when there are none)
 export function boxRow(o) {
   if (!o.boxFee) return "";

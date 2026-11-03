@@ -10,6 +10,15 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito+Sans:opsz,wght@6..12,400;6..12,600;6..12,700&display=swap">
 <link rel="stylesheet" href="style.css">
 <style>
+.sumgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px;margin:12px 0}
+.sum{background:var(--surface);border:2px solid var(--line);border-radius:14px;padding:12px 14px;display:grid;gap:2px;align-content:start}
+.sum h2{margin:0 0 4px;font-size:1.05rem;color:var(--brand-deep)}
+.sum .ln{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:baseline;padding:5px 2px;border:0;background:none;color:inherit;font:inherit;text-align:left;width:100%;border-radius:8px}
+.sum button.ln{cursor:pointer}.sum button.ln:hover{background:var(--line)}
+.sum .ln .c{color:var(--muted);font-size:.85rem}.sum .ln b{font-variant-numeric:tabular-nums}
+.sum .tot{border-top:2px solid var(--ink,currentColor);margin-top:4px;padding-top:7px;font-weight:800;font-size:1.08rem}
+.sum .sub{color:var(--muted);font-size:.8rem;margin:0 0 2px 2px}
+.sum .minus b{color:var(--brand-deep)}
 .narrow{max-width:460px}
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .chip{border:2px solid var(--line);background:var(--surface);color:var(--fg);font-weight:700;border-radius:99px;padding:5px 12px;cursor:pointer;font-size:.88rem}
@@ -96,19 +105,8 @@ table.inv input{width:90px;text-align:right;padding:5px 8px}
 
   <div id="dash" hidden>
     <div class="card toolbar" id="ranges"></div>
-    <div class="stats">
-      <div class="stat"><b id="sDine">₱0</b><span>Dine-in</span><small id="sDineN" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Counter orders, incl. take-out</small></div>
-      <div class="stat"><b id="sDel">₱0</b><span>Lugaw Delights delivery</span><small id="sFees" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Rider fees ₱0</small></div>
-      <div class="stat"><b id="sPre">₱0</b><span>Pre-orders</span><small id="sPreN" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Platters &amp; packages</small></div>
-      <div class="stat"><b id="sSales">₱0</b><span>Total sales</span><small class="muted" style="display:block;font-size:.78rem;margin-top:2px">Dine-in + delivery + pre-orders</small></div>
-      <div class="stat"><b id="sPlat">₱0</b><span>Foodpanda / Grab</span><small id="sPlatN" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Paid out weekly</small></div>
-      <div class="stat" style="grid-column:span 2"><b id="sMoney">₱0</b><span>Money summary</span><small id="sMoneyN" class="muted" style="display:block;font-size:.8rem;margin-top:2px"></small></div>
-      <div class="stat"><b id="sOut">₱0</b><span>Pay out</span><small id="sOutN" class="muted" style="display:block;font-size:.78rem;margin-top:2px">Cash taken from the drawer</small></div>
-      <div class="stat"><b id="sOrders">0</b><span>Completed orders</span></div>
-      <div class="stat"><b id="sAll">₱0</b><span>All sales</span><small class="muted" style="display:block;font-size:.78rem;margin-top:2px">Dine-in + all delivery, incl. Foodpanda / Grab</small></div>
-      <div class="stat"><b id="sOpen">0</b><span>In progress</span></div>
-      <div class="stat"><b id="sCancel">0</b><span>Cancelled</span></div>
-    </div>
+    <!-- Sold through: where the sales came from. Money: where that money is now. Both add up to the same total. -->
+    <div class="sumgrid" id="summary"></div>
     <div class="tabs" id="tabs"></div>
     <div id="view"></div>
   </div>
@@ -120,7 +118,7 @@ import { doc, getDoc, getDocs, setDoc, addDoc, deleteDoc, updateDoc, onSnapshot,
 import { CONTRACT_VERSION, agreementHTML } from "./contract.js";
 import { readLoyverse } from "./loyverse.js";
 import { findShifts, pastSummary } from "./pastshifts.js";
-import { saved, prepMinutes, orderType, businessDate, DAY_START, platformName, boxRow, SHOP, PLATFORMS, shiftSummary, salesRows, isPreorderSection, isPreorder, preorderWhen, saleAt, ymdOf } from "./common.js";
+import { saved, prepMinutes, orderType, businessDate, DAY_START, platformName, boxRow, SHOP, PLATFORMS, shiftSummary, salesRows, isPreorderSection, isPreorder, preorderWhen, saleAt, ymdOf, salesBreakdown, salePayment, saleKindOf, SALE_KINDS } from "./common.js";
 import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
@@ -304,41 +302,30 @@ $("#view").addEventListener("focusout",()=>setTimeout(()=>{ const a=document.act
 function render(force){
   const a=document.activeElement;
   if(force!==true && a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.closest("#view") && a.id!=="search"){ renderWaiting=true; return; }
-  // Sales: what the shop took in (cash, GCash). Foodpanda and Grab pay out weekly, so they're counted apart.
-  const done=salesDone(), own=done.filter(o=>!platformName(o)), sales=own.reduce((s,o)=>s+shopAmount(o),0);
-  $("#sSales").textContent=peso(sales);
-  // what Foodpanda and Grab owe the shop (paid out weekly), at menu prices
-  const pf=done.filter(o=>o.source==="foodpanda"), pg=done.filter(o=>o.source==="grab"), psum=l=>l.reduce((s,o)=>s+shopAmount(o),0);
-  $("#sPlat").textContent=peso(psum(pf)+psum(pg));
-  $("#sPlatN").textContent=`Foodpanda ${peso(psum(pf))} · Grab ${peso(psum(pg))} · ${plural(pf.length+pg.length,"order")}`;
-  // Pay out: cash sellers took from the drawer during their shifts (supplies and the like), in the range
+  // Every number here comes from salesBreakdown (common.js), from the same finished orders, so the two
+  // tables always end on the same total. Tap a line to see its orders.
+  const done=salesDone();
   const [ra,rb]=rangeDates(), outs=allShifts.flatMap(x=>x.moves||[]).filter(m=>m.type==="out" && m.at>=ra.getTime() && m.at<rb.getTime());
-  $("#sOut").textContent=peso(outs.reduce((t,m)=>t+(m.amount||0),0));
-  // Money summary: worked out like the shift report, over the chosen dates. Cash = what came into the
-  // drawer (cash sales, riders' cash, extra collected minus given back) minus the pay outs; the starting
-  // cash and pay ins aren't income. GCash / QR received. Foodpanda / Grab owed by the platforms.
-  const ms=shiftSummary({openedAt:Timestamp.fromDate(ra),closedAt:Timestamp.fromMillis(rb.getTime()-1),startCash:0,moves:outs},
-    [...new Map([...orders,...preDone].map(o=>[o.id,o])).values()]);
-  const cashNet=ms.cashSales+ms.riderCash+ms.adjustIn-ms.adjustOut-ms.payOut;
-  $("#sMoney").textContent=peso(cashNet+ms.gcashSales+ms.platformSales);
-  $("#sMoneyN").innerHTML=`Cash in drawer (after pay out) <b>${peso(cashNet)}</b> · GCash <b>${peso(ms.gcashSales)}</b> · Foodpanda / Grab <b>${peso(ms.platformSales)}</b>`;
-  $("#sOutN").textContent=outs.length?`${plural(outs.length,"time")} · latest: ${outs.sort((a,b)=>b.at-a.at)[0].note||"no note"}`:"Cash taken from the drawer";
-  $("#sOrders").textContent=done.length;
-  // everything sold: dine-in, Lugaw Delights delivery and Foodpanda / Grab (riders' fees not included)
-  $("#sAll").textContent=peso(done.reduce((s,o)=>s+shopAmount(o),0));
-  // Total sales = dine-in (the counter, take-out included) + Lugaw Delights' own delivery (food and
-  // boxes; the riders' fees shown under it are theirs, not sales)
-  // pre-orders (platters, packages) apart, like on the shift report: counted when delivered or picked up
-  const pres=own.filter(o=>o.preorder), dels=own.filter(o=>o.mode==="Delivery"&&!o.preorder), dine=own.filter(o=>o.mode!=="Delivery"&&!o.preorder);
-  $("#sPre").textContent=peso(pres.reduce((s,o)=>s+shopAmount(o),0));
-  const up=upcomingPre.filter(o=>o.paymentConfirmed);
-  $("#sPreN").textContent=`${plural(pres.length,"order")} done · ${up.length} paid, coming${up.length?` (${peso(up.reduce((s,o)=>s+shopAmount(o),0))})`:""}`;
-  $("#sDine").textContent=peso(dine.reduce((s,o)=>s+shopAmount(o),0));
-  $("#sDineN").textContent=`${plural(dine.length,"order")} · incl. take-out`;
-  $("#sDel").textContent=peso(dels.reduce((s,o)=>s+shopAmount(o),0));
-  $("#sFees").textContent=`Rider fees ${peso(dels.reduce((s,o)=>s+(o.deliveryFee||0),0))} · ${plural(dels.length,"order")}`;
-  $("#sOpen").textContent=orders.filter(o=>ACTIVE.includes(o.status)).length;
-  $("#sCancel").textContent=orders.filter(o=>o.status==="cancelled").length;
+  const bd=salesBreakdown(done, outs.reduce((t,m)=>t+(m.amount||0),0)), up=upcomingPre.filter(o=>o.paymentConfirmed);
+  const ln=(label,count,amount,key,cls="")=>`<${key?`button type="button" data-kind="${key}"`:"div"} class="ln ${cls}"><span>${label}</span><span class="c">${count!=null?plural(count,"order"):""}</span><b>${amount}</b></${key?"button":"div"}>`;
+  const note=t=>`<p class="sub">${t}</p>`;
+  $("#summary").innerHTML=`<section class="sum"><h2>Sold through</h2>
+      ${SALE_KINDS.map(([k,l])=>ln(l,bd.kinds[k].count,peso(bd.kinds[k].amount),k)
+        +(k==="delivery"&&bd.riderFees?note(`Riders' delivery fees, not shop sales: ${peso(bd.riderFees)}`):"")
+        +(k==="preorder"&&up.length?note(`Paid, not delivered yet (counted on their day): ${up.length} · ${peso(up.reduce((t,o)=>t+shopAmount(o),0))}`):"")).join("")}
+      ${ln("Total sales",bd.count,peso(bd.total),"all","tot")}</section>
+    <section class="sum"><h2>Money</h2>
+      ${ln("Cash",null,peso(bd.money.cash),"m-cash")}
+      ${ln(`Pay out${outs.length?` (${outs.length}×, latest: ${esc(outs.slice().sort((x,y)=>y.at-x.at)[0].note||"no note")})`:""}`,null,"− "+peso(bd.payOut),null,"minus")}
+      ${ln("Cash left after pay out",null,peso(bd.cashLeft))}
+      ${note("Starting cash and pay ins aren't counted: they were already the shop's money.")}
+      ${ln("GCash / QR",null,peso(bd.money.gcash),"m-gcash")}
+      ${ln("Foodpanda / Grab",null,peso(bd.money.platform),"m-platform")}
+      ${note("Paid out weekly by the platforms, at menu prices (less after their commission).")}
+      ${bd.money.unpaid?ln("Not paid yet",null,peso(bd.money.unpaid),"m-unpaid"):""}
+      ${ln("Total",null,peso(bd.total-bd.payOut),null,"tot")}
+      ${note(`= total sales ${peso(bd.total)} − pay out ${peso(bd.payOut)}`)}
+      <p class="sub" style="margin-top:6px">${orders.filter(o=>ACTIVE.includes(o.status)).length} in progress · ${orders.filter(o=>o.status==="cancelled").length} cancelled (not counted)</p></section>`;
   const pending=sellers.filter(s=>s.status==="pending").length+kitchen.filter(k=>k.status==="pending").length+riders.filter(r=>r.status==="pending").length;
   $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Staff & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["shifts","Shifts",allShifts.filter(x=>!x.closedAt).length],["savings","Savings"],["menu","Menu"],["inventory","Inventory"],["settings","Shop settings"]]
     .map(([id,l,n])=>`<button class="${tab===id?"on":""}" data-tab="${id}">${l}${n?`<span class="count">${n}</span>`:""}</button>`).join("");
@@ -352,7 +339,17 @@ function render(force){
   else if(tab==="inventory") renderInventory();
   else renderSettings();
 }
-$("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]"); if(b){ tab=b.dataset.tab; render(); } });
+$("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]"); if(b){ tab=b.dataset.tab; if(tab!=="orders") kindFilter=null; render(); } });
+$("#summary").addEventListener("click",e=>{ const b=e.target.closest("[data-kind]"); if(!b) return; kindFilter=b.dataset.kind; tab="orders"; render(); $("#tabs").scrollIntoView({behavior:"smooth",block:"start"}); });
+// The orders behind a line of the summary (kindFilter), exactly the ones it counted
+let kindFilter=null;
+const KIND_LABEL={all:"Total sales","m-cash":"Paid in cash","m-gcash":"Paid by GCash / QR","m-platform":"Foodpanda / Grab","m-unpaid":"Not paid yet"};
+function kindOrders(k){
+  const done=salesDone();
+  if(k==="all") return done;
+  if(k.startsWith("m-")){ const m=k.slice(2); return done.filter(o=>salePayment(o)[m]>0); }
+  return done.filter(o=>saleKindOf(o)===k);
+}
 
 function renderSales(done){
   const food=o=>shopAmount(o); // food and take-out boxes
@@ -360,8 +357,8 @@ function renderSales(done){
   done=done.filter(o=>!platformName(o)); // sellers' sales and the sales over time: the shop's own (Foodpanda / Grab apart)
   const bySeller=group(done,o=>o.sellerUid||"_none",sellerName,food);
   const byRider=group(done.filter(o=>o.mode==="Delivery"&&o.riderUid),o=>o.riderUid,riderName,o=>o.deliveryFee||0);
-  const kind=o=>platformName(o)||(o.preorder?"Pre-order":o.mode);
-  const byMode=group(all,kind,kind,food); // Foodpanda, Grab and pre-orders apart from the counter
+  const kindName=o=>SALE_KINDS.find(([k])=>k===saleKindOf(o))[1];
+  const byMode=group(all,kindName,kindName,food); // the same lines as "Sold through" above
   const byPay=group(all,o=>o.payment,o=>o.payment,food);
   // Foodpanda / Grab by week (Monday to Sunday), as the platforms pay out weekly
   const weekOf=d=>{ const x=businessDate(d); x.setDate(x.getDate()-(x.getDay()+6)%7); return x; }, byWeek=new Map();
@@ -408,12 +405,14 @@ function renderSales(done){
 const FILTERS=[["all","All"],["active","In progress"],["done","Completed"],["cancelled","Cancelled"]];
 function renderOrders(){
   const q=search.trim().toLowerCase();
-  const list=orders.filter(o=>filter==="all"||(filter==="active"&&ACTIVE.includes(o.status))||(filter==="done"&&isDone(o))||(filter==="cancelled"&&o.status==="cancelled"))
+  const list=(kindFilter?kindOrders(kindFilter):orders).filter(o=>kindFilter||filter==="all"||(filter==="active"&&ACTIVE.includes(o.status))||(filter==="done"&&isDone(o))||(filter==="cancelled"&&o.status==="cancelled"))
     .filter(o=>!q||[o.code,o.table,o.sellerName,o.riderName,o.mode].some(v=>String(v||"").toLowerCase().includes(q)));
   const shown=list.slice(0,300);
   $("#view").innerHTML=(saleOpen?saleForm():"")+lvPreview()+`<div class="card" style="margin-top:12px">
     <div class="toolbar">${saleOpen?"":`<button class="btn small" data-sadd>+ Add a sale</button>`}${lvPlan?"":`<button class="btn ghost small" data-lvpick>Import from Loyverse</button>`}${FILTERS.map(([k,l])=>`<button class="chip ${filter===k?"on":""}" data-filter="${k}">${l}</button>`).join("")}
       <input class="search" type="search" id="search" placeholder="Search code, table, seller…" value="${esc(search)}" aria-label="Search orders"></div>
+    ${kindFilter?`<div class="flag" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span>Showing the orders counted in <b>${esc(KIND_LABEL[kindFilter]||SALE_KINDS.find(([k])=>k===kindFilter)?.[1]||"")}</b>: ${plural(list.length,"order")} · ${peso(list.reduce((t,o)=>t+(kindFilter.startsWith("m-")?salePayment(o)[kindFilter.slice(2)]:shopAmount(o)),0))}</span>
+      <button class="btn ghost small" data-kindclear>Show all orders</button></div>`:""}
     ${delBar(shown)}
     <div class="tablewrap"><table class="orders"><thead><tr><th><input type="checkbox" data-pickall aria-label="Select all shown orders"${shown.length&&shown.every(o=>picked.has(o.id))?" checked":""}></th><th>Time</th><th>Code</th><th>Type</th><th>Seller</th><th>Rider</th><th>Status</th><th class="n">Total</th></tr></thead>
     <tbody>${shown.map(o=>`<tr class="row" data-open="${esc(o.id)}">
@@ -497,7 +496,8 @@ $("#view").addEventListener("click",async e=>{
 });
 $("#view").addEventListener("click",e=>{
   if(e.target.closest("[data-pick],[data-pickall],[data-delone],[data-delpicked],[data-unpick]")) return;
-  const f=e.target.closest("[data-filter]"); if(f){ filter=f.dataset.filter; render(); return; }
+  if(e.target.closest("[data-kindclear]")){ kindFilter=null; render(); return; }
+  const f=e.target.closest("[data-filter]"); if(f){ filter=f.dataset.filter; kindFilter=null; render(); return; }
   const r=e.target.closest("[data-open]"); if(r){ open=open===r.dataset.open?null:r.dataset.open; render(); }
 });
 $("#view").addEventListener("input",e=>{
