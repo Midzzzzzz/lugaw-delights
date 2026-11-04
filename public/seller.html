@@ -723,6 +723,9 @@ const unpaidDine=o=>o.mode==="Dine-in"&&o.status!=="cancelled"&&balanceOf(o)!==0
 // Delivery orders stay in one Delivery tab while they're on their way (each card shows its
 // progress), so the seller doesn't have to follow them from tab to tab. Once delivered they
 // move to Done today. New, Kitchen and Ready for pickup are pickup and dine-in orders.
+// An order of the shift open now: saved with it, or (older orders, or no shift open) by its time
+const thisShift=(o,t)=>{ if(o.shiftId && !o.preorder) return o.shiftId===shift?.id;
+  const ms=t?.toMillis?.(); return shift?.openedAt ? ms!=null && ms>=shift.openedAt.toMillis() : isToday(t); };
 const isDel=o=>o.mode==="Delivery";
 const delActive=o=>isDel(o)&&ACTIVE.includes(o.status)&&o.status!=="scheduled";
 // New and Ready for pickup are for customer pickup orders (switched off): shown only when they hold an order
@@ -732,10 +735,10 @@ const TABS=[
   ["pre","Pre-orders",o=>o.status==="scheduled","hideEmpty"],
   ["kitchen","Kitchen",o=>o.status==="preparing"&&!isDel(o)],
   ["out","Ready for pickup",o=>o.status==="ready_pickup","hideEmpty"],
-  ["done","Done today",o=>["delivered","completed"].includes(o.status)&&isToday(saleAt(o))],
+  ["done","Done this shift",o=>["delivered","completed"].includes(o.status)&&thisShift(o,saleAt(o))],
   ["unpaid","Unpaid",unpaidDine],
   ["settle","Settle with riders",unsettled],
-  ["cancelled","Cancelled",o=>o.status==="cancelled"&&isToday(o.createdAt)],
+  ["cancelled","Cancelled",o=>o.status==="cancelled"&&thisShift(o,o.createdAt)],
 ];
 // Delivery tab: oldest first
 const ms=o=>o.createdAt?.toMillis?.()??Infinity;

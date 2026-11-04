@@ -204,7 +204,8 @@ function start(){
   // Cashier shifts, newest first
   subs.push(onSnapshot(query(collection(db,"shifts"),orderBy("openedAt","desc"),limit(90)), s=>{
     allShifts=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})); shiftsErr=""; shiftsLoaded=true; autoSave();
-    if(range==="shift" && (shiftNowOpen()?.id||null)!==watchingShift){ renderRanges(); watchOrders(); }
+    const want=range==="shift"?(shiftNowOpen()?.id||null):"days:"+shiftsInView().map(y=>y.id).join(",");
+    if(want!==watchingShift){ renderRanges(); watchOrders(); }
     render();
   }, e=>{ shiftsErr="Couldn't load shifts: "+friendlyError(e)+""; if(tab==="shifts") render(); }));
   // The owner's menu (settings/menu) and inventory counts
@@ -245,6 +246,11 @@ const dayStart=d=>{ const x=businessDate(d); x.setHours(DAY_START()); return x; 
 const dayAt=s=>{ const x=new Date(s+"T00:00"); x.setHours(DAY_START()); return x; }; // a picked date's business day
 const ymd=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
 // "This shift": the shift open now (or the last one, once it's closed), from when it opened
+// Orders always go by shift, never by the clock. "By shift" shows one shift; the date choices show
+// every shift opened on those days, each with all its orders (whatever time they were punched).
+// Orders saved before orders carried their shift go by their own time.
+const shiftsInView=()=>{ if(range==="shift"){ const x=shiftNowOpen(); return x?[x]:[]; }
+  const [a,b]=rangeDates(); return allShifts.filter(x=>{ const t=x.openedAt?.toMillis?.(); return t!=null && t>=a.getTime() && t<b.getTime(); }); };
 // "By shift": the shift picked in the list (pickedShift), else the one open now, else the last one
 const shiftNowOpen=()=>(pickedShift&&allShifts.find(x=>x.id===pickedShift))||allShifts.find(x=>!x.closedAt&&!x.past)||allShifts.find(x=>!x.past)||null;
 function rangeDates(){
@@ -291,9 +297,15 @@ function watchOrders(){
     const u2=onSnapshot(query(collection(db,"orders"),where("shiftId","==",x.id)), s=>{ tagged=s.docs.map(d=>({id:d.id,...d.data()})); mix(); }, err);
     ordersSub=()=>{ u1(); u2(); }; watchingShift=x.id;
   } else {
-    watchingShift=null;
-    ordersSub=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<",Timestamp.fromDate(b)),orderBy("createdAt","desc")),
-      s=>{ orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err);
+    // the shifts opened on the chosen days, with all their orders; older orders (no shift) by their time
+    const ids=shiftsInView().map(y=>y.id); watchingShift="days:"+ids.join(",");
+    let byTime=[], tagged={};
+    const mix=()=>{ const m=new Map([...byTime.filter(o=>!o.shiftId),...Object.values(tagged).flat()].map(o=>[o.id,o]));
+      orders=[...m.values()].sort((p,q)=>(q.createdAt?.toMillis?.()??Infinity)-(p.createdAt?.toMillis?.()??Infinity)); render(); };
+    const us=[onSnapshot(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<",Timestamp.fromDate(b))), s=>{ byTime=s.docs.map(d=>({id:d.id,...d.data()})); mix(); }, err)];
+    for(let i=0;i<ids.length;i+=30){ const part=ids.slice(i,i+30), k=i;
+      us.push(onSnapshot(query(collection(db,"orders"),where("shiftId","in",part)), s=>{ tagged[k]=s.docs.map(d=>({id:d.id,...d.data()})); mix(); }, err)); }
+    ordersSub=()=>us.forEach(f=>f());
   }
   // pre-orders count as sales on the day they're delivered or picked up, which may be after they were ordered
   preSub?.(); preDone=[];
@@ -342,7 +354,7 @@ function render(force){
   // Every number here comes from salesBreakdown (common.js), from the same finished orders, so the two
   // tables always end on the same total. Tap a line to see its orders.
   const done=salesDone();
-  const [ra,rb]=rangeDates(), outs=allShifts.flatMap(x=>x.moves||[]).filter(m=>m.type==="out" && m.at>=ra.getTime() && m.at<rb.getTime());
+  const outs=shiftsInView().flatMap(x=>x.moves||[]).filter(m=>m.type==="out"); // pay outs of the shifts shown
   const bd=salesBreakdown(done, outs.reduce((t,m)=>t+(m.amount||0),0)), up=upcomingPre.filter(o=>o.paymentConfirmed);
   const ln=(label,count,amount,key,cls="")=>`<${key?`button type="button" data-kind="${key}"`:"div"} class="ln ${cls}"><span>${label}</span><span class="c">${count!=null?plural(count,"order"):""}</span><b>${amount}</b></${key?"button":"div"}>`;
   $("#summary").innerHTML=`<section class="sum"><h2>Sold through</h2>
