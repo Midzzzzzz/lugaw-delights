@@ -1584,12 +1584,13 @@ function renderShifts(){
     <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Sellers open a shift with the cash in the drawer and close it by counting the drawer. Tap a shift for its details.</p>
     ${pastPanel()}
     ${shiftsErr?`<div class="flag">${esc(shiftsErr)}</div>`:""}
-    <div class="tablewrap"><table class="orders"><thead><tr><th>Opened</th><th>Closed</th><th>Cashier</th><th class="n">Orders</th><th class="n">Total sales</th><th class="n">Expected cash</th><th class="n">Counted</th><th>Cash</th></tr></thead>
+    <div class="tablewrap"><table class="orders"><thead><tr><th>Opened</th><th>Closed</th><th>Cashier</th><th class="n">Orders</th><th class="n">Total sales</th><th class="n">GCash</th><th class="n">Foodpanda / Grab</th><th class="n">Expected cash</th><th class="n">Counted</th><th>Cash</th></tr></thead>
     <tbody>${shown.map(x=>`<tr class="row" data-shopen="${esc(x.id)}"><td>${t(x.openedAt)}</td><td>${x.closedAt?t(x.closedAt):`<span class="pill go">Open now</span>`}</td>
       <td>${esc(x.openedByName||"")}${x.closedByName&&x.closedByName!==x.openedByName?` → ${esc(x.closedByName)}`:""}</td>
       <td class="n">${x.overview?x.overview.count:x.summary?x.summary.orders:"—"}</td><td class="n">${x.overview?peso(x.overview.total):x.summary?peso(x.summary.sales):"—"}</td>
+      <td class="n">${x.overview?peso(x.overview.money.gcash):"—"}</td><td class="n">${x.overview?peso(x.overview.money.platform):"—"}</td>
       <td class="n">${x.summary?peso(x.summary.expected):"—"}</td><td class="n">${x.summary&&x.summary.counted!=null?peso(x.summary.counted):"—"}</td><td>${diffCell(x)}</td></tr>
-      ${shiftOpen===x.id?`<tr class="detail"><td colspan="8">${detail(x)}</td></tr>`:""}`).join("")||`<tr><td colspan="8" class="muted">No shifts yet. Sellers open one on the seller dashboard.</td></tr>`}</tbody></table></div></div>`;
+      ${shiftOpen===x.id?`<tr class="detail"><td colspan="10">${detail(x)}</td></tr>`:""}`).join("")||`<tr><td colspan="10" class="muted">No shifts yet. Sellers open one on the seller dashboard.</td></tr>`}</tbody></table></div></div>`;
 }
 // The cashier shift that was open at a time (for a sale added by hand), or none
 const shiftAt=d=>{ const t=d.getTime(); return allShifts.find(x=>!x.past && x.openedAt?.toMillis?.()<=t && t<=(x.closedAt?.toMillis?.()??Date.now())); };
