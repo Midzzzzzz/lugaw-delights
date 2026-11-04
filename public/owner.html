@@ -655,6 +655,23 @@ async function autoSave(){
       done.push(x.id); added=true;
     }
     if(added||!st.exists()) await setDoc(ref,{done:done.slice(-3000)});
+    // Keep the auto entries right: a shift's orders can change after it closed (a Foodpanda sale added
+    // from here, an order served or cancelled later). For the shifts of the last 45 days, the entry is
+    // worked out again and replaced when the amount changed. An entry the owner deleted stays deleted.
+    const since=Date.now()-45*86400000;
+    for(const x of everyShift){
+      const e=ledger.find(l=>l.id==="auto-shift-"+x.id), closed=x.closedAt?.toMillis?.();
+      if(!e || !closed || closed<since || !x.openedAt) continue;
+      const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((s,m)=>s+(m.amount||0),0);
+      const m=await moneyBetween(x,payOut), amount=Math.floor(m.total*AUTO_SAVE_PCT/100);
+      if(amount===e.amount || amount<=0) continue;
+      try{
+        await deleteDoc(doc(db,"ledger",e.id));
+        await setDoc(doc(db,"ledger",e.id),{type:"saving",amount,date:e.date,
+          note:`Auto ${AUTO_SAVE_PCT}% of shift ${t(x.openedAt)} – ${t(x.closedAt)}${x.closedByName?` (${x.closedByName})`:""}: ${peso(m.total)}`.slice(0,120),
+          createdAt:serverTimestamp(),createdBy:auth.currentUser.uid});
+      }catch(_){}
+    }
   }finally{ autoSaving=false; }
 }
 async function salesOn(day){
