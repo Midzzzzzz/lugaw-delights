@@ -135,7 +135,7 @@ import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, 
 
 const $=s=>document.querySelector(s);
 let ledger=[], ledgerErr="", agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], kitchen=[], riders=[], contacts={}, open=null, teamErr="";
-let range="today", tab="sales", filter="all", search="";
+let range="shift", pickedShift=null, tab="sales", filter="all", search="";
 setupAlerts();
 const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
 $("#setup").innerHTML=setupNotice();
@@ -203,7 +203,9 @@ function start(){
   }, x=>{ feesErr="Couldn't load the delivery fees: "+friendlyError(x); if(tab==="settings") render(); }));
   // Cashier shifts, newest first
   subs.push(onSnapshot(query(collection(db,"shifts"),orderBy("openedAt","desc"),limit(90)), s=>{
-    allShifts=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})); shiftsErr=""; shiftsLoaded=true; autoSave(); render();
+    allShifts=s.docs.map(d=>({id:d.id,...d.data({serverTimestamps:"estimate"})})); shiftsErr=""; shiftsLoaded=true; autoSave();
+    if(range==="shift" && (shiftNowOpen()?.id||null)!==watchingShift){ renderRanges(); watchOrders(); }
+    render();
   }, e=>{ shiftsErr="Couldn't load shifts: "+friendlyError(e)+""; if(tab==="shifts") render(); }));
   // The owner's menu (settings/menu) and inventory counts
   // Saved menu changes (recipes, prices) count right away, without a refresh
@@ -236,14 +238,18 @@ function start(){
 }
 
 // ---------- Date range ----------
-const RANGES=[["today","Today"],["yesterday","Yesterday"],["week","Last 7 days"],["month","This month"],["custom","Custom"]];
+const RANGES=[["shift","By shift"],["today","Today"],["yesterday","Yesterday"],["week","Last 7 days"],["month","This month"],["custom","Custom"]];
 const addDays=(d,n)=>{ const x=new Date(d); x.setDate(x.getDate()+n); return x; };
 // Start of the business day that d falls in (e.g. Oct 10, 5:00 AM for Oct 11, 12:30 AM)
 const dayStart=d=>{ const x=businessDate(d); x.setHours(DAY_START()); return x; };
 const dayAt=s=>{ const x=new Date(s+"T00:00"); x.setHours(DAY_START()); return x; }; // a picked date's business day
 const ymd=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+// "This shift": the shift open now (or the last one, once it's closed), from when it opened
+// "By shift": the shift picked in the list (pickedShift), else the one open now, else the last one
+const shiftNowOpen=()=>(pickedShift&&allShifts.find(x=>x.id===pickedShift))||allShifts.find(x=>!x.closedAt&&!x.past)||allShifts.find(x=>!x.past)||null;
 function rangeDates(){
   const t=dayStart(new Date());
+  if(range==="shift"){ const x=shiftNowOpen(); if(x?.openedAt) return [x.openedAt.toDate(), x.closedAt?new Date(x.closedAt.toMillis()+1):addDays(new Date(),1)]; }
   if(range==="yesterday") return [addDays(t,-1),t];
   if(range==="week") return [addDays(t,-6),addDays(t,1)];
   if(range==="month") return [new Date(t.getFullYear(),t.getMonth(),1,DAY_START()),addDays(t,1)];
@@ -257,25 +263,44 @@ function renderRanges(){
   const [a,b]=rangeDates();
   $("#ranges").innerHTML=RANGES.map(([k,l])=>`<button class="chip ${range===k?"on":""}" data-range="${k}">${l}</button>`).join("")
     + `<span class="custom" ${range==="custom"?"":"hidden"}><input type="date" id="from" value="${ymd(a)}" aria-label="From">
-       <span class="muted">to</span><input type="date" id="to" value="${ymd(addDays(b,-1))}" aria-label="To"></span>`;
+       <span class="muted">to</span><input type="date" id="to" value="${ymd(addDays(b,-1))}" aria-label="To"></span>`
+    + (range==="shift"?(()=>{ const x=shiftNowOpen(), t=v=>v?.toDate?.()?.toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"";
+        const list=allShifts.filter(y=>!y.past).slice(0,40);
+        return x?`<select id="pickShift" aria-label="Shift" style="width:auto;max-width:100%">${list.map(y=>`<option value="${esc(y.id)}"${y.id===x.id?" selected":""}>${esc(y.openedByName||"Shift")} · ${esc(t(y.openedAt))} – ${y.closedAt?esc(t(y.closedAt)):"now (open)"}</option>`).join("")}</select>
+          <span class="muted" style="font-size:.85rem">every order saved with this shift, whatever the time</span>`
+          :`<span class="muted" style="font-size:.88rem">No shift yet: showing today</span>`; })():"");
 }
 $("#ranges").addEventListener("click",e=>{ const b=e.target.closest("[data-range]"); if(!b) return; range=b.dataset.range; renderRanges(); watchOrders(); });
-$("#ranges").addEventListener("change",e=>{ if(e.target.matches("#from,#to")) watchOrders(); });
+$("#ranges").addEventListener("change",e=>{ if(e.target.matches("#from,#to")) watchOrders();
+  if(e.target.id==="pickShift"){ const open=allShifts.find(x=>!x.closedAt&&!x.past); pickedShift=e.target.value===open?.id?null:e.target.value; e.target.blur(); renderRanges(); watchOrders(); } });
 setInterval(()=>{ if(ordersSub && range==="today" && rangeDates()[0].getTime()!==watching) watchOrders(); }, 60000); // roll over at midnight
 
 // Live list of every order placed in the chosen range
 let watching=0;
 function watchOrders(){
   ordersSub?.(); const [a,b]=rangeDates(); watching=a.getTime(); open=null;
-  ordersSub=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<",Timestamp.fromDate(b)),orderBy("createdAt","desc")),
-    s=>{ orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); },
-    e=>{ $("#view").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; });
+  const err=e=>{ $("#view").innerHTML=`<p class="empty">${esc(friendlyError(e))}</p>`; };
+  const x=range==="shift"?shiftNowOpen():null;
+  if(x){
+    // This shift: every order saved with it, whatever its time, plus older orders (saved before
+    // orders carried their shift) made during its hours
+    let byTime=[], tagged=[];
+    const mix=()=>{ const m=new Map([...byTime.filter(o=>!o.shiftId||o.shiftId===x.id),...tagged].map(o=>[o.id,o]));
+      orders=[...m.values()].sort((p,q)=>(q.createdAt?.toMillis?.()??Infinity)-(p.createdAt?.toMillis?.()??Infinity)); render(); };
+    const u1=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<",Timestamp.fromDate(b))), s=>{ byTime=s.docs.map(d=>({id:d.id,...d.data()})); mix(); }, err);
+    const u2=onSnapshot(query(collection(db,"orders"),where("shiftId","==",x.id)), s=>{ tagged=s.docs.map(d=>({id:d.id,...d.data()})); mix(); }, err);
+    ordersSub=()=>{ u1(); u2(); }; watchingShift=x.id;
+  } else {
+    watchingShift=null;
+    ordersSub=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<",Timestamp.fromDate(b)),orderBy("createdAt","desc")),
+      s=>{ orders=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, err);
+  }
   // pre-orders count as sales on the day they're delivered or picked up, which may be after they were ordered
   preSub?.(); preDone=[];
   preSub=onSnapshot(query(collection(db,"orders"),where("preorder","==",true),where("deliverOn",">=",ymdOf(addDays(a,-1))),where("deliverOn","<=",ymdOf(b))),
     s=>{ preDone=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, ()=>{});
 }
-let preSub=null, preDone=[], upcomingPre=[];
+let preSub=null, preDone=[], upcomingPre=[], watchingShift=null;
 // The finished orders whose sale falls in the chosen range
 function salesDone(){
   const [a,b]=rangeDates(), inRange=o=>{ const t=saleAt(o)?.toMillis?.(); return t!=null && t>=a.getTime() && t<b.getTime(); };
