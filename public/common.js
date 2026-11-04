@@ -252,7 +252,8 @@ export function shiftSummary(shift, orders, now = Date.now()) {
   orders.forEach(o => {
     // sales added from the owner dashboard aren't in the drawer; a Foodpanda / Grab one filed under this
     // shift still counts in its Foodpanda / Grab sales
-    if (o.manual) { if (platformName(o) && o.status !== "cancelled" && ofShift(o)) { s.orders++; s.platformSales += o.total || 0; } return; }
+    // (one added without a shift, e.g. from an older owner app, goes by its time, like in the order lists)
+    if (o.manual) { if (platformName(o) && o.status !== "cancelled" && (ofShift(o) ?? inShift(ms(o.createdAt)))) { s.orders++; s.platformSales += o.total || 0; } return; }
     if (ofShift(o) === false) { // another shift's order: only cash a rider handed over during this one
       if (o.mode === "Delivery" && o.payment === "Cash" && o.cashReceived && inShift(ms(o.riderPaidAt) ?? ms(o.settledAt))) s.riderCash += shopAmount(o);
       return;

@@ -54,6 +54,7 @@ t("Armida's shift has hers, even though its clock time is in Teodora's", a2.orde
 const fp = { mode: "Dine-in", status: "completed", payment: "Foodpanda", source: "foodpanda", manual: true, total: 98, createdAt: at(9) };
 t("a Foodpanda sale the owner filed under a shift counts in its Foodpanda sales", shiftSummary(teo, [{ ...fp, shiftId: "teo" }]).platformSales === 98 && shiftSummary(arm, [{ ...fp, shiftId: "teo" }]).platformSales === 0);
 t("cash a rider hands over in the next shift goes in that drawer", shiftSummary(arm, [del({ payment: "Cash", shiftId: "teo", createdAt: at(12), cashReceived: true, riderPaidAt: at(15) })]).riderCash === 110);
+t("an owner-added Foodpanda sale with no shift counts in the shift of its time", shiftSummary(teo, [{ ...fp }]).platformSales === 98 && shiftSummary(arm, [{ ...fp }]).platformSales === 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
