@@ -760,14 +760,15 @@ function deliverySteps(o){
 function renderProfile(){
   if(!myProfile || !me) return;
   const p=myProfile, initials=String(p.name||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
-  // this shift's orders credited to this seller (not the calendar day)
-  const mine=orders.filter(o=>o.sellerUid===me.uid && thisShift(o,o.createdAt) && o.status!=="cancelled");
-  const sales=mine.filter(o=>["delivered","completed"].includes(o.status)).reduce((s,o)=>s+shopAmount(o),0);
+  // the whole shift: every order in it, whoever rang it up (also Foodpanda / Grab the owner added),
+  // the same total as the shift report: cash + GCash + Foodpanda / Grab + not paid yet
+  const sh=shift?shiftNow():null;
+  const count=sh?sh.orders:0, sales=sh?(sh.cashSales||0)+(sh.riderCash||0)+(sh.adjustIn||0)-(sh.adjustOut||0)+(sh.gcashSales||0)+(sh.platformSales||0)+(sh.unpaidCount?sh.unpaid||0:0):0;
   $("#profile").innerHTML=`<div class="avatar" aria-hidden="true">${esc(initials)}</div>
     <div class="pinfo"><div class="pname">${esc(p.name)} <span class="pill go">Seller</span></div>
       <div class="muted" style="font-size:.88rem">${esc(p.phone)} · ${esc(p.email||me.email||"")}${p.createdAt?.toDate?` · seller since ${p.createdAt.toDate().toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
       <div class="muted" style="font-size:.8rem">To change your details, ask the owner.</div></div>
-    <div class="pstats"><div><b>${mine.length}</b><span>My orders this shift</span></div><div><b>${peso(sales)}</b><span>My sales this shift</span></div></div>`;
+    <div class="pstats"><div><b>${count}</b><span>Orders this shift</span></div><div><b>${peso(sales)}</b><span>Sales this shift</span></div></div>`;
 }
 
 // Where to send a rider's earnings, from their rider profile
@@ -1197,6 +1198,7 @@ function shiftNow(sh=shift){
 }
 const typingInShift=()=>{ const a=document.activeElement; return !!a && a.tagName==="INPUT" && !!a.closest("#shiftCard"); };
 function renderShift(){
+  renderProfile(); // its orders and sales are the shift's
   const box=$("#shiftCard"); if(!box || typingInShift()) return;
   const msg=shiftMsg?`<p class="err" style="margin:6px 0 0">${esc(shiftMsg)}</p>`:"";
   if(lastClosed && !shift){
