@@ -240,7 +240,7 @@ function start(){
 // ---------- Date range ----------
 const RANGES=[["shift","By shift"],["today","Today"],["yesterday","Yesterday"],["week","Last 7 days"],["month","This month"],["custom","Custom"]];
 const addDays=(d,n)=>{ const x=new Date(d); x.setDate(x.getDate()+n); return x; };
-// Start of the business day that d falls in (e.g. Oct 10, 5:00 AM for Oct 11, 12:30 AM)
+// Start of the day that d falls in (midnight; dayStartHour in config.js)
 const dayStart=d=>{ const x=businessDate(d); x.setHours(DAY_START()); return x; };
 const dayAt=s=>{ const x=new Date(s+"T00:00"); x.setHours(DAY_START()); return x; }; // a picked date's business day
 const ymd=d=>d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");

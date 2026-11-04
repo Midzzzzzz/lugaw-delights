@@ -69,12 +69,12 @@ export function preorderWhen(o) {
   return d.toLocaleDateString("en-PH", { weekday: "long", month: "short", day: "numeric" }) + (t ? ", around " + t : "");
 }
 // When a paid, scheduled pre-order is sent to riders: 2 hours before the time the customer asked
-// for, or 8 AM on the delivery day (never before 5 AM, when the shop's day starts)
+// for, or 8 AM on the delivery day (never before the delivery day starts)
 export function preorderReleaseAt(o) {
   const day = o?.deliverOn ? new Date(o.deliverOn + "T00:00") : new Date((o?.createdAt?.toMillis?.() ?? Date.now()) + PREORDER_DAYS * 86400000);
   const [h, m] = (o?.deliverTime || "10:00").split(":").map(Number);
   day.setHours(h, m - 120, 0, 0);
-  const open = new Date(day); open.setHours(5, 0, 0, 0);
+  const open = o?.deliverOn ? new Date(o.deliverOn + "T00:00") : new Date(day.getFullYear(), day.getMonth(), day.getDate());
   return day < open ? open : day;
 }
 // An unpaid pre-order (no payment sent) is cancelled after this long, so it doesn't hold a day's order
@@ -445,9 +445,8 @@ export function fmtTime(ts) {
   const d = toDate(ts);
   return d ? d.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" }) : "just now";
 }
-// Business days start at SHOP.dayStartHour (5 AM by default), not midnight: an order at 12:30 AM
-// belongs to the day the late shift started. businessDate(d) = that day, at midnight.
-export const DAY_START = () => Number(SHOP.dayStartHour ?? 5);
+// Days start at SHOP.dayStartHour (0 = midnight, the calendar day). businessDate(d) = d's day, at midnight.
+export const DAY_START = () => Number(SHOP.dayStartHour ?? 0);
 export function businessDate(d) {
   const x = new Date(d.getTime() - DAY_START() * 3600000);
   return new Date(x.getFullYear(), x.getMonth(), x.getDate());
