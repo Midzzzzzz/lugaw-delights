@@ -147,7 +147,7 @@ setupAlerts();
 const $ = s => document.querySelector(s);
 let pastOrders=[], histAll=false; // My orders (finished orders of this phone)
 const cart = {};
-let storeOpen = true, user = null;
+let storeOpen = true, user = null, storeShiftId = null; // storeShiftId: the shift open now (settings/store)
 // Delivery fees per barangay, from the owner's settings (null until loaded, {} if not set up)
 let fees = null;
 const zone = ()=>$("#f-zone").value;
@@ -329,7 +329,7 @@ if(isConfigured){
     renderTrack();
   }, ()=>{});
   onSnapshot(doc(db,"settings","store"), s=>{
-    storeOpen = !s.exists() || s.data().open !== false;
+    storeOpen = !s.exists() || s.data().open !== false; storeShiftId = s.exists() ? s.data().shiftId || null : null;
     $("#closed").hidden = storeOpen; renderCart();
   }, ()=>{});
   onAuthStateChanged(auth, u=>{
@@ -701,7 +701,7 @@ $("#form").addEventListener("submit", async e=>{
     address: mode()==="Delivery"?`${address}, Brgy. ${z.name}, ${z.town}, Laguna`:"", notes, payment:pay(), items,
     ...(mode()==="Delivery"?{zone:z.id, zoneName:zoneLabel(z)}:{}),
     subtotal:t.subtotal, deliveryFee:t.deliveryFee, boxFee:t.boxFee, total:t.total,
-    status:preorderItems(items).length?"scheduled":"new", riderUid:null, createdAt:serverTimestamp(), ...(pin?{hasPin:true}:{}), ...(preorderItems(items).length?{preorder:true,deliverOn,...(deliverTime?{deliverTime}:{})}:{})
+    status:preorderItems(items).length?"scheduled":"new", riderUid:null, createdAt:serverTimestamp(), ...(storeShiftId?{shiftId:storeShiftId}:{}), ...(pin?{hasPin:true}:{}), ...(preorderItems(items).length?{preorder:true,deliverOn,...(deliverTime?{deliverTime}:{})}:{})
   });
   batch.set(doc(db,"contacts",ref.id),{ name, phone, customerUid:user.uid, createdAt:serverTimestamp() });
   batch.set(doc(db,"customers",user.uid),{ lastOrderAt:serverTimestamp(), lastOrderId:ref.id });

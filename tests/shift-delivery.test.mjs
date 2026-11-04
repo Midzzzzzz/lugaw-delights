@@ -43,5 +43,17 @@ s = shiftSummary(shift, [pre({ deliveredAt: at(14) }), { mode: "Dine-in", status
 t("pre-orders on their own line; dine-in, delivery and pre-orders add up to the total",
   s.preSales === 110 && s.preCount === 1 && s.dineSales === 78 && s.deliverySales === 110 && s.dineSales + s.deliverySales + s.preSales === s.sales);
 
+console.log("Orders belong to the shift they were punched in");
+const teo = { id: "teo", openedAt: at(8), closedAt: at(14), startCash: 0, moves: [] }, arm = { id: "arm", openedAt: at(14), closedAt: at(20), startCash: 0, moves: [] };
+const sale = over => ({ mode: "Dine-in", status: "completed", payment: "Cash", cashGiven: 100, total: 100, paidTotal: 100, ...over });
+// punched in Teodora's shift but saved a little after she closed (a slow phone), and one of Armida's at 1 PM by the clock
+const list = [sale({ shiftId: "teo", createdAt: at(15) }), sale({ shiftId: "arm", createdAt: at(13) }), sale({ createdAt: at(10) })];
+let a1 = shiftSummary(teo, list), a2 = shiftSummary(arm, list);
+t("Teodora's shift has her 2 orders (one saved after she closed; one older order by its time)", a1.orders === 2 && a1.sales === 200 && a1.cashSales === 200);
+t("Armida's shift has hers, even though its clock time is in Teodora's", a2.orders === 1 && a2.sales === 100 && a2.cashSales === 100);
+const fp = { mode: "Dine-in", status: "completed", payment: "Foodpanda", source: "foodpanda", manual: true, total: 98, createdAt: at(9) };
+t("a Foodpanda sale the owner filed under a shift counts in its Foodpanda sales", shiftSummary(teo, [{ ...fp, shiftId: "teo" }]).platformSales === 98 && shiftSummary(arm, [{ ...fp, shiftId: "teo" }]).platformSales === 0);
+t("cash a rider hands over in the next shift goes in that drawer", shiftSummary(arm, [del({ payment: "Cash", shiftId: "teo", createdAt: at(12), cashReceived: true, riderPaidAt: at(15) })]).riderCash === 110);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

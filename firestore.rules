@@ -44,6 +44,12 @@ service cloud.firestore {
     // Take-out box fee on an order (older orders have none)
     function boxOk(d) { return !('boxFee' in d) || amount(d.boxFee); }
     function amount(v) { return v is int && v >= 0 && v < 100000; }
+    // The shift open now (settings/store.shiftId): every order punched is saved with it, so a shift's
+    // orders are the ones recorded during it, whatever their time
+    function storeShift() {
+      return exists(/databases/$(database)/documents/settings/store) ? get(/databases/$(database)/documents/settings/store).data.get('shiftId', null) : null;
+    }
+    function shiftOk(d) { return !('shiftId' in d) || (d.shiftId is string && d.shiftId == storeShift()); }
     function storeOpen() {
       return !exists(/databases/$(database)/documents/settings/store) || get(/databases/$(database)/documents/settings/store).data.get('open', true) != false;
     }
@@ -77,8 +83,13 @@ service cloud.firestore {
       allow read: if true;
       allow write: if (isAdmin()
           && (!('cashMax' in request.resource.data) || (request.resource.data.cashMax is int && request.resource.data.cashMax >= 0)))
+        // (and which shift is open: the one this seller is opening, or none once it's closed)
         || (isSeller() && id == 'store'
-          && (resource == null ? request.resource.data.keys().hasOnly(['open']) : changed().hasOnly(['open'])))
+          && (resource == null ? request.resource.data.keys().hasOnly(['open', 'shiftId']) : changed().hasOnly(['open', 'shiftId']))
+          && (request.resource.data.get('shiftId', null) == null
+              || (request.resource.data.shiftId is string
+                  && existsAfter(/databases/$(database)/documents/shifts/$(request.resource.data.shiftId))
+                  && getAfter(/databases/$(database)/documents/shifts/$(request.resource.data.shiftId)).data.closedAt == null)))
         // Items sold out because an ingredient ran low: worked out on the seller dashboard from
         // the inventory count and the orders, published here for the customer page. The kitchen
         // publishes it too right after a refill, so refilled items are back on sale at once.
@@ -473,7 +484,8 @@ service cloud.firestore {
       function newOrder(d) {
         return d.keys().hasOnly(
              ['code','customerUid','mode','address','notes','payment','hasPin','zone','zoneName',
-              'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt','preorder','deliverOn','deliverTime'])
+              'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt','preorder','deliverOn','deliverTime','shiftId'])
+          && shiftOk(d)
           && d.customerUid == uid()
           // a pre-order waits as 'scheduled' (riders and the kitchen don't see it) until its delivery day
           && (d.status == 'new' || (d.status == 'scheduled' && d.get('preorder', false) == true))
@@ -512,7 +524,8 @@ service cloud.firestore {
       function dineIn(d) {
         return d.keys().hasOnly(
              ['code','customerUid','mode','table','notes','payment','cashGiven','paid','paidAt','gcashRef','paidTotal','sellerUid','sellerName',
-              'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt','source','platformRef'])
+              'items','subtotal','deliveryFee','boxFee','total','status','riderUid','createdAt','source','platformRef','shiftId'])
+          && shiftOk(d)
           && d.customerUid == uid()
           // paidTotal: the total the payment covered (changes after paying show a balance)
           && (!('paidTotal' in d) || ((('cashGiven' in d) || ('paid' in d)) && d.paidTotal == d.total))
@@ -545,7 +558,8 @@ service cloud.firestore {
       // It can be a Foodpanda or Grab order (source), paid by that platform like on the seller's screen.
       function manualSale(d) {
         return d.keys().hasOnly(['code','customerUid','mode','table','notes','payment','items','subtotal','deliveryFee','boxFee','total',
-              'status','riderUid','createdAt','manual','addedBy','addedAt','sellerUid','sellerName','cashGiven','paid','paidTotal','source','receipt','platformRef'])
+              'status','riderUid','createdAt','manual','addedBy','addedAt','sellerUid','sellerName','cashGiven','paid','paidTotal','source','receipt','platformRef','shiftId'])
+          && (!('shiftId' in d) || str(d.shiftId, 40)) // the owner files it under the shift it belongs to
           && (!('source' in d) || d.source in ['loyverse', 'foodpanda', 'grab']) && (!('receipt' in d) || str(d.receipt, 30))
           && ((d.get('source', '') in ['foodpanda', 'grab'] && platformOk(d))
               || (!(d.get('source', '') in ['foodpanda', 'grab']) && d.payment in ['Cash', 'GCash'] && !('platformRef' in d)))
@@ -638,6 +652,8 @@ service cloud.firestore {
             && (!changed().hasAny(['settledTotal']) || (resource.data.mode == 'Dine-in' && ('paidTotal' in resource.data)
                  && request.resource.data.settledTotal == resource.data.total))
             // (items, prices, box fees and the removal log only change through the dine-in change rule below)
+            // an order from an older customer app gets the open shift when a seller takes it on; never changed after
+            && (!changed().hasAny(['shiftId']) || (!('shiftId' in resource.data) && request.resource.data.shiftId == storeShift()))
             && !changed().hasAny(['code','customerUid','mode','items','subtotal','deliveryFee','boxFee','total','payment','createdAt','source','platformRef','preorder','deliverOn','deliverTime',
                                   'addedAt','removed','editedAt','editedBy','editedByName'])
             // the rider can only be taken off here (Send back to riders); giving an order to a rider is the assign rule below

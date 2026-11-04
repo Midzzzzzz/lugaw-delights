@@ -246,11 +246,22 @@ export function shiftSummary(shift, orders, now = Date.now()) {
   const inShift = t => t != null && t >= from && t < to + 1;
   const s = { orders: 0, sales: 0, dineSales: 0, deliverySales: 0, preSales: 0, preCount: 0, cashSales: 0, gcashSales: 0, platformSales: 0, riderCash: 0, adjustIn: 0, adjustOut: 0, unpaid: 0, unpaidCount: 0, cancelled: 0,
     payIn: 0, payOut: 0, startCash: shift.startCash || 0 };
+  // an order belongs to the shift it was punched in (shiftId); older orders without one, by their time.
+  // A pre-order counts where it was delivered or picked up (below).
+  const ofShift = o => o.shiftId && !o.preorder ? o.shiftId === shift.id : null;
   orders.forEach(o => {
-    if (o.manual) return;
+    // sales added from the owner dashboard aren't in the drawer; a Foodpanda / Grab one filed under this
+    // shift still counts in its Foodpanda / Grab sales
+    if (o.manual) { if (platformName(o) && o.status !== "cancelled" && ofShift(o)) { s.orders++; s.platformSales += o.total || 0; } return; }
+    if (ofShift(o) === false) { // another shift's order: only cash a rider handed over during this one
+      if (o.mode === "Delivery" && o.payment === "Cash" && o.cashReceived && inShift(ms(o.riderPaidAt) ?? ms(o.settledAt))) s.riderCash += shopAmount(o);
+      return;
+    }
+    const mine = ofShift(o) === true;
     // a pre-order counts in the shift it was delivered or picked up in (not when it was ordered and paid)
     if (o.preorder && o.status !== "cancelled" && !saleAt(o)) return;
-    const made = ms(o.preorder && o.status !== "cancelled" ? saleAt(o) : o.createdAt) ?? now;
+    const made0 = ms(o.preorder && o.status !== "cancelled" ? saleAt(o) : o.createdAt) ?? now;
+    const made = mine ? Math.max(from, Math.min(made0, to)) : made0; // this shift's order counts in it whatever its time
     if (o.status === "cancelled") { if (inShift(made)) s.cancelled++; return; }
     if (inShift(made)) { s.orders++; if (!platformName(o)) { s.sales += shopAmount(o); s[salesKind(o)] += shopAmount(o); if (o.preorder) s.preCount++; } } // Foodpanda / Grab: platformSales (paid out weekly)
     if (o.mode === "Delivery") {

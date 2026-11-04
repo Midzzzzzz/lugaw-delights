@@ -280,7 +280,7 @@ function start(){
   watchShift();
   // The store is open for online orders exactly while a shift is open
   subs.push(onSnapshot(doc(db,"settings","store"), s=>{
-    storeOpen=!s.exists()||s.data().open!==false;
+    storeOpen=!s.exists()||s.data().open!==false; storeShiftId=s.exists()?s.data().shiftId||null:null;
     $("#storeLabel").textContent=storeOpen?"Store open: taking orders":"Store closed: open a shift to start";
     $("#storeLabel").className="pill "+(storeOpen?"go":"off");
     syncStore();
@@ -408,11 +408,12 @@ function contactFor(id){
 // Store open = a shift is open. Opening and closing a shift open and close the store in the same
 // save; this also puts them back in step if they ever differ (for example from before shifts).
 let storeOpen=null, shiftLoaded=false, syncing=false;
+let storeShiftId=null; // the shift the store says is open (settings/store.shiftId)
 function syncStore(){
   if(storeOpen===null || !shiftLoaded || syncing) return;
-  const want=!!shift; if(want===storeOpen) return;
+  const want=!!shift; if(want===storeOpen && (storeShiftId||null)===(shift?.id||null)) return;
   syncing=true;
-  setDoc(doc(db,"settings","store"),{open:want},{merge:true}).catch(()=>{}).finally(()=>{ syncing=false; });
+  setDoc(doc(db,"settings","store"),{open:want,shiftId:shift?.id||null},{merge:true}).catch(()=>{}).finally(()=>{ syncing=false; });
 }
 
 // ---------- Dine-in orders (recorded at the counter) ----------
@@ -677,7 +678,8 @@ $("#dineForm").onsubmit=async e=>{
   const src=PLATFORMS[dinePay()]?dinePay():null, pref=$("#d-pref").value.trim().slice(0,30);
   const order={ code:orderCode(ref.id), customerUid:me.uid, sellerUid:me.uid, sellerName:myName, mode:"Dine-in",
     table:"", notes:"", payment:src?PLATFORMS[src]:dinePay(), items,
-    subtotal:t.subtotal, deliveryFee:0, boxFee:t.boxFee, total:t.total, status:"preparing", riderUid:null, createdAt:serverTimestamp() };
+    subtotal:t.subtotal, deliveryFee:0, boxFee:t.boxFee, total:t.total, status:"preparing", riderUid:null, createdAt:serverTimestamp(),
+    ...(shift?.id?{shiftId:shift.id}:{}) }; // this order belongs to the shift open now
   // Foodpanda / Grab: paid through the platform, at menu prices
   if(src) Object.assign(order,{source:src,paid:true,paidAt:serverTimestamp(),paidTotal:t.total,...(pref?{platformRef:pref}:{})});
   else if(given!==null) Object.assign(order,{cashGiven:given,paidTotal:t.total});
@@ -1160,7 +1162,7 @@ if(BT){
 // ---------- Cashier shift ----------
 // One shift at a time for the counter. Open it with the cash in the drawer; pay in / pay out
 // cash during the shift; close it by counting the drawer. Dine-in orders need an open shift.
-let shift=null, shiftOrders=[], shiftPre=[], stopShiftOrders=null, shiftForm="", shiftMsg="", shiftDraft={}, lastClosed=null;
+let shift=null, shiftOrders=[], shiftPre=[], shiftTagged=[], stopShiftOrders=null, shiftForm="", shiftMsg="", shiftDraft={}, lastClosed=null;
 const plural=(n,w)=>`${n} ${w}${n===1?"":"s"}`;
 const SHIFT_REASONS={in:["Change fund","Owner added cash"],out:["Bought supplies","Bought ice","Owner took cash","Paid rider"]};
 function watchShift(){
@@ -1170,13 +1172,14 @@ function watchShift(){
     if(shift?.id!==was){
       stopShiftOrders?.(); stopShiftOrders=null; shiftOrders=[]; shiftPre=[];
       if(shift?.openedAt){
+        const c=onSnapshot(query(collection(db,"orders"),where("shiftId","==",shift.id)), q=>{ shiftTagged=q.docs.map(d=>({id:d.id,...d.data()})); renderShift(); }, ()=>{});
         const a=onSnapshot(query(collection(db,"orders"),where("createdAt",">=",shift.openedAt)),
           q=>{ shiftOrders=q.docs.map(d=>({id:d.id,...d.data()})); renderShift(); }, ()=>{});
         // pre-orders ordered before the shift but delivered or picked up during it count in it
         const opened=shift.openedAt.toDate?.()||new Date();
         const b=onSnapshot(query(collection(db,"orders"),where("preorder","==",true),where("deliverOn",">=",ymdOf(new Date(opened.getTime()-86400000)))),
           q=>{ shiftPre=q.docs.map(d=>({id:d.id,...d.data()})); renderShift(); }, ()=>{});
-        stopShiftOrders=()=>{ a(); b(); };
+        stopShiftOrders=()=>{ a(); b(); c(); };
       }
     }
     renderShift();
@@ -1185,7 +1188,7 @@ function watchShift(){
 }
 // Orders for the summary: this shift's orders, plus deliveries whose cash came in during it
 function shiftNow(sh=shift){
-  const m=new Map(); [...orders,...shiftOrders,...shiftPre].forEach(o=>m.set(o.id,o));
+  const m=new Map(); [...orders,...shiftOrders,...shiftPre,...shiftTagged].forEach(o=>m.set(o.id,o));
   return shiftSummary(sh,[...m.values()]);
 }
 const typingInShift=()=>{ const a=document.activeElement; return !!a && a.tagName==="INPUT" && !!a.closest("#shiftCard"); };
@@ -1278,9 +1281,9 @@ $("#shiftCard").addEventListener("click",async e=>{
     if(shift){ return done(); } // someone else just opened one
     b.disabled=true;
     try{
-      const batch=writeBatch(db); // the shift and the store open together
-      batch.set(doc(collection(db,"shifts")),{openedAt:serverTimestamp(),openedBy:me.uid,openedByName:myName,startCash:n,moves:[],closedAt:null});
-      batch.set(doc(db,"settings","store"),{open:true},{merge:true});
+      const batch=writeBatch(db), sref=doc(collection(db,"shifts")); // the shift and the store open together
+      batch.set(sref,{openedAt:serverTimestamp(),openedBy:me.uid,openedByName:myName,startCash:n,moves:[],closedAt:null});
+      batch.set(doc(db,"settings","store"),{open:true,shiftId:sref.id},{merge:true}); // new orders are saved with this shift
       await batch.commit(); shiftDraft={}; lastClosed=null;
     }
     catch(x){ shiftMsg=friendlyError(x); b.disabled=false; }
@@ -1304,7 +1307,7 @@ $("#shiftCard").addEventListener("click",async e=>{
     try{
       const batch=writeBatch(db); // the shift, the store and the inventory count close together
       batch.update(doc(db,"shifts",shift.id),{closedAt:serverTimestamp(),closedBy:me.uid,closedByName:myName,countedCash:n,summary:s});
-      batch.set(doc(db,"settings","store"),{open:false},{merge:true});
+      batch.set(doc(db,"settings","store"),{open:false,shiftId:null},{merge:true});
       const refill=endCount(batch), refillRows=refillRowsNow();
       await batch.commit();
       lastClosed={...shift,closedAt:new Date(),closedByName:myName,summary:s,refillCount:refill,refillRows}; shiftForm=""; shiftDraft={};
@@ -1414,7 +1417,8 @@ $("#board").addEventListener("click", async e=>{
       b.replaceWith(box); return;
     }
     else if(set) await updateDoc(ref,{status:set,[set+"At"]:now,
-      ...(set==="preparing"?{sellerUid:me.uid,sellerName:myName}:{})}); // accepting credits the sale to this seller
+      ...(set==="preparing"?{sellerUid:me.uid,sellerName:myName}:{}),
+      ...(set==="preparing"&&storeShiftId&&!orders.find(x=>x.id===b.dataset.id)?.shiftId?{shiftId:storeShiftId}:{})}); // accepting credits the sale to this seller (and files it under the open shift)
   }catch(x){ b.disabled=false; b.textContent=friendlyError(x); }
 });
 </script>

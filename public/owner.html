@@ -560,13 +560,22 @@ let savMonth=todayStr().slice(0,7), salesHint={};
 // already handled, so an entry the owner deletes doesn't come back.
 const AUTO_SAVE_PCT=50;
 let ledgerLoaded=false, shiftsLoaded=false, autoSaving=false;
-async function moneyBetween(a,b,payOut){
-  const [q,p]=await Promise.all([
+// The orders of a shift: the ones saved with it when they were punched (shiftId), whatever their time.
+// Older orders, saved before shifts were recorded on orders, go by their time; a pre-order counts in
+// the shift it was delivered or picked up in.
+function inShiftOrders(x,list){
+  const a=x.openedAt?.toMillis?.(), b=x.closedAt?.toMillis?.()??Date.now(); if(a==null) return [];
+  const inside=t=>t!=null && t>=a && t<=b;
+  return list.filter(o=>o.preorder ? isDone(o)&&inside(saleAt(o)?.toMillis?.())
+    : (o.shiftId ? o.shiftId===x.id : inside(o.createdAt?.toMillis?.())) && (isDone(o)||(platformName(o)&&o.status!=="cancelled")));
+}
+async function moneyBetween(x,payOut){
+  const a=x.openedAt.toDate(), b=x.closedAt.toDate();
+  const [q,p,t]=await Promise.all([
     getDocs(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<=",Timestamp.fromDate(b)))),
-    getDocs(query(collection(db,"orders"),where("preorder","==",true),where("deliverOn",">=",ymdOf(addDays(a,-1))),where("deliverOn","<=",ymdOf(b))))]);
-  const inside=o=>{ const t=saleAt(o)?.toMillis?.(); return t!=null && t>=a.getTime() && t<=b.getTime(); };
-  const list=[...new Map([...q.docs,...p.docs].map(d=>[d.id,{id:d.id,...d.data()}])).values()]
-    .filter(o=>o.preorder ? isDone(o)&&inside(o) : isDone(o)||(platformName(o)&&o.status!=="cancelled"));
+    getDocs(query(collection(db,"orders"),where("preorder","==",true),where("deliverOn",">=",ymdOf(addDays(a,-1))),where("deliverOn","<=",ymdOf(b)))),
+    getDocs(query(collection(db,"orders"),where("shiftId","==",x.id)))]);
+  const list=inShiftOrders(x,[...new Map([...q.docs,...p.docs,...t.docs].map(d=>[d.id,{id:d.id,...d.data()}])).values()]);
   const bd=salesBreakdown(list,payOut);
   return { total:bd.total-bd.payOut, sales:bd.total, payOut };
 }
@@ -586,7 +595,7 @@ async function autoSave(){
       const closed=x.closedAt?.toMillis?.();
       if(!closed || !x.openedAt || done.includes(x.id)) continue;
       const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((s,m)=>s+(m.amount||0),0);
-      const m=await moneyBetween(x.openedAt.toDate(),x.closedAt.toDate(),payOut), amount=Math.floor(m.total*AUTO_SAVE_PCT/100);
+      const m=await moneyBetween(x,payOut), amount=Math.floor(m.total*AUTO_SAVE_PCT/100);
       if(amount>0){
         try{ await setDoc(doc(db,"ledger","auto-shift-"+x.id),{type:"saving",amount,date:ymd(businessDate(x.closedAt.toDate())),
           note:`Auto ${AUTO_SAVE_PCT}% of shift ${t(x.openedAt)} – ${t(x.closedAt)}${x.closedByName?` (${x.closedByName})`:""}: ${peso(m.total)}`.slice(0,120),
@@ -1330,6 +1339,7 @@ $("#view").addEventListener("click",async e=>{
       await saved(setDoc(ref,{code:orderCode(ref.id),customerUid:uid,sellerUid:uid,sellerName:"Owner",mode:saleMode(),table:"",notes:saleNotes.trim(),payment:pay,items,
         subtotal:t.subtotal,deliveryFee:t.deliveryFee,boxFee:t.boxFee,total:t.total,status:"completed",riderUid:null,createdAt:Timestamp.fromDate(when),
         manual:true,addedBy:uid,addedAt:serverTimestamp(),...(pay==="Cash"?{cashGiven:t.total}:{paid:true}),paidTotal:t.total,
+        ...(shiftAt(when)?{shiftId:shiftAt(when).id}:{}),
         ...(src?{source:src,...(ref0?{platformRef:ref0}:{})}:{})}));
       const [a,z]=rangeDates();
       saleOpen=false; delMsg=`Sale of ${peso(t.total)} saved for ${when.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})}.`+(when<a||when>=z?" Pick that date above to see it.":"");
@@ -1469,10 +1479,8 @@ function liveSummary(x){
 // e.g. Foodpanda), worked out with salesBreakdown like the dashboard's tables; its pay outs come off.
 function shiftOverview(x){
   if(!liveOrders) return null;
-  const a=x.openedAt?.toMillis?.(), b=x.closedAt?.toMillis?.()??Date.now(); if(a==null) return null;
-  const inside=t=>t!=null && t>=a && t<=b;
-  const list=liveOrders.filter(o=>o.preorder ? isDone(o)&&inside(saleAt(o)?.toMillis?.())
-    : inside(o.createdAt?.toMillis?.()) && (isDone(o)||(platformName(o)&&o.status!=="cancelled")));
+  if(x.openedAt?.toMillis?.()==null) return null;
+  const list=inShiftOrders(x,liveOrders);
   const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((t,m)=>t+(m.amount||0),0);
   return { ...salesBreakdown(list,payOut), byOwner:list.filter(o=>o.manual).length };
 }
@@ -1516,6 +1524,8 @@ function renderShifts(){
       <td class="n">${x.summary?peso(x.summary.expected):"—"}</td><td class="n">${x.summary&&x.summary.counted!=null?peso(x.summary.counted):"—"}</td><td>${diffCell(x)}</td></tr>
       ${shiftOpen===x.id?`<tr class="detail"><td colspan="8">${detail(x)}</td></tr>`:""}`).join("")||`<tr><td colspan="8" class="muted">No shifts yet. Sellers open one on the seller dashboard.</td></tr>`}</tbody></table></div></div>`;
 }
+// The cashier shift that was open at a time (for a sale added by hand), or none
+const shiftAt=d=>{ const t=d.getTime(); return allShifts.find(x=>!x.past && x.openedAt?.toMillis?.()<=t && t<=(x.closedAt?.toMillis?.()??Date.now())); };
 // ---------- Recording past shifts ----------
 // Before shifts were used: group the orders of a period into shifts wherever they stop for a few
 // hours (the store is open 24 hours, so not by calendar day). Saved shifts are marked "From
