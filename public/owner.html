@@ -348,8 +348,13 @@ $("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]");
 $("#summary").addEventListener("click",e=>{ const b=e.target.closest("[data-kind]"); if(!b) return; kindFilter=b.dataset.kind; tab="orders"; render(); $("#tabs").scrollIntoView({behavior:"smooth",block:"start"}); });
 // The orders behind a line of the summary (kindFilter), exactly the ones it counted
 let kindFilter=null;
+const kindLabel=k=>{ if(k.startsWith("shift:")){ const x=allShifts.find(y=>y.id===k.slice(6)), t=v=>v?.toDate?.()?.toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"now";
+    return x?`${x.openedByName?x.openedByName+"'s":"the"} shift, ${t(x.openedAt)} – ${x.closedAt?t(x.closedAt):"now"}`:"this shift"; }
+  return KIND_LABEL[k]||SALE_KINDS.find(([kk])=>kk===k)?.[1]||""; };
 const KIND_LABEL={all:"Total sales","m-cash":"Paid in cash","m-gcash":"Paid by GCash / QR","m-platform":"Foodpanda / Grab","m-unpaid":"Not paid yet"};
 function kindOrders(k){
+  // "shift:<id>": the orders a shift counted (Shifts tab), from all the orders loaded for the shifts
+  if(k.startsWith("shift:")){ const x=allShifts.find(y=>y.id===k.slice(6)); return x?inShiftOrders(x,liveOrders||orders):[]; }
   const done=salesDone();
   if(k==="all") return done;
   if(k.startsWith("m-")){ const m=k.slice(2); return done.filter(o=>salePayment(o)[m]>0); }
@@ -418,7 +423,7 @@ function renderOrders(){
   $("#view").innerHTML=(saleOpen?saleForm():"")+lvPreview()+`<div class="card" style="margin-top:12px">
     <div class="toolbar">${saleOpen?"":`<button class="btn small" data-sadd>+ Add a sale</button>`}${lvPlan?"":`<button class="btn ghost small" data-lvpick>Import from Loyverse</button>`}${FILTERS.map(([k,l])=>`<button class="chip ${filter===k?"on":""}" data-filter="${k}">${l}</button>`).join("")}
       <input class="search" type="search" id="search" placeholder="Search code, table, seller…" value="${esc(search)}" aria-label="Search orders"></div>
-    ${kindFilter?`<div class="flag" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span>Showing the orders counted in <b>${esc(KIND_LABEL[kindFilter]||SALE_KINDS.find(([k])=>k===kindFilter)?.[1]||"")}</b>: ${plural(list.length,"order")} · ${peso(list.reduce((t,o)=>t+(kindFilter.startsWith("m-")?salePayment(o)[kindFilter.slice(2)]:shopAmount(o)),0))}</span>
+    ${kindFilter?`<div class="flag" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span>Showing the orders counted in <b>${esc(kindLabel(kindFilter))}</b>: ${plural(list.length,"order")} · ${peso(list.reduce((t,o)=>t+(kindFilter.startsWith("m-")?salePayment(o)[kindFilter.slice(2)]:shopAmount(o)),0))}</span>
       <button class="btn ghost small" data-kindclear>Show all orders</button></div>`:""}
     ${delBar(shown)}
     <div class="tablewrap"><table class="orders"><thead><tr><th><input type="checkbox" data-pickall aria-label="Select all shown orders"${shown.length&&shown.every(o=>picked.has(o.id))?" checked":""}></th><th>Time</th><th>Code</th><th>Type</th><th>Seller</th><th>Rider</th><th>Status</th><th class="n">Total</th></tr></thead>
@@ -1511,7 +1516,7 @@ function renderShifts(){
             +r("Expected cash in drawer",peso(s.expected),true)+r("Counted",s.counted!=null?peso(s.counted):"—"); })()
         :r("Starting cash <small class=\"muted\">(not a sale)</small>",peso(x.startCash??0))+`<div class="muted">Still open: the drawer is counted when the seller closes the shift.</div>`}</div>
       ${(x.moves||[]).length?`<b style="display:block;margin-top:10px">Pay in / pay out</b><ul class="lines">${x.moves.map(m=>`<li><span class="q">${m.type==="in"?"In":"Out"}</span><span>${esc(m.note)} · ${esc(m.byName)} · ${new Date(m.at).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"})}</span><span class="amt">${peso(m.amount)}</span></li>`).join("")}</ul>`:""}
-      <div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-shdel="${esc(x.id)}">Delete shift</button></div>`; };
+      <div class="btnrow" style="margin-top:8px"><button class="btn small" data-shorders="${esc(x.id)}">See this shift's orders</button><button class="btn ghost small" data-shdel="${esc(x.id)}">Delete shift</button></div>`; };
   $("#view").innerHTML=`<div class="card" style="margin-top:12px">
     <h2 style="color:var(--brand-deep)">Shifts</h2>
     <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Sellers open a shift with the cash in the drawer and close it by counting the drawer. Tap a shift for its details.</p>
@@ -1614,6 +1619,7 @@ $("#view").addEventListener("click",async e=>{
       if(ids.length) await deleteOrders(ids);
       await deleteDoc(doc(db,"shifts",x.id)); shiftOpen=null;
     }catch(x){ d.disabled=false; d.textContent=friendlyError(x); } return; }
+  const so=e.target.closest("[data-shorders]"); if(so){ kindFilter="shift:"+so.dataset.shorders; tab="orders"; render(); $("#tabs").scrollIntoView({behavior:"smooth",block:"start"}); return; }
   const r=e.target.closest("[data-shopen]"); if(r){ shiftOpen=shiftOpen===r.dataset.shopen?null:r.dataset.shopen; render(); }
 });
 </script>
