@@ -451,6 +451,14 @@ function renderSales(done){
 }
 
 // ---------- Orders ----------
+// How an order was paid, the same way the Money table counts it
+function paidBy(o){
+  if(o.status==="cancelled") return `<span class="muted">—</span>`;
+  const p=salePayment(o), parts=[];
+  if(p.cash) parts.push("Cash"); if(p.gcash) parts.push("GCash / QR"); if(p.platform) parts.push(esc(o.payment||"Foodpanda / Grab"));
+  if(p.unpaid) parts.push(`<b style="color:var(--brand-deep)">Not paid${p.cash||p.gcash?` ${peso(p.unpaid)}`:""}</b>`);
+  return parts.join(" + ")||`<span class="muted">—</span>`;
+}
 const FILTERS=[["all","All"],["active","In progress"],["done","Completed"],["cancelled","Cancelled"]];
 function renderOrders(){
   const q=search.trim().toLowerCase();
@@ -463,17 +471,17 @@ function renderOrders(){
     ${kindFilter?`<div class="flag" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span>Showing the orders counted in <b>${esc(kindLabel(kindFilter))}</b>: ${plural(list.length,"order")} · ${peso(list.reduce((t,o)=>t+(kindFilter.startsWith("m-")?salePayment(o)[kindFilter.slice(2)]:shopAmount(o)),0))}</span>
       <button class="btn ghost small" data-kindclear>Show all orders</button></div>`:""}
     ${delBar(shown)}
-    <div class="tablewrap"><table class="orders"><thead><tr><th><input type="checkbox" data-pickall aria-label="Select all shown orders"${shown.length&&shown.every(o=>picked.has(o.id))?" checked":""}></th><th>Time</th><th>Code</th><th>Type</th><th>Seller</th><th>Rider</th><th>Status</th><th class="n">Total</th></tr></thead>
+    <div class="tablewrap"><table class="orders"><thead><tr><th><input type="checkbox" data-pickall aria-label="Select all shown orders"${shown.length&&shown.every(o=>picked.has(o.id))?" checked":""}></th><th>Time</th><th>Code</th><th>Type</th><th>Seller</th><th>Rider</th><th>Status</th><th>Paid by</th><th class="n">Total</th></tr></thead>
     <tbody>${shown.map(o=>`<tr class="row" data-open="${esc(o.id)}">
       <td><input type="checkbox" data-pick="${esc(o.id)}" aria-label="Select ${esc(o.code)}"${picked.has(o.id)?" checked":""}></td><td>${o.createdAt?.toDate?.().toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"})||"just now"}</td>
       <td><b>${esc(o.code)}</b></td><td>${esc(orderType(o))}${o.table?` · ${esc(o.table)}`:""}</td>
       <td>${o.sellerUid||o.sellerName?esc(sellerName(o)):`<span class="muted">—</span>`}</td>
       <td>${o.riderUid?esc(riderName(o)):`<span class="muted">—</span>`}</td>
       <td><span class="pill ${esc(STATUS[o.status]?.tone||"off")}">${esc(statusLabel(o))}</span>${o.manual?` <span class="pill">${o.source==="loyverse"?"From Loyverse":"Added by owner"}</span>`:""}</td>
-      <td class="n">${peso(o.total)}</td></tr>
-      ${open===o.id?`<tr class="detail"><td colspan="8">${detail(o)}
+      <td>${paidBy(o)}</td><td class="n">${peso(o.total)}</td></tr>
+      ${open===o.id?`<tr class="detail"><td colspan="9">${detail(o)}
         <div class="btnrow" style="margin-top:8px"><button class="btn ghost small" data-delone="${esc(o.id)}">Delete order</button></div></td></tr>`:""}`).join("")
-      || `<tr><td colspan="8" class="muted">No orders match.</td></tr>`}</tbody></table></div>
+      || `<tr><td colspan="9" class="muted">No orders match.</td></tr>`}</tbody></table></div>
     ${list.length>shown.length?`<p class="muted" style="font-size:.85rem">Showing the latest ${shown.length} of ${list.length}. Pick a shorter date range to see the rest.</p>`:""}
   </div>`;
 }

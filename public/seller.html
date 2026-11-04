@@ -760,13 +760,14 @@ function deliverySteps(o){
 function renderProfile(){
   if(!myProfile || !me) return;
   const p=myProfile, initials=String(p.name||"?").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
-  const mine=orders.filter(o=>o.sellerUid===me.uid && isToday(o.createdAt) && o.status!=="cancelled");
+  // this shift's orders credited to this seller (not the calendar day)
+  const mine=orders.filter(o=>o.sellerUid===me.uid && thisShift(o,o.createdAt) && o.status!=="cancelled");
   const sales=mine.filter(o=>["delivered","completed"].includes(o.status)).reduce((s,o)=>s+shopAmount(o),0);
   $("#profile").innerHTML=`<div class="avatar" aria-hidden="true">${esc(initials)}</div>
     <div class="pinfo"><div class="pname">${esc(p.name)} <span class="pill go">Seller</span></div>
       <div class="muted" style="font-size:.88rem">${esc(p.phone)} · ${esc(p.email||me.email||"")}${p.createdAt?.toDate?` · seller since ${p.createdAt.toDate().toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"})}`:""}</div>
       <div class="muted" style="font-size:.8rem">To change your details, ask the owner.</div></div>
-    <div class="pstats"><div><b>${mine.length}</b><span>My orders today</span></div><div><b>${peso(sales)}</b><span>My sales today</span></div></div>`;
+    <div class="pstats"><div><b>${mine.length}</b><span>My orders this shift</span></div><div><b>${peso(sales)}</b><span>My sales this shift</span></div></div>`;
 }
 
 // Where to send a rider's earnings, from their rider profile
@@ -1255,7 +1256,12 @@ const diffText=d=>d==null?"":d===0?`<span style="color:var(--ok)">Cash is exact<
 function shiftTable(s){
   const row=(l,v,b)=>`<div${b?' class="grand"':""}><span>${l}</span><span>${v}</span></div>`;
   return `<div class="totals" style="margin-top:8px;max-width:420px">
-    ${row("Starting cash",peso(s.startCash||0))}${row(`Expected cash in drawer <small class="muted">(incl. the ${peso(s.startCash||0)} starting cash)</small>`,peso(s.expected),true)}${row("Expected GCash",peso(s.gcashSales),true)}${row("Foodpanda / Grab sales",peso(s.platformSales||0))}<div class="muted" style="font-size:.8rem">Paid out weekly by the platforms, not in the drawer or GCash.</div>
+    ${row("Starting cash",peso(s.startCash||0))}
+    ${row("+ Cash sales",peso((s.cashSales||0)+(s.riderCash||0)+(s.adjustIn||0)-(s.adjustOut||0)))}
+    ${s.payIn?row("+ Pay in",peso(s.payIn)):""}${row("− Pay out",peso(s.payOut||0))}
+    ${row("Expected cash in drawer",peso(s.expected),true)}
+    ${row("Expected GCash",peso(s.gcashSales),true)}
+    ${s.unpaidCount?row(`Not paid yet (${s.unpaidCount})`,peso(s.unpaid)):""}${row("Foodpanda / Grab sales",peso(s.platformSales||0))}<div class="muted" style="font-size:.8rem">Paid out weekly by the platforms, not in the drawer or GCash.</div>
     ${s.counted!=null?row("Counted cash",peso(s.counted))+`<div>${diffText(s.counted-s.expected)}</div>`:""}</div>`;
 }
 $("#shiftCard").addEventListener("input",e=>{
