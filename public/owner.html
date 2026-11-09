@@ -750,13 +750,17 @@ function statementHTML(month){
     .head{display:flex;align-items:center;gap:12px;border-bottom:2px solid #000;padding-bottom:8px}.head img{width:56px;height:56px;object-fit:contain}
     h1{font-size:18px;margin:0}h2{font-size:15px;margin:14px 0 4px}.muted{color:#555}
     table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border-bottom:1px solid #ccc;padding:5px 6px;text-align:left;vertical-align:top}
-    th{background:#f2f2f2;font-size:11px;text-transform:uppercase}.n{text-align:right;white-space:nowrap}.tot td{font-weight:bold;border-top:2px solid #000}
+    th{background:#f2f2f2;font-size:11px;text-transform:uppercase}thead{display:table-header-group}tr{break-inside:avoid}
+    .pagehead th{background:none;text-transform:none;font-size:12px;font-weight:normal;padding:0 0 8px;border-bottom:0}.pagehead h2{text-transform:none}
+    .sumrow td{border-bottom:0;padding:4px 0 8px}.n{text-align:right;white-space:nowrap}.tot td{font-weight:bold;border-top:2px solid #000}
     .sum{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}.sum div{border:1px solid #ccc;border-radius:6px;padding:6px 8px}.sum b{display:block;font-size:14px}
     .noprint{text-align:center;margin-top:14px}.noprint button{font:inherit;padding:8px 14px}@media print{.noprint{display:none}}</style></head><body>
-    <div class="head"><img src="${location.origin}/logo.jpg" alt=""><div><h1>${esc(SHOP.name)}</h1><div>${esc(SHOP.receiptAddress||SHOP.pickupAddress||"")} · ${esc(SHOP.phone||"")}</div></div></div>
-    <h2>Savings statement</h2><div class="muted">Period: <b>${esc(period)}</b> · Printed ${esc(new Date().toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}</div>
-    <div class="sum"><div>Balance at start<b>${peso(opening)}</b></div><div>Money in (saved)<b>${peso(tin)}</b></div><div>Money out (expenses)<b>${peso(tout)}</b></div><div>Balance at end<b>${peso(opening+tin-tout)}</b></div></div>
-    <table><thead><tr><th>Date</th><th>Details</th><th class="n">Money in</th><th class="n">Money out</th><th class="n">Balance</th></tr></thead><tbody>
+    <!-- The header is in the table's head, so it prints again at the top of every page -->
+    <table><thead>
+      <tr class="pagehead"><th colspan="5"><div class="head"><img src="${location.origin}/logo.jpg" alt=""><div><h1>${esc(SHOP.name)}</h1><div>${esc(SHOP.receiptAddress||SHOP.pickupAddress||"")} · ${esc(SHOP.phone||"")}</div></div></div>
+        <h2>Savings statement</h2><div class="muted">Period: <b>${esc(period)}</b> · Printed ${esc(new Date().toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}</div></th></tr>
+      <tr><th>Date</th><th>Details</th><th class="n">Money in</th><th class="n">Money out</th><th class="n">Balance</th></tr></thead><tbody>
+      <tr class="sumrow"><td colspan="5"><div class="sum"><div>Balance at start<b>${peso(opening)}</b></div><div>Money in (saved)<b>${peso(tin)}</b></div><div>Money out (expenses)<b>${peso(tout)}</b></div><div>Balance at end<b>${peso(opening+tin-tout)}</b></div></div></td></tr>
       <tr><td></td><td><i>Balance at start</i></td><td></td><td></td><td class="n">${peso(opening)}</td></tr>
       ${rows.map(({e,bal})=>`<tr><td>${esc(d(e.date))}</td><td>${e.type==="saving"?"Saved":esc(e.category||"Expense")}${e.note?` · ${esc(stmtNote(e))}`:""}</td>
         <td class="n">${e.type==="saving"?peso(e.amount):""}</td><td class="n">${e.type==="expense"?peso(e.amount):""}</td><td class="n">${peso(bal)}</td></tr>`).join("")
