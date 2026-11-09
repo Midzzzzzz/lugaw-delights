@@ -758,7 +758,7 @@ function statementHTML(month){
     <div class="sum"><div>Balance at start<b>${peso(opening)}</b></div><div>Money in (saved)<b>${peso(tin)}</b></div><div>Money out (expenses)<b>${peso(tout)}</b></div><div>Balance at end<b>${peso(opening+tin-tout)}</b></div></div>
     <table><thead><tr><th>Date</th><th>Details</th><th class="n">Money in</th><th class="n">Money out</th><th class="n">Balance</th></tr></thead><tbody>
       <tr><td></td><td><i>Balance at start</i></td><td></td><td></td><td class="n">${peso(opening)}</td></tr>
-      ${rows.map(({e,bal})=>`<tr><td>${esc(d(e.date))}</td><td>${e.type==="saving"?"Saved":esc(e.category||"Expense")}${e.note?` · ${esc(e.note)}`:""}</td>
+      ${rows.map(({e,bal})=>`<tr><td>${esc(d(e.date))}</td><td>${e.type==="saving"?"Saved":esc(e.category||"Expense")}${e.note?` · ${esc(stmtNote(e))}`:""}</td>
         <td class="n">${e.type==="saving"?peso(e.amount):""}</td><td class="n">${e.type==="expense"?peso(e.amount):""}</td><td class="n">${peso(bal)}</td></tr>`).join("")
         ||`<tr><td colspan="5" class="muted">Nothing recorded in this period.</td></tr>`}
       <tr class="tot"><td></td><td>Totals · balance at end</td><td class="n">${peso(tin)}</td><td class="n">${peso(tout)}</td><td class="n">${peso(opening+tin-tout)}</td></tr>
@@ -766,6 +766,8 @@ function statementHTML(month){
     <div class="noprint"><button onclick="print()">Print</button> <button onclick="close()">Close</button></div>
     <script>addEventListener("load",()=>setTimeout(print,400))<\/script></body></html>`;
 }
+// An entry's note on the statement: the automatic ones without the seller's name ("… (Teodora): ₱4,621" -> "…: ₱4,621")
+const stmtNote=e=>e.id?.startsWith("auto-")?String(e.note||"").replace(/\s\([^()]*\)(?=:\s)/,""):e.note||"";
 // Opens the statement to print: the print screen in the app, a print window in a browser
 function printStatement(month){
   const html=statementHTML(month), name=`Savings statement ${month==="all"?"all":month}`;
