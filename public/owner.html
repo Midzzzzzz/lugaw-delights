@@ -720,7 +720,7 @@ function renderSavings(){
   <div class="card" style="margin-top:12px">
     <div class="toolbar" style="justify-content:space-between"><h2 style="color:var(--brand-deep);font-size:1.2rem">History</h2>
       <div class="btnrow"><select id="sv-month" aria-label="Month" style="width:auto">${months.map(m=>`<option value="${m}"${m===savMonth?" selected":""}>${mName(m)}</option>`).join("")}</select>
-        <button class="btn small" type="button" data-stmt="month">Print statement</button><button class="btn ghost small" type="button" data-stmt="all">Print all</button></div></div>
+        <button class="btn small" type="button" data-stmt="month">Print this month</button><button class="btn small" type="button" data-stmt="all">Print overall (since start)</button></div></div>
     <p style="margin:8px 0">${esc(mName(savMonth))}: saved <b>${peso(mSaved)}</b> · spent <b>${peso(mSpent)}</b> · net <b>${peso(mSaved-mSpent)}</b></p>
     <div class="tablewrap"><table class="orders"><thead><tr><th>Date</th><th>Type</th><th>Details</th><th class="n">Amount</th><th class="n">Balance</th><th></th></tr></thead>
     <tbody>${inMonth.map(e=>`<tr><td>${esc(new Date(e.date+"T00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric"}))}</td>
@@ -742,7 +742,8 @@ function statementHTML(month){
   const opening=all.filter(e=>!inP(e)&&(month==="all"||e.date<month+"-01")).reduce((t,e)=>t+sign(e),0);
   let bal=opening; const rows=all.filter(inP).map(e=>{ bal+=sign(e); return {e,bal}; });
   const tin=rows.filter(r=>r.e.type==="saving").reduce((t,r)=>t+r.e.amount,0), tout=rows.filter(r=>r.e.type==="expense").reduce((t,r)=>t+r.e.amount,0);
-  const period=month==="all"?"All entries":new Date(month+"-01T00:00").toLocaleDateString("en-PH",{month:"long",year:"numeric"});
+  const first=all[0]?.date, today=new Date().toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"});
+  const period=month==="all"?(first?`Overall, ${new Date(first+"T00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"})} – ${today}`:"Overall"):new Date(month+"-01T00:00").toLocaleDateString("en-PH",{month:"long",year:"numeric"});
   const d=x=>new Date(x+"T00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"});
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Savings statement - ${esc(period)}</title><style>
     @page{margin:14mm}body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#000;background:#fff;margin:16px auto;max-width:760px}
