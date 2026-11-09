@@ -719,7 +719,8 @@ function renderSavings(){
   </div>
   <div class="card" style="margin-top:12px">
     <div class="toolbar" style="justify-content:space-between"><h2 style="color:var(--brand-deep);font-size:1.2rem">History</h2>
-      <select id="sv-month" aria-label="Month" style="width:auto">${months.map(m=>`<option value="${m}"${m===savMonth?" selected":""}>${mName(m)}</option>`).join("")}</select></div>
+      <div class="btnrow"><select id="sv-month" aria-label="Month" style="width:auto">${months.map(m=>`<option value="${m}"${m===savMonth?" selected":""}>${mName(m)}</option>`).join("")}</select>
+        <button class="btn small" type="button" data-stmt="month">Print statement</button><button class="btn ghost small" type="button" data-stmt="all">Print all</button></div></div>
     <p style="margin:8px 0">${esc(mName(savMonth))}: saved <b>${peso(mSaved)}</b> · spent <b>${peso(mSpent)}</b> · net <b>${peso(mSaved-mSpent)}</b></p>
     <div class="tablewrap"><table class="orders"><thead><tr><th>Date</th><th>Type</th><th>Details</th><th class="n">Amount</th><th class="n">Balance</th><th></th></tr></thead>
     <tbody>${inMonth.map(e=>`<tr><td>${esc(new Date(e.date+"T00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric"}))}</td>
@@ -732,6 +733,47 @@ function renderSavings(){
   </div>`;
   showSalesHint();
 }
+// ---------- Savings statement (printable) ----------
+// Like a bank statement: the balance before the period, every saving (money in) and expense (money
+// out) in it with the balance after each, the totals, and the balance at the end.
+function statementHTML(month){
+  const all=[...ledger].sort((a,b)=>a.date===b.date?(a.createdAt?.toMillis?.()||0)-(b.createdAt?.toMillis?.()||0):(a.date<b.date?-1:1)); // oldest first
+  const inP=e=>month==="all"||monthOf(e.date)===month, sign=e=>e.type==="saving"?e.amount:-e.amount;
+  const opening=all.filter(e=>!inP(e)&&(month==="all"||e.date<month+"-01")).reduce((t,e)=>t+sign(e),0);
+  let bal=opening; const rows=all.filter(inP).map(e=>{ bal+=sign(e); return {e,bal}; });
+  const tin=rows.filter(r=>r.e.type==="saving").reduce((t,r)=>t+r.e.amount,0), tout=rows.filter(r=>r.e.type==="expense").reduce((t,r)=>t+r.e.amount,0);
+  const period=month==="all"?"All entries":new Date(month+"-01T00:00").toLocaleDateString("en-PH",{month:"long",year:"numeric"});
+  const d=x=>new Date(x+"T00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric",year:"numeric"});
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Savings statement - ${esc(period)}</title><style>
+    @page{margin:14mm}body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#000;background:#fff;margin:16px auto;max-width:760px}
+    .head{display:flex;align-items:center;gap:12px;border-bottom:2px solid #000;padding-bottom:8px}.head img{width:56px;height:56px;object-fit:contain}
+    h1{font-size:18px;margin:0}h2{font-size:15px;margin:14px 0 4px}.muted{color:#555}
+    table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border-bottom:1px solid #ccc;padding:5px 6px;text-align:left;vertical-align:top}
+    th{background:#f2f2f2;font-size:11px;text-transform:uppercase}.n{text-align:right;white-space:nowrap}.tot td{font-weight:bold;border-top:2px solid #000}
+    .sum{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}.sum div{border:1px solid #ccc;border-radius:6px;padding:6px 8px}.sum b{display:block;font-size:14px}
+    .noprint{text-align:center;margin-top:14px}.noprint button{font:inherit;padding:8px 14px}@media print{.noprint{display:none}}</style></head><body>
+    <div class="head"><img src="${location.origin}/logo.jpg" alt=""><div><h1>${esc(SHOP.name)}</h1><div>${esc(SHOP.receiptAddress||SHOP.pickupAddress||"")} · ${esc(SHOP.phone||"")}</div></div></div>
+    <h2>Savings statement</h2><div class="muted">Period: <b>${esc(period)}</b> · Printed ${esc(new Date().toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}</div>
+    <div class="sum"><div>Balance at start<b>${peso(opening)}</b></div><div>Money in (saved)<b>${peso(tin)}</b></div><div>Money out (expenses)<b>${peso(tout)}</b></div><div>Balance at end<b>${peso(opening+tin-tout)}</b></div></div>
+    <table><thead><tr><th>Date</th><th>Details</th><th class="n">Money in</th><th class="n">Money out</th><th class="n">Balance</th></tr></thead><tbody>
+      <tr><td></td><td><i>Balance at start</i></td><td></td><td></td><td class="n">${peso(opening)}</td></tr>
+      ${rows.map(({e,bal})=>`<tr><td>${esc(d(e.date))}</td><td>${e.type==="saving"?"Saved":esc(e.category||"Expense")}${e.note?` · ${esc(e.note)}`:""}</td>
+        <td class="n">${e.type==="saving"?peso(e.amount):""}</td><td class="n">${e.type==="expense"?peso(e.amount):""}</td><td class="n">${peso(bal)}</td></tr>`).join("")
+        ||`<tr><td colspan="5" class="muted">Nothing recorded in this period.</td></tr>`}
+      <tr class="tot"><td></td><td>Totals · balance at end</td><td class="n">${peso(tin)}</td><td class="n">${peso(tout)}</td><td class="n">${peso(opening+tin-tout)}</td></tr>
+    </tbody></table>
+    <div class="noprint"><button onclick="print()">Print</button> <button onclick="close()">Close</button></div>
+    <script>addEventListener("load",()=>setTimeout(print,400))<\/script></body></html>`;
+}
+// Opens the statement to print: the print screen in the app, a print window in a browser
+function printStatement(month){
+  const html=statementHTML(month), name=`Savings statement ${month==="all"?"all":month}`;
+  const p=window.Capacitor?.Plugins?.Printer?.printHtml?.({name,html:html.split("<script>")[0]+"</body></html>"});
+  if(p){ p.catch(()=>{}); return; }
+  const w=window.open("","_blank"); if(!w){ alert("Allow pop-ups to print the statement."); return; }
+  w.document.open(); w.document.write(html); w.document.close();
+}
+$("#view").addEventListener("click",e=>{ const b=e.target.closest("[data-stmt]"); if(b && tab==="savings") printStatement(b.dataset.stmt==="all"?"all":savMonth); });
 async function showSalesHint(){
   const day=$("#sv-date")?.value; if(!day) return;
   const hint=$("#sv-hint"); hint.textContent="Checking sales…";
