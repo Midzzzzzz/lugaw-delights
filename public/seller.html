@@ -1264,6 +1264,10 @@ function shiftTable(s){
     ${row("Expected cash in drawer",peso(s.expected),true)}
     ${row("Expected GCash",peso(s.gcashSales),true)}
     ${s.unpaidCount?row(`Not paid yet (${s.unpaidCount})`,peso(s.unpaid)):""}${row("Foodpanda / Grab sales",peso(s.platformSales||0))}<div class="muted" style="font-size:.8rem">Paid out weekly by the platforms, not in the drawer or GCash.</div>
+    ${(()=>{ // the same 50% the owner's Savings saves when the shift closes: half of all sales after pay out
+      const net=(s.cashSales||0)+(s.riderCash||0)+(s.adjustIn||0)-(s.adjustOut||0)+(s.gcashSales||0)+(s.platformSales||0)+(s.unpaid||0)-(s.payOut||0);
+      return row("Goes to savings (50%)",peso(Math.max(0,Math.floor(net*0.5))),true)
+        +`<div class="muted" style="font-size:.8rem">Half of ${peso(Math.max(0,net))} (all sales minus pay out). Saved to the owner's savings when the shift closes.</div>`; })()}
     ${s.counted!=null?row("Counted cash",peso(s.counted))+`<div>${diffText(s.counted-s.expected)}</div>`:""}</div>`;
 }
 $("#shiftCard").addEventListener("input",e=>{
