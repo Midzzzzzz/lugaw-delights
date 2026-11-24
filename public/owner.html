@@ -366,7 +366,7 @@ function render(force){
   const done=salesDone();
   const outs=shiftsInView().flatMap(x=>x.moves||[]).filter(m=>m.type==="out"); // pay outs of the shifts shown
   // a shift's short comes off the total (a pay out nobody recorded), its over is added (cash nobody rang up)
-  const recordedOut=outs.reduce((t,m)=>t+(m.amount||0),0), diffs=shiftsInView().map(cashDiffOf);
+  const recordedOut=outs.reduce((t,m)=>t+(m.amount||0),0), diffs=shiftsInView().map(x=>cashDiffFrom(x,orders));
   const overs=diffs.filter(d=>d>0).reduce((t,d)=>t+d,0), shorts=-diffs.filter(d=>d<0).reduce((t,d)=>t+d,0);
   const bd=salesBreakdown(done, recordedOut+shorts-overs), up=upcomingPre.filter(o=>o.paymentConfirmed);
   const ln=(label,count,amount,key,cls="")=>`<${key?`button type="button" data-kind="${key}"`:"div"} class="ln ${cls}"><span>${label}</span><span class="c">${count!=null?plural(count,"order"):""}</span><b>${amount}</b></${key?"button":"div"}>`;
@@ -635,13 +635,13 @@ function inShiftOrders(x,list){
   return list.filter(o=>o.preorder ? isDone(o)&&inside(saleAt(o)?.toMillis?.())
     : (o.shiftId ? o.shiftId===x.id : inside(o.createdAt?.toMillis?.())) && (isDone(o)||(platformName(o)&&o.status!=="cancelled")));
 }
-// A shift's cash over or short at closing (counted − expected on its closing report). Short: money taken
-// from the drawer without recording a pay out, so it comes off the money total; over: cash nobody rang
-// up, so it's added. In the Shifts tab x.saved is the closing report (x.summary is worked out again).
-function cashDiffOf(x){
-  const sv=x.saved??x.summary, counted=x.countedCash??sv?.counted, expected=sv?.expected;
-  if(x.past || !x.closedAt || counted==null || expected==null) return 0;
-  return Math.round(counted-expected);
+// A shift's cash over or short: counted − expected cash, the expected worked out from its orders (as the
+// Shifts tab's Cash column shows it). Short: money taken from the drawer without recording a pay out, so it
+// comes off the total; over: cash nobody rang up, so it's added. list: the orders around the shift.
+function cashDiffFrom(x,list){
+  const counted=x.countedCash??(x.saved??x.summary)?.counted;
+  if(x.past || !x.closedAt || counted==null || !list) return 0;
+  return Math.round(counted-shiftSummary(x,list).expected);
 }
 async function moneyBetween(x,payOut){
   const a=x.openedAt.toDate(), b=x.closedAt.toDate();
@@ -649,8 +649,8 @@ async function moneyBetween(x,payOut){
     getDocs(query(collection(db,"orders"),where("createdAt",">=",Timestamp.fromDate(a)),where("createdAt","<=",Timestamp.fromDate(b)))),
     getDocs(query(collection(db,"orders"),where("preorder","==",true),where("deliverOn",">=",ymdOf(addDays(a,-1))),where("deliverOn","<=",ymdOf(b)))),
     getDocs(query(collection(db,"orders"),where("shiftId","==",x.id)))]);
-  const list=inShiftOrders(x,[...new Map([...q.docs,...p.docs,...t.docs].map(d=>[d.id,{id:d.id,...d.data()}])).values()]);
-  const bd=salesBreakdown(list,payOut);
+  const all=[...new Map([...q.docs,...p.docs,...t.docs].map(d=>[d.id,{id:d.id,...d.data()}])).values()], list=inShiftOrders(x,all);
+  const bd=salesBreakdown(list,payOut-cashDiffFrom(x,all)); // a short adds to the pay out, an over takes off it
   return { total:bd.total-bd.payOut, sales:bd.total, payOut, platform:bd.money.platform, gcash:bd.money.gcash };
 }
 // Where a shift's savings come from: Foodpanda / Grab first, then GCash, and cash only for the rest
@@ -683,7 +683,7 @@ async function autoSave(){
     for(const x of everyShift){
       const closed=x.closedAt?.toMillis?.();
       if(!closed || !x.openedAt || done.includes(x.id)) continue;
-      const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((s,m)=>s+(m.amount||0),0)-cashDiffOf(x); // a short adds to the pay out, an over takes off it
+      const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((s,m)=>s+(m.amount||0),0);
       const m=await moneyBetween(x,payOut), amount=Math.floor(m.total*AUTO_SAVE_PCT/100);
       if(amount>0){
         try{ await setDoc(doc(db,"ledger","auto-shift-"+x.id),{type:"saving",amount,from:savedFrom(amount,m),date:ymd(businessDate(x.closedAt.toDate())),
@@ -705,7 +705,7 @@ async function autoSave(){
     for(const x of everyShift){
       const e=ledger.find(l=>l.id==="auto-shift-"+x.id), closed=x.closedAt?.toMillis?.();
       if(!e || !closed || !x.openedAt || (closed<since && e.from)) continue;
-      const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((s,m)=>s+(m.amount||0),0)-cashDiffOf(x); // a short adds to the pay out, an over takes off it
+      const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((s,m)=>s+(m.amount||0),0);
       const m=await moneyBetween(x,payOut);
       let amount=Math.floor(m.total*AUTO_SAVE_PCT/100);
       if(closed<since) amount=e.amount; // older than 45 days: the amount stays, only where it is is added
@@ -1917,8 +1917,9 @@ function renderShifts(){
             +r("Cash earned",peso(earned),true)
             +r("Starting cash <small class=\"muted\">(not a sale)</small>","+ "+peso(s.startCash))+(s.payIn?r("Pay in <small class=\"muted\">(not a sale)</small>","+ "+peso(s.payIn)):"")
             +r("Expected cash in drawer",peso(s.expected),true)+r("Counted",s.counted!=null?peso(s.counted):"—")
-            +(cashDiffOf(x)<0?r("Cash short <small class=\"muted\">(pay out not recorded: comes off the total)</small>","− "+peso(-cashDiffOf(x)))
-              :cashDiffOf(x)>0?r("Cash over <small class=\"muted\">(not rung up: added to the total)</small>","+ "+peso(cashDiffOf(x))):""); })()
+            +(()=>{ const d=s.counted!=null?Math.round(s.counted-s.expected):0;
+              return d<0?r("Cash short <small class=\"muted\">(pay out not recorded: comes off the total)</small>","− "+peso(-d))
+                :d>0?r("Cash over <small class=\"muted\">(not rung up: added to the total)</small>","+ "+peso(d)):""; })(); })()
         :r("Starting cash <small class=\"muted\">(not a sale)</small>",peso(x.startCash??0))+`<div class="muted">Still open: the drawer is counted when the seller closes the shift.</div>`}</div>
       ${(x.moves||[]).length?`<b style="display:block;margin-top:10px">Pay in / pay out</b><ul class="lines">${x.moves.map(m=>`<li><span class="q">${m.type==="in"?"In":"Out"}</span><span>${esc(m.note)} · ${esc(m.byName)} · ${new Date(m.at).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"})}</span><span class="amt">${peso(m.amount)}</span></li>`).join("")}</ul>`:""}
       <div class="btnrow" style="margin-top:8px"><button class="btn small" data-shorders="${esc(x.id)}">See this shift's orders</button><button class="btn ghost small" data-shdel="${esc(x.id)}">Delete shift</button></div>`; };
@@ -1927,14 +1928,17 @@ function renderShifts(){
     <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Sellers open a shift with the cash in the drawer and close it by counting the drawer. Tap a shift for its details.</p>
     ${pastPanel()}
     ${shiftsErr?`<div class="flag">${esc(shiftsErr)}</div>`:""}
-    <div class="tablewrap"><table class="orders"><thead><tr><th>Opened</th><th>Closed</th><th>Cashier</th><th class="n">Orders</th><th class="n">GCash</th><th class="n">Foodpanda / Grab</th><th class="n">Expected cash</th><th class="n">Total sales</th><th class="n">Pay out</th><th class="n">Counted</th><th>Cash</th></tr></thead>
+    <div class="tablewrap"><table class="orders"><thead><tr><th>Opened</th><th>Closed</th><th>Cashier</th><th class="n">Orders</th><th class="n">GCash</th><th class="n">Foodpanda / Grab</th><th class="n">Expected cash</th><th class="n">Sales</th><th class="n">Pay out</th><th class="n">Total sales <small class="muted">(after pay out)</small></th><th class="n">Counted</th><th>Cash</th><th class="n">Final sales</th></tr></thead>
     <tbody>${shown.map(x=>`<tr class="row" data-shopen="${esc(x.id)}"><td>${t(x.openedAt)}</td><td>${x.closedAt?t(x.closedAt):`<span class="pill go">Open now</span>`}</td>
       <td>${esc(x.openedByName||"")}${x.closedByName&&x.closedByName!==x.openedByName?` → ${esc(x.closedByName)}`:""}</td>
       <td class="n">${x.overview?x.overview.count:x.summary?x.summary.orders:"—"}</td>
       <td class="n">${x.overview?peso(x.overview.money.gcash):"—"}</td><td class="n">${x.overview?peso(x.overview.money.platform):"—"}</td>
-      <td class="n">${x.summary?peso(x.summary.expected):"—"}</td><td class="n">${x.overview?peso(x.overview.total):x.summary?peso(x.summary.sales):"—"}</td>
-      <td class="n">${(()=>{ const o=(x.moves||[]).filter(m=>m.type==="out").reduce((t,m)=>t+(m.amount||0),0); return o?"− "+peso(o):peso(0); })()}</td><td class="n">${x.summary&&x.summary.counted!=null?peso(x.summary.counted):"—"}</td><td>${diffCell(x)}</td></tr>
-      ${shiftOpen===x.id?`<tr class="detail"><td colspan="11">${detail(x)}</td></tr>`:""}`).join("")||`<tr><td colspan="11" class="muted">No shifts yet. Sellers open one on the seller dashboard.</td></tr>`}</tbody></table></div></div>`;
+      <td class="n">${x.summary?peso(x.summary.expected):"—"}</td>${(()=>{ // Sales − Pay out = Total sales; Total sales − short (or + over) = Final sales (what the 50% saving is from)
+        const sales=x.overview?x.overview.total:x.summary?x.summary.sales:null, out=(x.moves||[]).filter(m=>m.type==="out").reduce((t,m)=>t+(m.amount||0),0);
+        const sm=x.summary, d=!x.past&&sm&&sm.counted!=null?Math.round(sm.counted-sm.expected):0, total=sales==null?null:sales-out;
+        return `<td class="n">${sales==null?"—":peso(sales)}</td><td class="n">${out?"− "+peso(out):peso(0)}</td><td class="n">${total==null?"—":peso(total)}</td>
+          <td class="n">${sm&&sm.counted!=null?peso(sm.counted):"—"}</td><td>${diffCell(x)}</td><td class="n"><b>${total==null?"—":peso(total+d)}</b></td>`; })()}</tr>
+      ${shiftOpen===x.id?`<tr class="detail"><td colspan="13">${detail(x)}</td></tr>`:""}`).join("")||`<tr><td colspan="13" class="muted">No shifts yet. Sellers open one on the seller dashboard.</td></tr>`}</tbody></table></div></div>`;
 }
 // The cashier shift that was open at a time (for a sale added by hand), or none
 const shiftAt=d=>{ const t=d.getTime(); return allShifts.find(x=>!x.past && x.openedAt?.toMillis?.()<=t && t<=(x.closedAt?.toMillis?.()??Date.now())); };
