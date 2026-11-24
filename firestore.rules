@@ -422,6 +422,17 @@ service cloud.firestore {
 
     // Savings book: money the owner sets aside from sales, and expenses paid from it.
     // Owner only. Entries are added or deleted, never edited.
+    // Where the savings are, corrected by the owner (owner.html → Savings → Correct the amounts):
+    // how much to add to each of Foodpanda / Grab, GCash and cash (adding up to 0, so the balance stays)
+    match /savingsSplit/{id} {
+      allow read: if isAdmin();
+      allow write: if isAdmin() && id == 'offset'
+        && request.resource.data.keys().hasOnly(['platform','gcash','cash','at','by'])
+        && request.resource.data.platform is int && request.resource.data.gcash is int && request.resource.data.cash is int
+        && request.resource.data.platform + request.resource.data.gcash + request.resource.data.cash == 0
+        && request.resource.data.at == request.time && request.resource.data.by == uid();
+    }
+
     match /ledger/{entryId} {
       allow read, delete: if isAdmin();
       allow create: if isAdmin()
