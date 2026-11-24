@@ -134,7 +134,7 @@ import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
 const $=s=>document.querySelector(s);
-let crew=[], duties=[], attErr="", attMsg="", attPeriod=null; // staff attendance (see "Staff attendance & pay")
+let crew=[], duties=[], attErr="", attMsg="", attPeriod=null, attStaff=""; // staff attendance (see "Staff attendance & pay")
 let ledger=[], ledgerErr="", agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], kitchen=[], riders=[], contacts={}, open=null, teamErr="";
 let range="shift", pickedShift=null, tab="sales", filter="all", search="";
 setupAlerts();
@@ -805,7 +805,10 @@ const sameDate=(a,b)=>a!=null&&b!=null&&new Date(a).toDateString()===new Date(b)
 const hmOf=t=>t==null?"":new Date(t).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"});
 function renderAttendance(){
   const ps=payPeriods(), p=ps.find(x=>x.key===attPeriod)||ps[0]; attPeriod=p.key;
-  const inP=duties.filter(d=>{ const t=dms(d.inAt)??Date.now(); return t>=p.from && t<p.to; }).sort((a,b)=>(dms(b.inAt)??Infinity)-(dms(a.inAt)??Infinity));
+  // the staff filter: one staff member's duties and pay only ("" = everyone)
+  const staffOpts=[...new Map([...crew.map(c=>[c.id,c.name]),...duties.map(d=>[d.crewId,d.name])]).entries()].map(([id,name])=>({id,name:crew.find(c=>c.id===id)?.name||name})).sort((a,b)=>a.name.localeCompare(b.name));
+  if(attStaff && !staffOpts.some(o=>o.id===attStaff)) attStaff="";
+  const inP=duties.filter(d=>{ const t=dms(d.inAt)??Date.now(); return t>=p.from && t<p.to && (!attStaff || d.crewId===attStaff); }).sort((a,b)=>(dms(b.inAt)??Infinity)-(dms(a.inAt)??Infinity));
   const by=new Map();
   inP.forEach(d=>{ const g=by.get(d.crewId)||{id:d.crewId,name:crew.find(c=>c.id===d.crewId)?.name||d.name,count:0,pay:0,paid:0}; g.count++; g.pay+=d.rate||0; if(d.paidAt) g.paid+=d.rate||0; by.set(d.crewId,g); });
   const groups=[...by.values()].sort((a,b)=>a.name.localeCompare(b.name));
@@ -832,7 +835,8 @@ function renderAttendance(){
   </div>
   <div class="card" style="margin-top:12px">
     <div class="toolbar" style="justify-content:space-between"><h2 style="color:var(--brand-deep);font-size:1.2rem">Pay</h2>
-      <select id="att-period" aria-label="Pay period" style="width:auto">${ps.map(x=>`<option value="${x.key}"${x.key===p.key?" selected":""}>${esc(x.label)}</option>`).join("")}</select></div>
+      <div class="btnrow"><select id="att-staff" aria-label="Show staff" style="width:auto"><option value="">All staff</option>${staffOpts.map(o=>`<option value="${esc(o.id)}"${o.id===attStaff?" selected":""}>${esc(o.name)}</option>`).join("")}</select>
+        <select id="att-period" aria-label="Pay period" style="width:auto">${ps.map(x=>`<option value="${x.key}"${x.key===p.key?" selected":""}>${esc(x.label)}</option>`).join("")}</select></div></div>
     <div class="stats" style="margin-top:8px">
       <div class="stat"><b>${tot.count}</b><span>Duties</span></div>
       <div class="stat"><b>${peso(tot.pay)}</b><span>Total pay</span></div>
@@ -842,12 +846,12 @@ function renderAttendance(){
     <div class="tablewrap"><table class="orders"><thead><tr><th>Staff</th><th class="n">Duties</th><th class="n">Pay</th><th class="n">Still to pay</th><th></th></tr></thead><tbody>
     ${groups.map(g=>`<tr><td><b>${esc(g.name)}</b></td><td class="n">${g.count}</td><td class="n">${peso(g.pay)}</td><td class="n">${peso(g.pay-g.paid)}</td>
       <td>${g.pay-g.paid>0?`<button class="btn small" type="button" data-att-pay="${esc(g.id)}">Mark paid</button>`:`<span class="pill go">Paid</span>`}</td></tr>`).join("")
-      ||`<tr><td colspan="5" class="muted">No duties in ${esc(p.label)}.</td></tr>`}</tbody></table></div>
+      ||`<tr><td colspan="5" class="muted">No duties in ${esc(p.label)}${attStaff?" for this staff member":""}.</td></tr>`}</tbody></table></div>
     ${crew.length?`<form id="dutyForm" novalidate style="margin-top:14px;display:grid;gap:8px;border-top:2px dashed var(--line);padding-top:10px">
       <h3 style="margin:0">Record a duty</h3>
       <p class="muted" style="margin:0;font-size:.85rem">For a past day, or a duty nobody scanned. It's added to the pay of its period. Fill in <b>To date</b> to record one duty for every day from Date to To date.</p>
       <div class="btnrow" style="align-items:end">
-        <label class="f" for="du-crew">Staff<select id="du-crew" style="width:auto">${crew.map(c=>`<option value="${esc(c.id)}">${esc(c.name)} (${peso(c.rate)})</option>`).join("")}</select></label>
+        <label class="f" for="du-crew">Staff<select id="du-crew" style="width:auto">${crew.map(c=>`<option value="${esc(c.id)}"${c.id===attStaff?" selected":""}>${esc(c.name)} (${peso(c.rate)})</option>`).join("")}</select></label>
         <label class="f" for="du-date">Date<input type="date" id="du-date" value="${todayStr()}" max="${todayStr()}"></label>
         <label class="f" for="du-to">To date <small class="muted">(optional)</small><input type="date" id="du-to" max="${todayStr()}"></label>
         <label class="f" for="du-in">Time in<input type="time" id="du-in" value="05:00"></label>
@@ -856,7 +860,7 @@ function renderAttendance(){
         <button class="btn" type="submit">Record duty</button></div>
       <div class="btnrow" style="font-size:.9rem;align-items:center"><span class="muted">Days off (skipped when recording several days):</span>
         ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" name="du-off" value="${i}">${d}</label>`).join("")}</div></form>`:""}
-    <h3 style="margin:14px 0 6px">Duties in ${esc(p.label)}</h3>
+    <h3 style="margin:14px 0 6px">Duties in ${esc(p.label)}${attStaff?` · ${esc(staffOpts.find(o=>o.id===attStaff)?.name||"")}`:""}</h3>
     <div class="tablewrap"><table class="orders"><thead><tr><th>Date</th><th>Staff</th><th>Time in</th><th>Time out</th><th class="n">Hours</th><th class="n">Pay</th><th></th></tr></thead><tbody>
     ${inP.map(d=>{ const a=dms(d.inAt), b=dms(d.outAt);
       return `<tr><td>${a?esc(new Date(a).toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"})):""}</td><td>${esc(d.name)}</td><td>${esc(hmOf(a))}</td>
@@ -886,7 +890,10 @@ async function printCards(list){
   const w=window.open("","_blank"); if(!w){ attMsg="Allow pop-ups to print the cards."; return render(true); }
   w.document.open(); w.document.write(html); w.document.close();
 }
-$("#view").addEventListener("change",e=>{ if(e.target.id==="att-period"){ attPeriod=e.target.value; document.activeElement?.blur(); render(true); } });
+$("#view").addEventListener("change",e=>{
+  if(e.target.id==="att-period"){ attPeriod=e.target.value; document.activeElement?.blur(); render(true); }
+  if(e.target.id==="att-staff"){ attStaff=e.target.value; document.activeElement?.blur(); render(true); }
+});
 $("#view").addEventListener("submit",async e=>{
   const f=e.target;
   if(f.id==="crewForm"){
