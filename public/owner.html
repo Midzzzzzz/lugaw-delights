@@ -845,14 +845,17 @@ function renderAttendance(){
       ||`<tr><td colspan="5" class="muted">No duties in ${esc(p.label)}.</td></tr>`}</tbody></table></div>
     ${crew.length?`<form id="dutyForm" novalidate style="margin-top:14px;display:grid;gap:8px;border-top:2px dashed var(--line);padding-top:10px">
       <h3 style="margin:0">Record a duty</h3>
-      <p class="muted" style="margin:0;font-size:.85rem">For a past day, or a duty nobody scanned. It's added to the pay of its period.</p>
+      <p class="muted" style="margin:0;font-size:.85rem">For a past day, or a duty nobody scanned. It's added to the pay of its period. Fill in <b>To date</b> to record one duty for every day from Date to To date.</p>
       <div class="btnrow" style="align-items:end">
         <label class="f" for="du-crew">Staff<select id="du-crew" style="width:auto">${crew.map(c=>`<option value="${esc(c.id)}">${esc(c.name)} (${peso(c.rate)})</option>`).join("")}</select></label>
         <label class="f" for="du-date">Date<input type="date" id="du-date" value="${todayStr()}" max="${todayStr()}"></label>
-        <label class="f" for="du-in">Time in<input type="time" id="du-in" value="08:00"></label>
+        <label class="f" for="du-to">To date <small class="muted">(optional)</small><input type="date" id="du-to" max="${todayStr()}"></label>
+        <label class="f" for="du-in">Time in<input type="time" id="du-in" value="05:00"></label>
         <label class="f" for="du-out">Time out <small class="muted">(optional)</small><input type="time" id="du-out" value="17:00"></label>
         <label class="f" for="du-rate">Pay (₱) <small class="muted">(blank: their pay)</small><input type="number" id="du-rate" inputmode="numeric" min="0" step="1" style="width:120px"></label>
-        <button class="btn" type="submit">Record duty</button></div></form>`:""}
+        <button class="btn" type="submit">Record duty</button></div>
+      <div class="btnrow" style="font-size:.9rem;align-items:center"><span class="muted">Days off (skipped when recording several days):</span>
+        ${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>`<label style="display:inline-flex;gap:4px;align-items:center"><input type="checkbox" name="du-off" value="${i}">${d}</label>`).join("")}</div></form>`:""}
     <h3 style="margin:14px 0 6px">Duties in ${esc(p.label)}</h3>
     <div class="tablewrap"><table class="orders"><thead><tr><th>Date</th><th>Staff</th><th>Time in</th><th>Time out</th><th class="n">Hours</th><th class="n">Pay</th><th></th></tr></thead><tbody>
     ${inP.map(d=>{ const a=dms(d.inAt), b=dms(d.outAt);
@@ -901,15 +904,43 @@ $("#view").addEventListener("submit",async e=>{
     if(!date||!tin){ attMsg="Pick the date and the time in."; return render(true); }
     const rate=rv===""?c.rate:Math.floor(Number(rv));
     if(!(rate>=0&&rate<100000)){ attMsg="Type the pay in pesos."; return render(true); }
-    const a=new Date(date+"T"+tin);
-    let b=tout?new Date(date+"T"+tout):null; if(b && b<=a) b=new Date(+b+86400000); // past midnight: the next day
-    if(a>new Date()||(b&&b>new Date())){ attMsg="The time in and time out can't be later than now."; return render(true); }
-    const dup=duties.find(d=>d.crewId===c.id && sameDate(dms(d.inAt),+a));
-    if(dup && !confirm(`${c.name} already has a duty on ${a.toLocaleDateString("en-PH",{month:"short",day:"numeric"})} (time in ${hmOf(dms(dup.inAt))}). Record another one? It's paid as another duty.`)) return;
+    const to=$("#du-to").value, off=[...f.querySelectorAll('[name="du-off"]:checked')].map(x=>+x.value);
+    // one duty per day: time out before time in means past midnight (the next day)
+    const dutyOn=day=>{ const a=new Date(day+"T"+tin); let b=tout?new Date(day+"T"+tout):null; if(b && b<=a) b=new Date(+b+86400000); return {a,b}; };
+    const rec=({a,b})=>({crewId:c.id,name:c.name,rate,inAt:Timestamp.fromDate(a),outAt:b?Timestamp.fromDate(b):null,
+      inBy:auth.currentUser.uid,inByName:"Owner",...(b?{outBy:auth.currentUser.uid,outByName:"Owner"}:{}),byOwner:true});
+    const hasDuty=a=>duties.some(d=>d.crewId===c.id && sameDate(dms(d.inAt),+a));
+    const short=d=>d.toLocaleDateString("en-PH",{month:"short",day:"numeric"});
+    let list=[], note="";
+    if(!to || to===date){
+      const x=dutyOn(date);
+      if(x.a>new Date()||(x.b&&x.b>new Date())){ attMsg="The time in and time out can't be later than now."; return render(true); }
+      const dup=duties.find(d=>d.crewId===c.id && sameDate(dms(d.inAt),+x.a));
+      if(dup && !confirm(`${c.name} already has a duty on ${short(x.a)} (time in ${hmOf(dms(dup.inAt))}). Record another one? It's paid as another duty.`)) return;
+      list=[x];
+    } else {
+      if(to<date){ attMsg="To date must be after Date."; return render(true); }
+      const days=[]; for(let d=new Date(date+"T00:00"); ymd(d)<=to; d=new Date(d.getFullYear(),d.getMonth(),d.getDate()+1)) days.push(ymd(d));
+      if(days.length>62){ attMsg="Record at most 62 days at a time."; return render(true); }
+      let skipOff=0, skipHad=0, noOut=0;
+      for(const day of days){
+        const x=dutyOn(day);
+        if(off.includes(x.a.getDay())){ skipOff++; continue; }
+        if(hasDuty(x.a)){ skipHad++; continue; } // already has a duty that day (scanned or recorded)
+        if(x.a>new Date()) continue; // today, not started yet
+        if(x.b && x.b>new Date()){ x.b=null; noOut++; } // today, not finished yet: no time out
+        list.push(x);
+      }
+      if(!list.length){ attMsg=`Nothing to record: every day from ${esc(short(new Date(date+"T00:00")))} to ${esc(short(new Date(to+"T00:00")))} is a day off or already has a duty.`; return render(true); }
+      note=[skipOff?`${skipOff} day${skipOff===1?"":"s"} off skipped`:"",skipHad?`${skipHad} day${skipHad===1?" that already has":"s that already have"} a duty skipped`:"",noOut?"today without a time out (not finished yet)":""].filter(Boolean).join(", ");
+      if(!confirm(`Record ${list.length} dut${list.length===1?"y":"ies"} for ${c.name} (${short(list[0].a)} – ${short(list[list.length-1].a)}), ${tin}${tout?"–"+tout:""}, ${peso(rate)} each = ${peso(rate*list.length)}?${note?`
+
+${note[0].toUpperCase()+note.slice(1)}.`:""}`)) return;
+    }
     try{
-      await setDoc(doc(collection(db,"attendance")),{crewId:c.id,name:c.name,rate,inAt:Timestamp.fromDate(a),outAt:b?Timestamp.fromDate(b):null,
-        inBy:auth.currentUser.uid,inByName:"Owner",...(b?{outBy:auth.currentUser.uid,outByName:"Owner"}:{}),byOwner:true});
-      attMsg=""; attPeriod=halfMonth(a).key; document.activeElement?.blur(); render(true); // show the period it went to
+      for(let i=0;i<list.length;i+=50){ const bt=writeBatch(db); list.slice(i,i+50).forEach(x=>bt.set(doc(collection(db,"attendance")),rec(x))); await bt.commit(); }
+      attMsg=list.length>1?`Recorded ${list.length} duties for ${esc(c.name)}${note?` (${esc(note)})`:""}.`:"";
+      attPeriod=halfMonth(list[list.length-1].a).key; document.activeElement?.blur(); render(true); // show the period of the last one
     }catch(x){ attMsg="Couldn't record: "+esc(friendlyError(x)); render(true); }
   }
   if(f.dataset.rateform){
