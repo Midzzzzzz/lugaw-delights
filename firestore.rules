@@ -476,7 +476,9 @@ service cloud.firestore {
           && request.resource.data.outAt == request.time
           && request.resource.data.outBy == uid() && str(request.resource.data.outByName, 80))
         || (isAdmin()
-          && changed().hasOnly(['rate','outAt','outBy','outByName','paidAt','fixedNote'])
+          && changed().hasOnly(['rate','outAt','outBy','outByName','paidAt','fixedNote','paidLedger'])
+          // paidLedger: the savings expense the pay was taken from (or 'none' for a ₱0 duty)
+          && (!('paidLedger' in request.resource.data) || str(request.resource.data.paidLedger, 128))
           && amount(request.resource.data.rate)
           && (!('paidAt' in request.resource.data) || request.resource.data.paidAt == null || request.resource.data.paidAt is timestamp)
           && (!('fixedNote' in request.resource.data) || str(request.resource.data.fixedNote, 120)));
