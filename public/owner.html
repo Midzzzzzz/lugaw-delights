@@ -678,24 +678,10 @@ async function autoSave(){
       }
       done.push(x.id); added=true;
     }
-    // Cash over or short when the shift was closed (counted − expected cash, as on the closing report):
-    // over goes into the savings (cash), short comes out of it. Each shift once, also the past ones;
-    // an entry the owner deletes stays deleted.
-    let diffDone=st.exists()?st.data().diffDone||null:null; const firstDiff=diffDone===null; diffDone=diffDone||[];
-    for(const x of everyShift){
-      if(!x.closedAt?.toMillis?.() || !x.openedAt || diffDone.includes(x.id)) continue;
-      const counted=x.countedCash??x.summary?.counted, expected=x.summary?.expected;
-      const d=counted!=null && expected!=null ? Math.round(counted-expected) : 0;
-      if(d){
-        const base={date:ymd(businessDate(x.closedAt.toDate())),note:`Cash ${d>0?"over":"short"} of shift ${t(x.openedAt)} – ${t(x.closedAt)}${x.closedByName?` (${x.closedByName})`:""}: ${peso(Math.abs(d))}`.slice(0,120),
-          createdAt:serverTimestamp(),createdBy:auth.currentUser.uid};
-        try{ await setDoc(doc(db,"ledger","auto-diff-"+x.id), d>0 ? {type:"saving",amount:d,from:{platform:0,gcash:0,cash:d},...base}
-          : {type:"expense",amount:-d,category:"Cash short",paidFrom:"cash",...base}); }
-        catch(_){} // another owner screen saved it first
-      }
-      diffDone.push(x.id); added=true;
-    }
-    if(added||firstDiff||!st.exists()) await setDoc(ref,{done:done.slice(-3000),diffDone:diffDone.slice(-3000)});
+    if(added||!st.exists()) await setDoc(ref,{done:done.slice(-3000)});
+    // Cash over / short entries are no longer added to the savings (owner's choice, Nov 24 2026):
+    // the ones an earlier version added are removed
+    for(const e of ledger.filter(e=>e.id.startsWith("auto-diff-"))) await deleteDoc(doc(db,"ledger",e.id)).catch(()=>{});
     // Keep the auto entries right: a shift's orders can change after it closed (a Foodpanda sale added
     // from here, an order served or cancelled later). For the shifts of the last 45 days, the entry is
     // worked out again and replaced when the amount changed. An entry the owner deleted stays deleted.
