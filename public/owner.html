@@ -733,16 +733,13 @@ function renderSavings(){
   const mName=m=>new Date(m+"-01T00:00").toLocaleDateString("en-PH",{month:"long",year:"numeric"});
   $("#view").innerHTML=`${ledgerErr?`<div class="flag" style="margin-top:12px">${esc(ledgerErr)}</div>`:""}
   <div class="stats" style="margin-top:12px">
-    <div class="stat"><b>${peso(saved-spent)}</b><span>Savings balance</span></div>
+    <div class="stat"><b>${peso(saved-spent)}</b><span>Savings balance</span>${(()=>{ const w=savingsWhere();
+      return `<small class="muted" style="display:block;margin-top:4px;font-size:.8rem;line-height:1.35">Cash ${peso(w.cash)} · GCash ${peso(w.gcash)} · Foodpanda / Grab ${peso(w.platform)}</small>`; })()}</div>
     <div class="stat"><b>${peso(saved)}</b><span>Total saved</span></div>
     <div class="stat"><b>${peso(spent)}</b><span>Total spent</span></div>
   </div>
   ${(()=>{ const t=savingsWhere(), bal=t.platform+t.gcash+t.cash;
-    return `<h3 style="margin:14px 0 0">Where the savings are</h3><div class="stats" style="margin-top:6px">
-      <div class="stat"><b>${peso(t.platform)}</b><span>Foodpanda / Grab</span></div>
-      <div class="stat"><b>${peso(t.gcash)}</b><span>GCash</span></div>
-      <div class="stat"><b>${peso(t.cash)}</b><span>Cash</span></div></div>
-    ${splitEdit?`<form id="splitForm" class="btnrow" novalidate style="margin-top:8px;align-items:end">
+    return `    ${splitEdit?`<form id="splitForm" class="btnrow" novalidate style="margin-top:8px;align-items:end">
         <label class="f" for="sp-cash">Cash now (₱)<input id="sp-cash" type="number" inputmode="numeric" min="0" step="1" value="${Math.max(0,t.cash)}" style="width:130px"></label>
         <label class="f" for="sp-gcash">GCash now (₱)<input id="sp-gcash" type="number" inputmode="numeric" min="0" step="1" value="${Math.max(0,t.gcash)}" style="width:130px"></label>
         <span class="muted" style="padding-bottom:10px">Foodpanda / Grab: the rest of the ${peso(bal)} balance</span>
