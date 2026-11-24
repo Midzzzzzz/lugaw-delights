@@ -44,6 +44,15 @@ await t("owner corrects the pay and marks it paid", () => assertSucceeds(updateD
 await t("owner unmarks paid", () => assertSucceeds(updateDoc(doc(o, "attendance/d1"), { paidAt: null })));
 await t("owner can't change who it was", () => assertFails(updateDoc(doc(o, "attendance/d1"), { crewId: "ben" })));
 await t("seller reads attendance", () => assertSucceeds(getDoc(doc(s, "attendance/d1"))));
+const past = (over = {}) => ({ crewId: "ana", name: "Ana", rate: 450, inAt: Timestamp.fromMillis(Date.now() - 50 * 3600000), outAt: Timestamp.fromMillis(Date.now() - 42 * 3600000),
+  inBy: "owner", inByName: "Owner", outBy: "owner", outByName: "Owner", byOwner: true, ...over });
+await t("owner records a past duty", () => assertSucceeds(setDoc(doc(o, "attendance/p1"), past())));
+await t("owner records one with no time out", () => assertSucceeds(setDoc(doc(o, "attendance/p2"), past({ outAt: null, outBy: null, outByName: null }))));
+await t("owner records one at another pay", () => assertSucceeds(setDoc(doc(o, "attendance/p3"), past({ rate: 300 }))));
+await t("duty in the future refused", () => assertFails(setDoc(doc(o, "attendance/p4"), past({ inAt: Timestamp.fromMillis(Date.now() + 3600000), outAt: null }))));
+await t("time out before time in refused", () => assertFails(setDoc(doc(o, "attendance/p5"), past({ outAt: Timestamp.fromMillis(Date.now() - 60 * 3600000) }))));
+await t("past duty for someone not on the list refused", () => assertFails(setDoc(doc(o, "attendance/p6"), past({ crewId: "nobody" }))));
+await t("seller can't record a past duty", () => assertFails(setDoc(doc(s, "attendance/p7"), past({ inBy: "s1", inByName: "S" }))));
 await t("owner deletes a wrong duty", () => assertSucceeds(deleteDoc(doc(o, "attendance/d1"))));
 await t("owner removes a staff member", () => assertSucceeds(deleteDoc(doc(o, "crew/ben"))));
 console.log(`\n${pass} passed, ${fail} failed`);

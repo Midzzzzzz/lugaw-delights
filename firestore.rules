@@ -460,7 +460,17 @@ service cloud.firestore {
         && request.resource.data.rate == get(/databases/$(database)/documents/crew/$(request.resource.data.crewId)).data.rate
         && str(request.resource.data.name, 60)
         && request.resource.data.inAt == request.time && request.resource.data.outAt == null
-        && request.resource.data.inBy == uid() && str(request.resource.data.inByName, 80);
+        && request.resource.data.inBy == uid() && str(request.resource.data.inByName, 80)
+        // the owner records a duty by hand (a past day, or one nobody scanned): any pay, times not in the future
+        || (isAdmin()
+          && request.resource.data.keys().hasOnly(['crewId','name','rate','inAt','outAt','inBy','inByName','outBy','outByName','byOwner'])
+          && exists(/databases/$(database)/documents/crew/$(request.resource.data.crewId))
+          && str(request.resource.data.name, 60) && amount(request.resource.data.rate)
+          && request.resource.data.byOwner == true
+          && request.resource.data.inAt is timestamp && request.resource.data.inAt <= request.time
+          && (request.resource.data.outAt == null
+            || (request.resource.data.outAt is timestamp && request.resource.data.outAt > request.resource.data.inAt && request.resource.data.outAt <= request.time))
+          && request.resource.data.inBy == uid() && str(request.resource.data.inByName, 80));
       allow update: if (isStaff() && resource.data.outAt == null
           && changed().hasOnly(['outAt','outBy','outByName'])
           && request.resource.data.outAt == request.time

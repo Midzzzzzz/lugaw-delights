@@ -375,7 +375,7 @@ function render(force){
       ${bd.money.unpaid?ln("Not paid yet",null,peso(bd.money.unpaid),"m-unpaid"):""}
       ${ln("Total",null,peso(bd.total-bd.payOut),null,"tot")}</section>`;
   const pending=sellers.filter(s=>s.status==="pending").length+kitchen.filter(k=>k.status==="pending").length+riders.filter(r=>r.status==="pending").length;
-  $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Staff & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["shifts","Shifts",allShifts.filter(x=>!x.closedAt).length],["savings","Savings"],["attendance","Attendance",duties.filter(d=>!d.outAt).length],["menu","Menu"],["inventory","Inventory"],["settings","Shop settings"]]
+  $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Staff & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["shifts","Shifts",allShifts.filter(x=>!x.closedAt).length],["savings","Savings"],["attendance","Attendance",duties.filter(d=>!d.outAt&&!d.byOwner).length],["menu","Menu"],["inventory","Inventory"],["settings","Shop settings"]]
     .map(([id,l,n])=>`<button class="${tab===id?"on":""}" data-tab="${id}">${l}${n?`<span class="count">${n}</span>`:""}</button>`).join("");
   if(tab==="sales") renderSales(done);
   else if(tab==="orders") renderOrders();
@@ -801,6 +801,7 @@ function halfMonth(d){
 }
 function payPeriods(){ const out=[]; let d=new Date(); for(let i=0;i<24;i++){ const p=halfMonth(d); out.push(p); d=new Date(p.from-1); } return out; }
 const dms=t=>t?.toMillis?.()??null;
+const sameDate=(a,b)=>a!=null&&b!=null&&new Date(a).toDateString()===new Date(b).toDateString();
 const hmOf=t=>t==null?"":new Date(t).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"});
 function renderAttendance(){
   const ps=payPeriods(), p=ps.find(x=>x.key===attPeriod)||ps[0]; attPeriod=p.key;
@@ -809,7 +810,7 @@ function renderAttendance(){
   inP.forEach(d=>{ const g=by.get(d.crewId)||{id:d.crewId,name:crew.find(c=>c.id===d.crewId)?.name||d.name,count:0,pay:0,paid:0}; g.count++; g.pay+=d.rate||0; if(d.paidAt) g.paid+=d.rate||0; by.set(d.crewId,g); });
   const groups=[...by.values()].sort((a,b)=>a.name.localeCompare(b.name));
   const tot=groups.reduce((t,g)=>({count:t.count+g.count,pay:t.pay+g.pay,paid:t.paid+g.paid}),{count:0,pay:0,paid:0});
-  const onNow=duties.filter(d=>!d.outAt);
+  const onNow=duties.filter(d=>!d.outAt && !d.byOwner); // a duty the owner recorded without a time out isn't "on duty now"
   $("#view").innerHTML=`${attErr?`<div class="flag" style="margin-top:12px">${esc(attErr)}</div>`:""}
   <p class="notice" style="margin:12px 0 0">Add each staff member with their <b>pay per duty</b> and print their <b>QR card</b>. At the counter (seller app → <b>Attendance</b>) they scan it when they start and again when they finish: that's one duty. ${onNow.length?`<b>On duty now:</b> ${onNow.map(d=>`${esc(d.name)} (since ${esc(hmOf(dms(d.inAt)))})`).join(", ")}.`:"Nobody is on duty now."}</p>
   ${attMsg?`<p class="flag" style="margin:12px 0 0">${attMsg}</p>`:""}
@@ -842,11 +843,21 @@ function renderAttendance(){
     ${groups.map(g=>`<tr><td><b>${esc(g.name)}</b></td><td class="n">${g.count}</td><td class="n">${peso(g.pay)}</td><td class="n">${peso(g.pay-g.paid)}</td>
       <td>${g.pay-g.paid>0?`<button class="btn small" type="button" data-att-pay="${esc(g.id)}">Mark paid</button>`:`<span class="pill go">Paid</span>`}</td></tr>`).join("")
       ||`<tr><td colspan="5" class="muted">No duties in ${esc(p.label)}.</td></tr>`}</tbody></table></div>
+    ${crew.length?`<form id="dutyForm" novalidate style="margin-top:14px;display:grid;gap:8px;border-top:2px dashed var(--line);padding-top:10px">
+      <h3 style="margin:0">Record a duty</h3>
+      <p class="muted" style="margin:0;font-size:.85rem">For a past day, or a duty nobody scanned. It's added to the pay of its period.</p>
+      <div class="btnrow" style="align-items:end">
+        <label class="f" for="du-crew">Staff<select id="du-crew" style="width:auto">${crew.map(c=>`<option value="${esc(c.id)}">${esc(c.name)} (${peso(c.rate)})</option>`).join("")}</select></label>
+        <label class="f" for="du-date">Date<input type="date" id="du-date" value="${todayStr()}" max="${todayStr()}"></label>
+        <label class="f" for="du-in">Time in<input type="time" id="du-in" value="08:00"></label>
+        <label class="f" for="du-out">Time out <small class="muted">(optional)</small><input type="time" id="du-out" value="17:00"></label>
+        <label class="f" for="du-rate">Pay (₱) <small class="muted">(blank: their pay)</small><input type="number" id="du-rate" inputmode="numeric" min="0" step="1" style="width:120px"></label>
+        <button class="btn" type="submit">Record duty</button></div></form>`:""}
     <h3 style="margin:14px 0 6px">Duties in ${esc(p.label)}</h3>
     <div class="tablewrap"><table class="orders"><thead><tr><th>Date</th><th>Staff</th><th>Time in</th><th>Time out</th><th class="n">Hours</th><th class="n">Pay</th><th></th></tr></thead><tbody>
     ${inP.map(d=>{ const a=dms(d.inAt), b=dms(d.outAt);
       return `<tr><td>${a?esc(new Date(a).toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"})):""}</td><td>${esc(d.name)}</td><td>${esc(hmOf(a))}</td>
-      <td>${b?esc(hmOf(b))+(b-a>86400000?` <span class="muted">(${esc(new Date(b).toLocaleDateString("en-PH",{month:"short",day:"numeric"}))})</span>`:""):`<span class="pill work">On duty</span>`}${d.outByName==="Owner"?` <span class="muted">(set by owner)</span>`:""}</td>
+      <td>${b?esc(hmOf(b))+(b-a>86400000?` <span class="muted">(${esc(new Date(b).toLocaleDateString("en-PH",{month:"short",day:"numeric"}))})</span>`:""):d.byOwner?`<span class="muted">No time out</span>`:`<span class="pill work">On duty</span>`}${d.byOwner?` <span class="muted">(added by owner)</span>`:d.outByName==="Owner"?` <span class="muted">(set by owner)</span>`:""}</td>
       <td class="n">${a&&b?((b-a)/3600000).toFixed(1):""}</td><td class="n">${peso(d.rate||0)}${d.paidAt?` <span class="pill go">Paid</span>`:""}</td>
       <td><div class="btnrow">${b?"":`<button class="btn ghost small" type="button" data-att-out="${esc(d.id)}">Set time out</button>`}<button class="btn ghost small" type="button" data-att-del="${esc(d.id)}">Delete</button></div></td></tr>`; }).join("")
       ||`<tr><td colspan="7" class="muted">None.</td></tr>`}</tbody></table></div>
@@ -882,6 +893,24 @@ $("#view").addEventListener("submit",async e=>{
     if(!($("#cr-rate").value!=="" && rate>=0 && rate<100000)){ attMsg="Type the pay per duty in pesos, e.g. 400."; return render(true); }
     try{ await setDoc(doc(collection(db,"crew")),{name,rate,code:newCode(),active:true,createdAt:serverTimestamp()}); attMsg=""; document.activeElement?.blur(); render(true); }
     catch(x){ attMsg="Couldn't add: "+esc(friendlyError(x)); render(true); }
+  }
+  if(f.id==="dutyForm"){
+    e.preventDefault();
+    const c=crew.find(x=>x.id===$("#du-crew").value), date=$("#du-date").value, tin=$("#du-in").value, tout=$("#du-out").value, rv=$("#du-rate").value;
+    if(!c){ attMsg="Pick the staff member."; return render(true); }
+    if(!date||!tin){ attMsg="Pick the date and the time in."; return render(true); }
+    const rate=rv===""?c.rate:Math.floor(Number(rv));
+    if(!(rate>=0&&rate<100000)){ attMsg="Type the pay in pesos."; return render(true); }
+    const a=new Date(date+"T"+tin);
+    let b=tout?new Date(date+"T"+tout):null; if(b && b<=a) b=new Date(+b+86400000); // past midnight: the next day
+    if(a>new Date()||(b&&b>new Date())){ attMsg="The time in and time out can't be later than now."; return render(true); }
+    const dup=duties.find(d=>d.crewId===c.id && sameDate(dms(d.inAt),+a));
+    if(dup && !confirm(`${c.name} already has a duty on ${a.toLocaleDateString("en-PH",{month:"short",day:"numeric"})} (time in ${hmOf(dms(dup.inAt))}). Record another one? It's paid as another duty.`)) return;
+    try{
+      await setDoc(doc(collection(db,"attendance")),{crewId:c.id,name:c.name,rate,inAt:Timestamp.fromDate(a),outAt:b?Timestamp.fromDate(b):null,
+        inBy:auth.currentUser.uid,inByName:"Owner",...(b?{outBy:auth.currentUser.uid,outByName:"Owner"}:{}),byOwner:true});
+      attMsg=""; attPeriod=halfMonth(a).key; document.activeElement?.blur(); render(true); // show the period it went to
+    }catch(x){ attMsg="Couldn't record: "+esc(friendlyError(x)); render(true); }
   }
   if(f.dataset.rateform){
     e.preventDefault();

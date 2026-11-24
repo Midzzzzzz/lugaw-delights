@@ -865,7 +865,7 @@ const dur=m=>`${Math.floor(m/60)}h ${Math.round(m%60)}m`;
 const sameDay=(a,b)=>new Date(a).toDateString()===new Date(b).toDateString();
 function say(html,kind){ $("#scanMsg").innerHTML=html?`<p class="${kind==="bad"?"flag":""}" style="margin:0;font-size:1.05rem;${kind==="ok"?"color:var(--ok);font-weight:700":""}">${html}</p>`:""; }
 function renderAttendance(){
-  const now=Date.now(), on=duties.filter(d=>!d.outAt).sort((a,b)=>tms(a.inAt)-tms(b.inAt));
+  const now=Date.now(), on=duties.filter(d=>!d.outAt && !d.byOwner).sort((a,b)=>tms(a.inAt)-tms(b.inAt));
   const done=duties.filter(d=>d.outAt && sameDay(tms(d.inAt)??now,now)).sort((a,b)=>tms(b.outAt)-tms(a.outAt));
   $("#attendList").innerHTML=!crew.length?`<p class="muted" style="margin:0">No staff yet. The owner adds staff and prints their QR cards on the owner dashboard (Attendance tab).</p>`
     :`<h3 style="margin:0 0 4px;font-size:1rem">On duty now (${on.length})</h3>
@@ -881,7 +881,7 @@ async function scanned(raw){
   const c=crew.find(x=>x.code===code);
   if(!c) return say("This QR card isn't on the staff list. Ask the owner for a new card.","bad");
   if(c.active===false) return say(`${esc(c.name)}'s card was turned off by the owner.`,"bad");
-  const open=duties.find(d=>d.crewId===c.id && !d.outAt), now=Date.now();
+  const open=duties.find(d=>d.crewId===c.id && !d.outAt && !d.byOwner), now=Date.now(); // the owner's hand-recorded duties are never "open"
   scanBusy=true;
   try{
     if(open){
