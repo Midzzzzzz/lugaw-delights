@@ -134,7 +134,7 @@ import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
 const $=s=>document.querySelector(s);
-let splitOffset=null, splitEdit=false, splitMsg=""; // savings: the owner's correction of where the money is
+let splitOffset=null; // savings: the owner's correction of where the money is (still counted in the amounts)
 let crew=[], duties=[], attErr="", attMsg="", attPeriod=null, attStaff=""; // staff attendance (see "Staff attendance & pay")
 let ledger=[], ledgerErr="", agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], kitchen=[], riders=[], contacts={}, open=null, teamErr="";
 let range="shift", pickedShift=null, tab="sales", filter="all", search="";
@@ -653,19 +653,6 @@ function savingsWhere(withOffset=true){
   if(withOffset && splitOffset) for(const x in t) t[x]+=splitOffset[x]||0;
   return t;
 }
-$("#view").addEventListener("click",e=>{ const b=e.target.closest("[data-split]"); if(!b || tab!=="savings") return;
-  splitEdit=b.dataset.split==="edit"; splitMsg=""; render(true); });
-$("#view").addEventListener("submit",async e=>{
-  if(e.target.id!=="splitForm") return; e.preventDefault();
-  const cash=Math.floor(Number($("#sp-cash").value)), gcash=Math.floor(Number($("#sp-gcash").value)), now=savingsWhere(), bal=now.platform+now.gcash+now.cash;
-  if($("#sp-cash").value===""||$("#sp-gcash").value===""||!(cash>=0)||!(gcash>=0)){ splitMsg="Type how much is in cash and in GCash (₱0 if none)."; return render(true); }
-  if(cash+gcash>bal){ splitMsg=`Cash and GCash together (${peso(cash+gcash)}) are more than the ${peso(bal)} savings balance.`; return render(true); }
-  // the correction: what to add to each so they show these amounts (Foodpanda / Grab gets the rest)
-  const raw=savingsWhere(false), want={cash,gcash,platform:bal-cash-gcash};
-  const off={platform:want.platform-raw.platform,gcash:want.gcash-raw.gcash,cash:want.cash-raw.cash};
-  try{ await setDoc(doc(db,"savingsSplit","offset"),{...off,at:serverTimestamp(),by:auth.currentUser.uid}); splitEdit=false; splitMsg=""; document.activeElement?.blur(); render(true); }
-  catch(x){ splitMsg="Couldn't save: "+friendlyError(x); render(true); }
-});
 async function autoSave(){
   if(autoSaving || !ledgerLoaded || !shiftsLoaded || !auth.currentUser) return;
   autoSaving=true;
@@ -738,17 +725,6 @@ function renderSavings(){
     <div class="stat"><b>${peso(saved)}</b><span>Total saved</span></div>
     <div class="stat"><b>${peso(spent)}</b><span>Total spent</span></div>
   </div>
-  ${(()=>{ const t=savingsWhere(), bal=t.platform+t.gcash+t.cash;
-    return `    ${splitEdit?`<form id="splitForm" class="btnrow" novalidate style="margin-top:8px;align-items:end">
-        <label class="f" for="sp-cash">Cash now (₱)<input id="sp-cash" type="number" inputmode="numeric" min="0" step="1" value="${Math.max(0,t.cash)}" style="width:130px"></label>
-        <label class="f" for="sp-gcash">GCash now (₱)<input id="sp-gcash" type="number" inputmode="numeric" min="0" step="1" value="${Math.max(0,t.gcash)}" style="width:130px"></label>
-        <span class="muted" style="padding-bottom:10px">Foodpanda / Grab: the rest of the ${peso(bal)} balance</span>
-        <button class="btn small" type="submit">Save</button><button class="btn ghost small" type="button" data-split="cancel">Cancel</button></form>`
-      :`<div class="btnrow" style="margin-top:6px;align-items:center"><button class="btn ghost small" type="button" data-split="edit">Correct the amounts</button>
-        ${splitOffset?.at?.toDate?`<span class="muted" style="font-size:.85rem">Corrected ${esc(splitOffset.at.toDate().toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"}))}</span>`:""}</div>`}
-    ${splitMsg?`<p class="flag" style="margin:6px 0 0">${esc(splitMsg)}</p>`:""}
-    <p class="muted" style="margin:6px 0 0;font-size:.85rem">Each shift's savings come from its <b>Foodpanda / Grab</b> money first, then <b>GCash</b>, and <b>cash</b> only for the rest. Expenses come off the money they were paid with. Savings and expenses recorded before this count as cash.</p>`; })()}
-  <p class="notice" style="margin:12px 0 0">Every <b>shift</b> (when a seller closes it, and past shifts recorded from the order timeline), <b>${AUTO_SAVE_PCT}% of that shift's money total</b> (worked out from its orders like the Money table: sales + Foodpanda / Grab − pay outs) is saved here automatically, marked <b>Auto</b>. It's added as soon as this dashboard sees the shift close; if it isn't open then, it's added the next time it opens.</p>
   <div class="panels">
     <form class="card panel" id="savForm" novalidate style="display:grid;gap:10px">
       <h2>Add savings</h2>
