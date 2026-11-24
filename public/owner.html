@@ -52,6 +52,11 @@ table.orders{width:100%;border-collapse:collapse;font-size:.88rem}
 table.orders th{text-align:left;color:var(--muted);font-weight:700;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;padding:6px 8px;border-bottom:2px solid var(--line);white-space:nowrap}
 table.orders td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
 table.orders tr.row{cursor:pointer}
+/* Shifts list: 13 columns in one view (headings wrap, tighter cells) */
+table.shiftlist{font-size:.82rem}
+table.orders.shiftlist th,table.orders.shiftlist th.n{white-space:normal;padding:6px 3px;letter-spacing:0;text-transform:none;font-size:.74rem;line-height:1.15;vertical-align:bottom}
+table.orders.shiftlist .pill{padding:2px 6px;font-size:.75rem;white-space:nowrap}
+table.orders.shiftlist td{padding:7px 3px}
 table.orders tr.row:hover td{background:var(--sunk)}
 table.orders td.n,table.orders th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .detail td{background:var(--sunk)}
@@ -1928,7 +1933,7 @@ function renderShifts(){
     <p class="muted" style="font-size:.88rem;margin:4px 0 8px">Sellers open a shift with the cash in the drawer and close it by counting the drawer. Tap a shift for its details.</p>
     ${pastPanel()}
     ${shiftsErr?`<div class="flag">${esc(shiftsErr)}</div>`:""}
-    <div class="tablewrap"><table class="orders"><thead><tr><th>Opened</th><th>Closed</th><th>Cashier</th><th class="n">Orders</th><th class="n">GCash</th><th class="n">Foodpanda / Grab</th><th class="n">Expected cash</th><th class="n">Sales</th><th class="n">Pay out</th><th class="n">Total sales <small class="muted">(after pay out)</small></th><th class="n">Counted</th><th>Cash</th><th class="n">Final sales</th></tr></thead>
+    <div class="tablewrap"><table class="orders shiftlist"><thead><tr><th>Opened</th><th>Closed</th><th>Cashier</th><th class="n">Orders</th><th class="n">GCash</th><th class="n">Foodpanda / Grab</th><th class="n">Expected cash</th><th class="n">Sales</th><th class="n">Pay out</th><th class="n">Total sales</th><th class="n">Counted</th><th>Cash</th><th class="n">Final sales</th></tr></thead>
     <tbody>${shown.map(x=>`<tr class="row" data-shopen="${esc(x.id)}"><td>${t(x.openedAt)}</td><td>${x.closedAt?t(x.closedAt):`<span class="pill go">Open now</span>`}</td>
       <td>${esc(x.openedByName||"")}${x.closedByName&&x.closedByName!==x.openedByName?` → ${esc(x.closedByName)}`:""}</td>
       <td class="n">${x.overview?x.overview.count:x.summary?x.summary.orders:"—"}</td>
