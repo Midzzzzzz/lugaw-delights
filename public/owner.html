@@ -842,6 +842,9 @@ function halfMonth(d){
 }
 function payPeriods(){ const out=[]; let d=new Date(); for(let i=0;i<24;i++){ const p=halfMonth(d); out.push(p); d=new Date(p.from-1); } return out; }
 const dms=t=>t?.toMillis?.()??null;
+// A duty counts in a pay period when it's in it, or it's from an earlier period and wasn't paid by then
+// (not paid yet, or paid during this period: it stays in the pay it was paid with)
+const inPayPeriod=(d,p)=>{ const t=dms(d.inAt)??Date.now(), paid=dms(d.paidAt); return (t>=p.from && t<p.to) || (t<p.from && (!d.paidAt || (paid!=null && paid>=p.from))); };
 const sameDate=(a,b)=>a!=null&&b!=null&&new Date(a).toDateString()===new Date(b).toDateString();
 const hmOf=t=>t==null?"":new Date(t).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"});
 function renderAttendance(){
@@ -849,7 +852,8 @@ function renderAttendance(){
   // the staff filter: one staff member's duties and pay only ("" = everyone)
   const staffOpts=[...new Map([...crew.map(c=>[c.id,c.name]),...duties.map(d=>[d.crewId,d.name])]).entries()].map(([id,name])=>({id,name:crew.find(c=>c.id===id)?.name||name})).sort((a,b)=>a.name.localeCompare(b.name));
   if(attStaff && !staffOpts.some(o=>o.id===attStaff)) attStaff="";
-  const inP=duties.filter(d=>{ const t=dms(d.inAt)??Date.now(); return t>=p.from && t<p.to && (!attStaff || d.crewId===attStaff); }).sort((a,b)=>(dms(b.inAt)??Infinity)-(dms(a.inAt)??Infinity));
+  // this period's duties, and unpaid ones from earlier periods (carried over until they're paid)
+  const inP=duties.filter(d=>inPayPeriod(d,p) && (!attStaff || d.crewId===attStaff)).sort((a,b)=>(dms(b.inAt)??Infinity)-(dms(a.inAt)??Infinity));
   const by=new Map();
   inP.forEach(d=>{ const g=by.get(d.crewId)||{id:d.crewId,name:crew.find(c=>c.id===d.crewId)?.name||d.name,count:0,pay:0,paid:0}; g.count++; g.pay+=d.rate||0; if(d.paidAt) g.paid+=d.rate||0; by.set(d.crewId,g); });
   const groups=[...by.values()].sort((a,b)=>a.name.localeCompare(b.name));
@@ -907,7 +911,7 @@ function renderAttendance(){
     <h3 style="margin:14px 0 6px">Duties in ${esc(p.label)}${attStaff?` · ${esc(staffOpts.find(o=>o.id===attStaff)?.name||"")}`:""}</h3>
     <div class="tablewrap"><table class="orders"><thead><tr><th>Date</th><th>Staff</th><th>Time in</th><th>Time out</th><th class="n">Hours</th><th class="n">Pay</th><th></th></tr></thead><tbody>
     ${inP.map(d=>{ const a=dms(d.inAt), b=dms(d.outAt);
-      return `<tr><td>${a?esc(new Date(a).toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"})):""}</td><td>${esc(d.name)}</td><td>${esc(hmOf(a))}</td>
+      return `<tr><td>${a?esc(new Date(a).toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"})):""}${a!=null&&a<p.from?`<div class="muted" style="font-size:.8rem">From ${esc(halfMonth(new Date(a)).label)}${d.paidAt?"":", not paid"}</div>`:""}</td><td>${esc(d.name)}</td><td>${esc(hmOf(a))}</td>
       <td>${b?esc(hmOf(b))+(b-a>86400000?` <span class="muted">(${esc(new Date(b).toLocaleDateString("en-PH",{month:"short",day:"numeric"}))})</span>`:""):d.byOwner?`<span class="muted">No time out</span>`:`<span class="pill work">On duty</span>`}${d.byOwner?` <span class="muted">(added by owner)</span>`:d.outByName==="Owner"?` <span class="muted">(set by owner)</span>`:""}</td>
       <td class="n">${a&&b?((b-a)/3600000).toFixed(1):""}</td><td class="n">${peso(d.rate||0)}${d.paidAt?` <span class="pill go">Paid</span>`:""}</td>
       <td><div class="btnrow">${b?"":`<button class="btn ghost small" type="button" data-att-out="${esc(d.id)}">Set time out</button>`}<button class="btn ghost small" type="button" data-att-del="${esc(d.id)}">Delete</button></div></td></tr>`; }).join("")
@@ -1025,7 +1029,7 @@ $("#view").addEventListener("click",async e=>{
     else if(d.attRemove){ const c=crew.find(x=>x.id===d.attRemove);
       if(c && confirm(`Remove ${c.name}? Their card stops working. Their past duties stay in the pay list.`)) await deleteDoc(doc(db,"crew",c.id)); }
     else if(d.attPay){ const p=payPeriods().find(x=>x.key===attPeriod);
-      const list=duties.filter(x=>x.crewId===d.attPay && !x.paidAt && (dms(x.inAt)??0)>=p.from && (dms(x.inAt)??0)<p.to);
+      const list=duties.filter(x=>x.crewId===d.attPay && !x.paidAt && inPayPeriod(x,p)); // also unpaid ones carried over
       const sum=list.reduce((t,x)=>t+(x.rate||0),0);
       if(list.length && confirm(`Mark ${list.length} dut${list.length===1?"y":"ies"} of ${list[0].name} as paid (${peso(sum)})?
 
