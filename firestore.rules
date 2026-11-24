@@ -425,7 +425,17 @@ service cloud.firestore {
     match /ledger/{entryId} {
       allow read, delete: if isAdmin();
       allow create: if isAdmin()
-        && request.resource.data.keys().hasOnly(['type','amount','date','note','category','createdAt','createdBy'])
+        && request.resource.data.keys().hasOnly(['type','amount','date','note','category','createdAt','createdBy','from','paidFrom'])
+        // a saving: where its money is (Foodpanda / Grab, GCash, cash), adding up to the amount
+        && (!('from' in request.resource.data) || (request.resource.data.type == 'saving'
+          && request.resource.data.from is map && request.resource.data.from.size() == 3
+          && request.resource.data.from.keys().hasOnly(['platform','gcash','cash'])
+          && request.resource.data.from.platform is int && request.resource.data.from.platform >= 0
+          && request.resource.data.from.gcash is int && request.resource.data.from.gcash >= 0
+          && request.resource.data.from.cash is int && request.resource.data.from.cash >= 0
+          && request.resource.data.from.platform + request.resource.data.from.gcash + request.resource.data.from.cash == request.resource.data.amount))
+        // an expense: which money it was paid with
+        && (!('paidFrom' in request.resource.data) || (request.resource.data.type == 'expense' && request.resource.data.paidFrom in ['cash','gcash','platform']))
         && request.resource.data.type in ['saving', 'expense']
         && request.resource.data.amount is int && request.resource.data.amount > 0 && request.resource.data.amount < 10000000
         && request.resource.data.date is string && request.resource.data.date.matches('[0-9]{4}-[0-9]{2}-[0-9]{2}')

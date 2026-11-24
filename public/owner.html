@@ -634,8 +634,16 @@ async function moneyBetween(x,payOut){
     getDocs(query(collection(db,"orders"),where("shiftId","==",x.id)))]);
   const list=inShiftOrders(x,[...new Map([...q.docs,...p.docs,...t.docs].map(d=>[d.id,{id:d.id,...d.data()}])).values()]);
   const bd=salesBreakdown(list,payOut);
-  return { total:bd.total-bd.payOut, sales:bd.total, payOut };
+  return { total:bd.total-bd.payOut, sales:bd.total, payOut, platform:bd.money.platform, gcash:bd.money.gcash };
 }
+// Where a shift's savings come from: Foodpanda / Grab first, then GCash, and cash only for the rest
+function savedFrom(amount,m){
+  const platform=Math.max(0,Math.min(amount,Math.floor(m.platform||0))), gcash=Math.max(0,Math.min(amount-platform,Math.floor(m.gcash||0)));
+  return { platform, gcash, cash:amount-platform-gcash };
+}
+// The money of a savings entry by where it is (entries from before this was recorded: cash)
+const partsOf=e=>e.type==="saving" ? (e.from||{platform:0,gcash:0,cash:e.amount}) : {platform:0,gcash:0,cash:0,[e.paidFrom||"cash"]:e.amount};
+const FROM_LABEL={platform:"Foodpanda / Grab",gcash:"GCash",cash:"Cash"};
 async function autoSave(){
   if(autoSaving || !ledgerLoaded || !shiftsLoaded || !auth.currentUser) return;
   autoSaving=true;
@@ -654,7 +662,7 @@ async function autoSave(){
       const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((s,m)=>s+(m.amount||0),0);
       const m=await moneyBetween(x,payOut), amount=Math.floor(m.total*AUTO_SAVE_PCT/100);
       if(amount>0){
-        try{ await setDoc(doc(db,"ledger","auto-shift-"+x.id),{type:"saving",amount,date:ymd(businessDate(x.closedAt.toDate())),
+        try{ await setDoc(doc(db,"ledger","auto-shift-"+x.id),{type:"saving",amount,from:savedFrom(amount,m),date:ymd(businessDate(x.closedAt.toDate())),
           note:`Auto ${AUTO_SAVE_PCT}% of shift ${t(x.openedAt)} – ${t(x.closedAt)}${x.closedByName?` (${x.closedByName})`:""}: ${peso(m.total)}`.slice(0,120),
           createdAt:serverTimestamp(),createdBy:auth.currentUser.uid}); }
         catch(_){} // another owner screen saved it first
@@ -665,16 +673,20 @@ async function autoSave(){
     // Keep the auto entries right: a shift's orders can change after it closed (a Foodpanda sale added
     // from here, an order served or cancelled later). For the shifts of the last 45 days, the entry is
     // worked out again and replaced when the amount changed. An entry the owner deleted stays deleted.
+    // An older entry saved before it recorded where its money is gets that worked out (same amount).
     const since=Date.now()-45*86400000;
     for(const x of everyShift){
       const e=ledger.find(l=>l.id==="auto-shift-"+x.id), closed=x.closedAt?.toMillis?.();
-      if(!e || !closed || closed<since || !x.openedAt) continue;
+      if(!e || !closed || !x.openedAt || (closed<since && e.from)) continue;
       const payOut=(x.moves||[]).filter(m=>m.type==="out").reduce((s,m)=>s+(m.amount||0),0);
-      const m=await moneyBetween(x,payOut), amount=Math.floor(m.total*AUTO_SAVE_PCT/100);
-      if(amount===e.amount || amount<=0) continue;
+      const m=await moneyBetween(x,payOut);
+      let amount=Math.floor(m.total*AUTO_SAVE_PCT/100);
+      if(closed<since) amount=e.amount; // older than 45 days: the amount stays, only where it is is added
+      const from=savedFrom(amount,m);
+      if(amount<=0 || (amount===e.amount && e.from && e.from.platform===from.platform && e.from.gcash===from.gcash)) continue;
       try{
         await deleteDoc(doc(db,"ledger",e.id));
-        await setDoc(doc(db,"ledger",e.id),{type:"saving",amount,date:e.date,
+        await setDoc(doc(db,"ledger",e.id),{type:"saving",amount,from,date:e.date,
           note:`Auto ${AUTO_SAVE_PCT}% of shift ${t(x.openedAt)} – ${t(x.closedAt)}${x.closedByName?` (${x.closedByName})`:""}: ${peso(m.total)}`.slice(0,120),
           createdAt:serverTimestamp(),createdBy:auth.currentUser.uid});
       }catch(_){}
@@ -703,12 +715,19 @@ function renderSavings(){
     <div class="stat"><b>${peso(saved)}</b><span>Total saved</span></div>
     <div class="stat"><b>${peso(spent)}</b><span>Total spent</span></div>
   </div>
+  ${(()=>{ const t={platform:0,gcash:0,cash:0}; ledger.forEach(e=>{ const p=partsOf(e), k=e.type==="saving"?1:-1; for(const x in t) t[x]+=k*(p[x]||0); });
+    return `<h3 style="margin:14px 0 0">Where the savings are</h3><div class="stats" style="margin-top:6px">
+      <div class="stat"><b>${peso(t.platform)}</b><span>Foodpanda / Grab</span></div>
+      <div class="stat"><b>${peso(t.gcash)}</b><span>GCash</span></div>
+      <div class="stat"><b>${peso(t.cash)}</b><span>Cash</span></div></div>
+    <p class="muted" style="margin:6px 0 0;font-size:.85rem">Each shift's savings come from its <b>Foodpanda / Grab</b> money first, then <b>GCash</b>, and <b>cash</b> only for the rest. Expenses come off the money they were paid with. Savings and expenses recorded before this count as cash.</p>`; })()}
   <p class="notice" style="margin:12px 0 0">Every <b>shift</b> (when a seller closes it, and past shifts recorded from the order timeline), <b>${AUTO_SAVE_PCT}% of that shift's money total</b> (worked out from its orders like the Money table: sales + Foodpanda / Grab − pay outs) is saved here automatically, marked <b>Auto</b>. It's added as soon as this dashboard sees the shift close; if it isn't open then, it's added the next time it opens.</p>
   <div class="panels">
     <form class="card panel" id="savForm" novalidate style="display:grid;gap:10px">
       <h2>Add savings</h2>
       <label class="f" for="sv-date">Sales date<input type="date" id="sv-date" value="${todayStr()}" max="${todayStr()}"></label>
       <p class="muted" style="margin:0;font-size:.88rem" id="sv-hint">Checking sales…</p>
+      <label class="f" for="sv-from">Where is the money?<select id="sv-from"><option value="cash">Cash</option><option value="gcash">GCash</option><option value="platform">Foodpanda / Grab</option></select></label>
       <label class="f" for="sv-amt">Amount to save (₱)<input id="sv-amt" type="number" inputmode="numeric" min="1" step="1" placeholder="e.g. 1500"></label>
       <label class="f" for="sv-note">Note (optional)<input id="sv-note" maxlength="120" placeholder="e.g. From today's sales, deposited at bank"></label>
       <p class="err" id="sv-err" hidden></p>
@@ -718,6 +737,7 @@ function renderSavings(){
       <h2>Add expense</h2>
       <label class="f" for="ex-date">Date<input type="date" id="ex-date" value="${todayStr()}" max="${todayStr()}"></label>
       <label class="f" for="ex-cat">Category<select id="ex-cat">${EXPENSE_TYPES.map(c=>`<option>${c}</option>`).join("")}</select></label>
+      <label class="f" for="ex-from">Paid with<select id="ex-from"><option value="cash">Cash</option><option value="gcash">GCash</option><option value="platform">Foodpanda / Grab</option></select></label>
       <label class="f" for="ex-amt">Amount (₱)<input id="ex-amt" type="number" inputmode="numeric" min="1" step="1" placeholder="e.g. 800"></label>
       <label class="f" for="ex-note">What was it for?<input id="ex-note" maxlength="120" placeholder="e.g. 2 sacks of rice"></label>
       <p class="err" id="ex-err" hidden></p>
@@ -732,7 +752,8 @@ function renderSavings(){
     <div class="tablewrap"><table class="orders"><thead><tr><th>Date</th><th>Type</th><th>Details</th><th class="n">Amount</th><th class="n">Balance</th><th></th></tr></thead>
     <tbody>${inMonth.map(e=>`<tr><td>${esc(new Date(e.date+"T00:00").toLocaleDateString("en-PH",{month:"short",day:"numeric"}))}</td>
       <td>${e.type==="saving"?`<span class="pill go">Saved</span>`:`<span class="pill work">${esc(e.category||"Expense")}</span>`}</td>
-      <td>${esc(e.note||"")}</td>
+      <td>${esc(e.note||"")}${e.type==="saving"&&e.from?`<div class="muted" style="font-size:.82rem">${["platform","gcash","cash"].filter(k=>e.from[k]).map(k=>`${FROM_LABEL[k]} ${peso(e.from[k])}`).join(" · ")}</div>`
+        :e.type==="expense"&&e.paidFrom&&e.paidFrom!=="cash"?`<div class="muted" style="font-size:.82rem">Paid with ${FROM_LABEL[e.paidFrom]}</div>`:""}</td>
       <td class="n" style="color:${e.type==="saving"?"var(--ok)":"var(--brand-deep)"}">${e.type==="saving"?"+":"−"}${peso(e.amount)}</td>
       <td class="n">${peso(run[e.id])}</td>
       <td><button class="btn ghost small" data-ledger-del="${esc(e.id)}">Delete</button></td></tr>`).join("")
@@ -881,7 +902,7 @@ async function paySalary(list){
   const days=list.map(x=>dms(x.inAt)??Date.now()).sort((a,b)=>a-b), sh=t=>new Date(t).toLocaleDateString("en-PH",{month:"short",day:"numeric"});
   const span=sh(days[0])+(sh(days[0])!==sh(days[days.length-1])?" – "+sh(days[days.length-1]):"");
   const bt=writeBatch(db), lref=sum>0?doc(collection(db,"ledger")):null;
-  if(lref) bt.set(lref,{type:"expense",amount:sum,date:todayStr(),category:"Salaries",note:`Salary: ${name}, ${list.length} dut${list.length===1?"y":"ies"} (${span})`.slice(0,120),
+  if(lref) bt.set(lref,{type:"expense",amount:sum,date:todayStr(),category:"Salaries",paidFrom:"cash",note:`Salary: ${name}, ${list.length} dut${list.length===1?"y":"ies"} (${span})`.slice(0,120),
     createdAt:serverTimestamp(),createdBy:auth.currentUser.uid});
   list.forEach(x=>bt.update(doc(db,"attendance",x.id),{...(x.paidAt?{}:{paidAt:serverTimestamp()}),paidLedger:lref?lref.id:"none"}));
   await bt.commit();
@@ -1043,7 +1064,8 @@ $("#view").addEventListener("submit",async e=>{
   if(exp&&amount>balance&&btn.dataset.sure!=="1"){ btn.dataset.sure="1"; btn.textContent=`More than the ${peso(balance)} balance. Pay anyway?`; return; }
   btn.disabled=true;
   try{
-    await addDoc(collection(db,"ledger"),{type:sav?"saving":"expense",amount,date,note,...(exp?{category:$("#ex-cat").value}:{}),
+    const src=$(`#${p}-from`).value;
+    await addDoc(collection(db,"ledger"),{type:sav?"saving":"expense",amount,date,note,...(exp?{category:$("#ex-cat").value,paidFrom:src}:{from:{platform:0,gcash:0,cash:0,[src]:amount}}),
       createdAt:serverTimestamp(),createdBy:auth.currentUser.uid});
     savMonth=date.slice(0,7); document.activeElement?.blur(); render(true);
   }catch(x){ btn.disabled=false; err(friendlyError(x)); }
