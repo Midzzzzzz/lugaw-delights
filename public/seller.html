@@ -157,12 +157,26 @@
     <button class="btn big" type="button" id="dineBar" hidden></button>
     <div class="tabs" id="tabs"></div>
     <div class="grid-cards" id="board"></div>
+    <div class="card" id="attendCard" hidden>
+      <h2 style="color:var(--brand-deep);font-size:1.15rem;margin:0">Staff attendance</h2>
+      <p class="muted" style="margin:4px 0 10px;font-size:.9rem">Staff scan their QR card when they start and when they finish their duty.</p>
+      <div class="btnrow"><button class="btn" type="button" id="scanBtn">Scan staff QR</button>
+        <button class="btn ghost small" type="button" id="codeBtn">Type the code instead</button></div>
+      <form id="codeForm" class="btnrow" hidden style="margin-top:8px"><input id="codeIn" maxlength="16" autocomplete="off" autocapitalize="characters" placeholder="Code under the QR" aria-label="Code under the QR" style="max-width:220px;text-transform:uppercase">
+        <button class="btn small" type="submit">Time in / out</button></form>
+      <div id="scanWrap" hidden style="margin-top:10px;max-width:420px">
+        <video id="scanVideo" playsinline muted style="width:100%;border-radius:12px;background:#000"></video>
+        <div class="btnrow" style="margin-top:6px"><button class="btn ghost small" type="button" id="scanStop">Stop camera</button></div>
+      </div>
+      <div id="scanMsg" role="status" aria-live="polite" style="margin-top:10px"></div>
+      <div id="attendList" style="margin-top:12px"></div>
+    </div>
   </div>
 </div>
 
 <script type="module">
 import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "./fb/auth.js";
-import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch } from "./fb/firestore.js";
+import { doc, getDoc, setDoc, updateDoc, onSnapshot, collection, query, where, orderBy, limit, serverTimestamp, writeBatch, Timestamp } from "./fb/firestore.js";
 import { receiptBytes, openDrawerBytes, toBase64, shiftBytes, refillBytes } from "./escpos.js";
 import { prepMinutes, orderType, PLATFORMS, salesRows, isPreorder, preorderWhen, preorderReleaseAt, PREORDER_PAY_MINUTES, preorderItems, paymentSent, paymentRejected, saleAt, ymdOf } from "./common.js";
 import { shiftSummary } from "./common.js";
@@ -172,11 +186,12 @@ import { auth, db, isConfigured, SHOP, MENU, ITEMS, applyMenu, trackerCount, bel
 const $=s=>document.querySelector(s);
 // A device set up for the kitchen (kitchen.html remembers it) opens the kitchen page instead
 try{ if(localStorage.getItem("lugaw-device")==="kitchen") location.replace("kitchen.html"); }catch(_){}
+let crew=[], duties=[], scanStream=null, scanTimer=null, scanBusy=false, lastScan={code:"",at:0}, scanIdle=0, againFor=null; // staff attendance
 let subs=[], lists={}, orders=[], riders=[], contacts={}, asked=new Set(), tab="delivery", known=null;
 let me=null, myName="", myProfile=null, watchSeller=null, registering=false;
 const show=v=>["loginForm","notAdmin","dash"].forEach(id=>$("#"+id).hidden=id!==v);
 $("#setup").innerHTML=setupNotice();
-function stopData(){ subs.forEach(f=>f()); subs=[]; shift=null; lastClosed=null; shiftLoaded=false; storeOpen=null; stockCount=null; countOrders=[]; invDoc=null; publishedSoldOut=null; clearTimeout(publishTimer); publishTimer=null; lists={}; orders=[]; contacts={}; asked=new Set(); known=null; }
+function stopData(){ stopScan(); subs.forEach(f=>f()); subs=[]; shift=null; lastClosed=null; shiftLoaded=false; storeOpen=null; stockCount=null; countOrders=[]; invDoc=null; publishedSoldOut=null; clearTimeout(publishTimer); publishTimer=null; lists={}; orders=[]; contacts={}; asked=new Set(); known=null; }
 
 // Only sellers the owner approved can use this page. The owner has their own
 // login on owner.html; to work the counter, the owner registers a seller account.
@@ -278,6 +293,10 @@ setupAlerts(); if(inApp()){ $("#soundBtn").textContent="Alerts on"; $("#soundBtn
 // older order that still needs action never drops off the dashboard.
 function start(){
   watchShift();
+  // staff attendance: the staff list (to know whose QR was scanned) and the duties of the last 2 days
+  subs.push(onSnapshot(collection(db,"crew"), s=>{ crew=s.docs.map(d=>({id:d.id,...d.data()})); if(tab==="staff") renderAttendance(); }, ()=>{}));
+  subs.push(onSnapshot(query(collection(db,"attendance"),where("inAt",">=",Timestamp.fromMillis(Date.now()-2*86400000))), s=>{
+    duties=s.docs.map(d=>({id:d.id,...d.data()})); if(tab==="staff") renderAttendance(); }, ()=>{}));
   // The store is open for online orders exactly while a shift is open
   subs.push(onSnapshot(doc(db,"settings","store"), s=>{
     storeOpen=!s.exists()||s.data().open!==false; storeShiftId=s.exists()?s.data().shiftId||null:null;
@@ -739,6 +758,7 @@ const TABS=[
   ["unpaid","Unpaid",unpaidDine],
   ["settle","Settle with riders",unsettled],
   ["cancelled","Cancelled",o=>o.status==="cancelled"&&thisShift(o,o.createdAt)],
+  ["staff","Attendance",()=>false],
 ];
 // Delivery tab: oldest first
 const ms=o=>o.createdAt?.toMillis?.()??Infinity;
@@ -820,6 +840,9 @@ function render(force){
     const n=orders.filter(f).length;
     return `<button class="${tab===id?"on":""}" data-tab="${id}">${label}${n?`<span class="count">${n}</span>`:""}</button>`;
   }).join("");
+  $("#board").hidden=tab==="staff"; $("#attendCard").hidden=tab!=="staff";
+  if(tab==="staff"){ renderAttendance(); return; }
+  stopScan();
   const list=orders.filter(TABS.find(t=>t[0]===tab)[2]);
   if(tab==="new"||tab==="kitchen") list.reverse(); // oldest first
   if(tab==="delivery") list.sort(delSort);
@@ -831,6 +854,94 @@ function render(force){
 }
 setInterval(()=>{ if(!$("#dash").hidden) render(); },60000); // keeps "finding a rider for N min" current
 $("#tabs").addEventListener("click",e=>{ const b=e.target.closest("[data-tab]"); if(b){ tab=b.dataset.tab; render(); } });
+
+// ---------- Staff attendance ----------
+// Each staff member has a QR card from the owner (owner dashboard → Attendance). Scanning it here
+// times them in; scanning it again times them out. The owner pays them per duty.
+// (crew, duties and the scanner state are declared at the top: render() can run before this line)
+const tms=t=>t?.toMillis?.()??null;
+const hm=t=>t?new Date(t).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}):"";
+const dur=m=>`${Math.floor(m/60)}h ${Math.round(m%60)}m`;
+const sameDay=(a,b)=>new Date(a).toDateString()===new Date(b).toDateString();
+function say(html,kind){ $("#scanMsg").innerHTML=html?`<p class="${kind==="bad"?"flag":""}" style="margin:0;font-size:1.05rem;${kind==="ok"?"color:var(--ok);font-weight:700":""}">${html}</p>`:""; }
+function renderAttendance(){
+  const now=Date.now(), on=duties.filter(d=>!d.outAt).sort((a,b)=>tms(a.inAt)-tms(b.inAt));
+  const done=duties.filter(d=>d.outAt && sameDay(tms(d.inAt)??now,now)).sort((a,b)=>tms(b.outAt)-tms(a.outAt));
+  $("#attendList").innerHTML=!crew.length?`<p class="muted" style="margin:0">No staff yet. The owner adds staff and prints their QR cards on the owner dashboard (Attendance tab).</p>`
+    :`<h3 style="margin:0 0 4px;font-size:1rem">On duty now (${on.length})</h3>
+    ${on.map(d=>`<div>${esc(d.name)} <span class="muted">· since ${esc(hm(tms(d.inAt)))}${tms(d.inAt)?` (${dur((now-tms(d.inAt))/60000)})`:""}</span></div>`).join("")||`<div class="muted">Nobody timed in.</div>`}
+    <h3 style="margin:12px 0 4px;font-size:1rem">Finished today (${done.length})</h3>
+    ${done.map(d=>`<div>${esc(d.name)} <span class="muted">· ${esc(hm(tms(d.inAt)))} – ${esc(hm(tms(d.outAt)))}</span></div>`).join("")||`<div class="muted">None yet.</div>`}`;
+}
+// One scan (or typed code): time in, or time out if they're on duty
+async function scanned(raw){
+  const code=String(raw||"").trim().toUpperCase().replace(/^LDCREW:/,"");
+  if(scanBusy || (code===lastScan.code && Date.now()-lastScan.at<5000)) return; // the same card held in front of the camera
+  lastScan={code,at:Date.now()}; scanIdle=Date.now();
+  const c=crew.find(x=>x.code===code);
+  if(!c) return say("This QR card isn't on the staff list. Ask the owner for a new card.","bad");
+  if(c.active===false) return say(`${esc(c.name)}'s card was turned off by the owner.`,"bad");
+  const open=duties.find(d=>d.crewId===c.id && !d.outAt), now=Date.now();
+  scanBusy=true;
+  try{
+    if(open){
+      const since=tms(open.inAt)??now;
+      if(now-since<2*60000){ say(`${esc(c.name)} just timed in at ${esc(hm(since))}. Scan again when the duty is over.`); return; }
+      await updateDoc(doc(db,"attendance",open.id),{outAt:serverTimestamp(),outBy:me.uid,outByName:myName});
+      open.outAt=Timestamp.now(); // right away here, before the server's copy comes back (a quick second scan sees it)
+      say(`Thank you, ${esc(c.name)}! Timed out at ${esc(hm(now))} · on duty ${esc(dur((now-since)/60000))}`,"ok");
+    } else {
+      // a second duty on the same day is paid again: ask first
+      if(againFor!==c.id && duties.some(d=>d.crewId===c.id && d.outAt && sameDay(tms(d.inAt)??0,now))){
+        againFor=c.id;
+        $("#scanMsg").innerHTML=`<p class="flag" style="margin:0">${esc(c.name)} already finished a duty today. Start another duty? It is paid as another duty.</p>
+          <div class="btnrow" style="margin-top:6px"><button class="btn small" type="button" data-again="${esc(c.code)}">Yes, start another duty</button><button class="btn ghost small" type="button" data-again="">No</button></div>`;
+        return;
+      }
+      againFor=null;
+      const ref=doc(collection(db,"attendance"));
+      await setDoc(ref,{crewId:c.id,name:c.name,rate:c.rate,inAt:serverTimestamp(),outAt:null,inBy:me.uid,inByName:myName});
+      if(!duties.some(d=>d.id===ref.id)) duties.push({id:ref.id,crewId:c.id,name:c.name,rate:c.rate,inAt:Timestamp.now(),outAt:null}); // before the server's copy comes back
+      const h=new Date().getHours();
+      say(`Good ${h<12?"morning":h<18?"afternoon":"evening"}, ${esc(c.name)}! Timed in at ${esc(hm(now))}`,"ok");
+    }
+    try{ chime(); }catch(_){}
+  }catch(x){ say("Couldn't save: "+esc(friendlyError(x)),"bad"); }
+  finally{ scanBusy=false; renderAttendance(); }
+}
+$("#attendCard").addEventListener("click",e=>{ const b=e.target.closest("[data-again]"); if(!b) return;
+  if(b.dataset.again){ lastScan={code:"",at:0}; scanned(b.dataset.again); } else { againFor=null; say(""); } });
+$("#codeBtn").onclick=()=>{ $("#codeForm").hidden=!$("#codeForm").hidden; if(!$("#codeForm").hidden) $("#codeIn").focus(); };
+$("#codeForm").onsubmit=e=>{ e.preventDefault(); const v=$("#codeIn").value; $("#codeIn").value=""; lastScan={code:"",at:0}; scanned(v); };
+// The camera reader (jsQR) is loaded the first time it's needed
+const loadJsQR=()=>window.jsQR?Promise.resolve():new Promise((ok,bad)=>{ const sc=document.createElement("script"); sc.src="jsqr.js"; sc.onload=ok; sc.onerror=()=>bad(new Error("load")); document.head.append(sc); });
+$("#scanBtn").onclick=async()=>{
+  if(scanStream) return;
+  say("Opening the camera…");
+  try{
+    await loadJsQR();
+    scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"},audio:false});
+  }catch(x){ scanStream=null;
+    return say(x?.message==="load"?"Couldn't load the QR reader. Check the internet and try again.":"Can't use the camera. Allow camera access for this app, or tap \"Type the code instead\".","bad"); }
+  const v=$("#scanVideo"); v.srcObject=scanStream; await v.play().catch(()=>{});
+  $("#scanWrap").hidden=false; say("Hold the QR card in front of the camera."); scanIdle=Date.now();
+  const cv=document.createElement("canvas"), cx=cv.getContext("2d",{willReadFrequently:true});
+  scanTimer=setInterval(()=>{
+    if(Date.now()-scanIdle>120000){ stopScan(); return say("Camera turned off after 2 minutes with no scan."); } // saves the battery
+    if(scanBusy || v.readyState<2 || !v.videoWidth) return;
+    const w=Math.min(640,v.videoWidth), h=Math.round(v.videoHeight*w/v.videoWidth);
+    cv.width=w; cv.height=h; cx.drawImage(v,0,0,w,h);
+    const r=window.jsQR(cx.getImageData(0,0,w,h).data,w,h,{inversionAttempts:"dontInvert"});
+    if(r?.data) scanned(r.data);
+  },250);
+};
+function stopScan(){
+  if(scanTimer){ clearInterval(scanTimer); scanTimer=null; }
+  if(scanStream){ scanStream.getTracks().forEach(t=>t.stop()); scanStream=null; }
+  const w=$("#scanWrap"); if(w) w.hidden=true;
+}
+$("#scanStop").onclick=()=>{ stopScan(); say(""); };
+document.addEventListener("visibilitychange",()=>{ if(document.hidden) stopScan(); });
 
 const waitedMin=o=>{ const d=o.createdAt?.toDate?.(); return d?Math.max(0,Math.floor((Date.now()-d.getTime())/60000)):0; };
 // Items removed from a dine-in order, with who removed them and when

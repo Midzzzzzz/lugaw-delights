@@ -134,6 +134,7 @@ import { notify, setupAlerts, orderSummary, inApp } from "./common.js";
 import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, ingredientsLeft, soldOutFrom, calcTotals, orderCode, compressPhoto, MAX_LINES, MAX_QTY, ACTIVE, peso, esc, STATUS, statusLabel, shopAmount, itemsHTML, mapsLink, phoneKey, telLink, loadProofs, proofsHTML, payShotButton, DELIVERY_ZONES, defaultFees, hasPayout, payoutText, friendlyError, setupNotice } from "./common.js";
 
 const $=s=>document.querySelector(s);
+let crew=[], duties=[], attErr="", attMsg="", attPeriod=null; // staff attendance (see "Staff attendance & pay")
 let ledger=[], ledgerErr="", agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], kitchen=[], riders=[], contacts={}, open=null, teamErr="";
 let range="shift", pickedShift=null, tab="sales", filter="all", search="";
 setupAlerts();
@@ -175,6 +176,11 @@ $("#create").onclick=async()=>{ lerr();
   try{ await createUserWithEmailAndPassword(auth,$("#l-email").value.trim(),$("#l-pass").value); }catch(x){ lerr(friendlyError(x)); } };
 
 function start(){
+  // Staff attendance: the staff list and the duties of the last year (pay is per duty)
+  subs.push(onSnapshot(collection(db,"crew"), s=>{ crew=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.name.localeCompare(b.name)); attErr=""; render(); },
+    e=>{ attErr="Couldn't load staff: "+friendlyError(e); if(tab==="attendance") render(); }));
+  subs.push(onSnapshot(query(collection(db,"attendance"),where("inAt",">=",Timestamp.fromMillis(Date.now()-366*86400000))), s=>{
+    duties=s.docs.map(d=>({id:d.id,...d.data()})); render(); }, e=>{ attErr="Couldn't load attendance: "+friendlyError(e); if(tab==="attendance") render(); }));
   // Savings book: money set aside from sales, and expenses paid from it (owner only)
   subs.push(onSnapshot(query(collection(db,"ledger"),orderBy("date","desc")), s=>{
     // newest first: by date, then by when it was recorded
@@ -369,13 +375,14 @@ function render(force){
       ${bd.money.unpaid?ln("Not paid yet",null,peso(bd.money.unpaid),"m-unpaid"):""}
       ${ln("Total",null,peso(bd.total-bd.payOut),null,"tot")}</section>`;
   const pending=sellers.filter(s=>s.status==="pending").length+kitchen.filter(k=>k.status==="pending").length+riders.filter(r=>r.status==="pending").length;
-  $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Staff & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["shifts","Shifts",allShifts.filter(x=>!x.closedAt).length],["savings","Savings"],["menu","Menu"],["inventory","Inventory"],["settings","Shop settings"]]
+  $("#tabs").innerHTML=[["sales","Sales"],["orders","Orders",orders.length],["team","Staff & riders",pending],["reports","Reports",reports.filter(r=>r.status==="open").length],["shifts","Shifts",allShifts.filter(x=>!x.closedAt).length],["savings","Savings"],["attendance","Attendance",duties.filter(d=>!d.outAt).length],["menu","Menu"],["inventory","Inventory"],["settings","Shop settings"]]
     .map(([id,l,n])=>`<button class="${tab===id?"on":""}" data-tab="${id}">${l}${n?`<span class="count">${n}</span>`:""}</button>`).join("");
   if(tab==="sales") renderSales(done);
   else if(tab==="orders") renderOrders();
   else if(tab==="team") renderTeam();
   else if(tab==="reports") renderReports();
   else if(tab==="savings") renderSavings();
+  else if(tab==="attendance") renderAttendance();
   else if(tab==="shifts") renderShifts();
   else if(tab==="menu") renderMenu();
   else if(tab==="inventory") renderInventory();
@@ -781,6 +788,138 @@ function printStatement(month){
   w.document.open(); w.document.write(html); w.document.close();
 }
 $("#view").addEventListener("click",e=>{ const b=e.target.closest("[data-stmt]"); if(b && tab==="savings") printStatement(b.dataset.stmt==="all"?"all":savMonth); });
+// ---------- Staff attendance & pay ----------
+// The owner adds each staff member with their pay per duty and prints their QR card. At the counter
+// (seller app → Attendance) they scan it when they start and again when they finish: one duty.
+// Pay is per duty, totalled per half-month (1–15, 16–end), and marked paid here.
+// (crew, duties, attErr, attMsg, attPeriod are declared at the top: render() can run before this line)
+const newCode=()=>{ const A="ABCDEFGHJKLMNPQRSTUVWXYZ23456789", r=crypto.getRandomValues(new Uint8Array(10)); return [...r].map(x=>A[x%A.length]).join(""); };
+function halfMonth(d){
+  const y=d.getFullYear(), m=d.getMonth(), first=d.getDate()<=15;
+  const from=new Date(y,m,first?1:16), to=first?new Date(y,m,16):new Date(y,m+1,1), f={month:"short",day:"numeric"};
+  return { key:ymd(from), from:+from, to:+to, label:`${from.toLocaleDateString("en-PH",f)} – ${new Date(+to-1).toLocaleDateString("en-PH",{...f,year:"numeric"})}` };
+}
+function payPeriods(){ const out=[]; let d=new Date(); for(let i=0;i<24;i++){ const p=halfMonth(d); out.push(p); d=new Date(p.from-1); } return out; }
+const dms=t=>t?.toMillis?.()??null;
+const hmOf=t=>t==null?"":new Date(t).toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"});
+function renderAttendance(){
+  const ps=payPeriods(), p=ps.find(x=>x.key===attPeriod)||ps[0]; attPeriod=p.key;
+  const inP=duties.filter(d=>{ const t=dms(d.inAt)??Date.now(); return t>=p.from && t<p.to; }).sort((a,b)=>(dms(b.inAt)??Infinity)-(dms(a.inAt)??Infinity));
+  const by=new Map();
+  inP.forEach(d=>{ const g=by.get(d.crewId)||{id:d.crewId,name:crew.find(c=>c.id===d.crewId)?.name||d.name,count:0,pay:0,paid:0}; g.count++; g.pay+=d.rate||0; if(d.paidAt) g.paid+=d.rate||0; by.set(d.crewId,g); });
+  const groups=[...by.values()].sort((a,b)=>a.name.localeCompare(b.name));
+  const tot=groups.reduce((t,g)=>({count:t.count+g.count,pay:t.pay+g.pay,paid:t.paid+g.paid}),{count:0,pay:0,paid:0});
+  const onNow=duties.filter(d=>!d.outAt);
+  $("#view").innerHTML=`${attErr?`<div class="flag" style="margin-top:12px">${esc(attErr)}</div>`:""}
+  <p class="notice" style="margin:12px 0 0">Add each staff member with their <b>pay per duty</b> and print their <b>QR card</b>. At the counter (seller app → <b>Attendance</b>) they scan it when they start and again when they finish: that's one duty. ${onNow.length?`<b>On duty now:</b> ${onNow.map(d=>`${esc(d.name)} (since ${esc(hmOf(dms(d.inAt)))})`).join(", ")}.`:"Nobody is on duty now."}</p>
+  ${attMsg?`<p class="flag" style="margin:12px 0 0">${attMsg}</p>`:""}
+  <div class="card" style="margin-top:12px">
+    <div class="toolbar" style="justify-content:space-between"><h2 style="color:var(--brand-deep);font-size:1.2rem">Staff and pay per duty</h2>
+      ${crew.length?`<button class="btn small" type="button" data-att-cards="all">Print all QR cards</button>`:""}</div>
+    <div class="tablewrap"><table class="orders"><thead><tr><th>Name</th><th>Pay per duty</th><th>QR card</th><th></th></tr></thead><tbody>
+    ${crew.map(c=>`<tr><td><b>${esc(c.name)}</b></td>
+      <td><form class="btnrow" data-rateform="${esc(c.id)}" style="flex-wrap:nowrap"><input type="number" inputmode="numeric" min="0" step="1" value="${c.rate}" aria-label="Pay per duty for ${esc(c.name)}" style="width:110px">
+        <button class="btn ghost small" type="submit">Save</button></form></td>
+      <td><div class="btnrow"><button class="btn ghost small" type="button" data-att-cards="${esc(c.id)}">Print card</button><button class="btn ghost small" type="button" data-att-newcard="${esc(c.id)}">New card</button></div></td>
+      <td><button class="btn ghost small" type="button" data-att-remove="${esc(c.id)}">Remove</button></td></tr>`).join("")
+      ||`<tr><td colspan="4" class="muted">No staff yet. Add them below.</td></tr>`}</tbody></table></div>
+    <form id="crewForm" class="btnrow" novalidate style="margin-top:10px;align-items:end">
+      <label class="f" for="cr-name">Name<input id="cr-name" maxlength="60" placeholder="e.g. Ana Cruz"></label>
+      <label class="f" for="cr-rate">Pay per duty (₱)<input id="cr-rate" type="number" inputmode="numeric" min="0" step="1" placeholder="e.g. 400" style="width:130px"></label>
+      <button class="btn" type="submit">Add staff</button></form>
+    <p class="muted" style="margin:8px 0 0;font-size:.85rem">A new pay applies to duties from now on; past duties keep the pay they were timed in with. <b>New card</b> makes the old card stop working (use it if a card is lost).</p>
+  </div>
+  <div class="card" style="margin-top:12px">
+    <div class="toolbar" style="justify-content:space-between"><h2 style="color:var(--brand-deep);font-size:1.2rem">Pay</h2>
+      <select id="att-period" aria-label="Pay period" style="width:auto">${ps.map(x=>`<option value="${x.key}"${x.key===p.key?" selected":""}>${esc(x.label)}</option>`).join("")}</select></div>
+    <div class="stats" style="margin-top:8px">
+      <div class="stat"><b>${tot.count}</b><span>Duties</span></div>
+      <div class="stat"><b>${peso(tot.pay)}</b><span>Total pay</span></div>
+      <div class="stat"><b>${peso(tot.paid)}</b><span>Paid</span></div>
+      <div class="stat"><b>${peso(tot.pay-tot.paid)}</b><span>Still to pay</span></div>
+    </div>
+    <div class="tablewrap"><table class="orders"><thead><tr><th>Staff</th><th class="n">Duties</th><th class="n">Pay</th><th class="n">Still to pay</th><th></th></tr></thead><tbody>
+    ${groups.map(g=>`<tr><td><b>${esc(g.name)}</b></td><td class="n">${g.count}</td><td class="n">${peso(g.pay)}</td><td class="n">${peso(g.pay-g.paid)}</td>
+      <td>${g.pay-g.paid>0?`<button class="btn small" type="button" data-att-pay="${esc(g.id)}">Mark paid</button>`:`<span class="pill go">Paid</span>`}</td></tr>`).join("")
+      ||`<tr><td colspan="5" class="muted">No duties in ${esc(p.label)}.</td></tr>`}</tbody></table></div>
+    <h3 style="margin:14px 0 6px">Duties in ${esc(p.label)}</h3>
+    <div class="tablewrap"><table class="orders"><thead><tr><th>Date</th><th>Staff</th><th>Time in</th><th>Time out</th><th class="n">Hours</th><th class="n">Pay</th><th></th></tr></thead><tbody>
+    ${inP.map(d=>{ const a=dms(d.inAt), b=dms(d.outAt);
+      return `<tr><td>${a?esc(new Date(a).toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"})):""}</td><td>${esc(d.name)}</td><td>${esc(hmOf(a))}</td>
+      <td>${b?esc(hmOf(b))+(b-a>86400000?` <span class="muted">(${esc(new Date(b).toLocaleDateString("en-PH",{month:"short",day:"numeric"}))})</span>`:""):`<span class="pill work">On duty</span>`}${d.outByName==="Owner"?` <span class="muted">(set by owner)</span>`:""}</td>
+      <td class="n">${a&&b?((b-a)/3600000).toFixed(1):""}</td><td class="n">${peso(d.rate||0)}${d.paidAt?` <span class="pill go">Paid</span>`:""}</td>
+      <td><div class="btnrow">${b?"":`<button class="btn ghost small" type="button" data-att-out="${esc(d.id)}">Set time out</button>`}<button class="btn ghost small" type="button" data-att-del="${esc(d.id)}">Delete</button></div></td></tr>`; }).join("")
+      ||`<tr><td colspan="7" class="muted">None.</td></tr>`}</tbody></table></div>
+  </div>`;
+}
+// QR cards to print: the shop's name, the staff member's name, the QR and the code under it
+const loadQrLib=()=>window.qrcode?Promise.resolve():new Promise((ok,bad)=>{ const sc=document.createElement("script"); sc.src="qrcode.js"; sc.onload=ok; sc.onerror=bad; document.head.append(sc); });
+async function printCards(list){
+  try{ await loadQrLib(); }catch(_){ attMsg="Couldn't load the QR maker. Check the internet and try again."; return render(true); }
+  const img=code=>{ const q=window.qrcode(0,"M"); q.addData("LDCREW:"+code); q.make(); return q.createDataURL(6,2); };
+  const html=`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Staff QR cards</title><style>
+    @page{margin:10mm}body{font-family:Arial,Helvetica,sans-serif;color:#000;background:#fff;margin:0}
+    .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8mm}.c{border:1px dashed #888;border-radius:8px;padding:6mm;text-align:center;break-inside:avoid}
+    .c .shop{display:flex;align-items:center;justify-content:center;gap:6px;font-weight:bold}.c .shop img{width:28px;height:28px;object-fit:contain}
+    .c h2{margin:6px 0 2px;font-size:20px}.c .qr{width:52mm;height:52mm;image-rendering:pixelated}.c .code{font-family:monospace;font-size:15px;letter-spacing:2px}
+    .c .how{font-size:11px;color:#444;margin-top:4px}.noprint{text-align:center;margin:12px}@media print{.noprint{display:none}}</style></head><body>
+    <div class="grid">${list.map(c=>`<div class="c"><div class="shop"><img src="${location.origin}/logo.jpg" alt="">${esc(SHOP.name)}</div><h2>${esc(c.name)}</h2>
+      <img class="qr" src="${img(c.code)}" alt="QR code"><div class="code">${esc(c.code)}</div><div class="how">Scan at the counter when you start and when you finish your duty.</div></div>`).join("")}</div>
+    <div class="noprint"><button onclick="print()">Print</button> <button onclick="close()">Close</button></div>
+    <script>addEventListener("load",()=>setTimeout(print,400))<\/script></body></html>`;
+  const p=window.Capacitor?.Plugins?.Printer?.printHtml?.({name:"Staff QR cards",html:html.split("<script>")[0]+"</body></html>"});
+  if(p){ p.catch(()=>{}); return; }
+  const w=window.open("","_blank"); if(!w){ attMsg="Allow pop-ups to print the cards."; return render(true); }
+  w.document.open(); w.document.write(html); w.document.close();
+}
+$("#view").addEventListener("change",e=>{ if(e.target.id==="att-period"){ attPeriod=e.target.value; document.activeElement?.blur(); render(true); } });
+$("#view").addEventListener("submit",async e=>{
+  const f=e.target;
+  if(f.id==="crewForm"){
+    e.preventDefault();
+    const name=$("#cr-name").value.trim().replace(/\s+/g," "), rate=Math.floor(Number($("#cr-rate").value));
+    if(!name){ attMsg="Type the staff member's name."; return render(true); }
+    if(!($("#cr-rate").value!=="" && rate>=0 && rate<100000)){ attMsg="Type the pay per duty in pesos, e.g. 400."; return render(true); }
+    try{ await setDoc(doc(collection(db,"crew")),{name,rate,code:newCode(),active:true,createdAt:serverTimestamp()}); attMsg=""; document.activeElement?.blur(); render(true); }
+    catch(x){ attMsg="Couldn't add: "+esc(friendlyError(x)); render(true); }
+  }
+  if(f.dataset.rateform){
+    e.preventDefault();
+    const v=f.querySelector("input").value, rate=Math.floor(Number(v));
+    if(v===""||!(rate>=0&&rate<100000)){ attMsg="Type the pay per duty in pesos."; return render(true); }
+    try{ await updateDoc(doc(db,"crew",f.dataset.rateform),{rate}); attMsg=""; document.activeElement?.blur(); render(true); }
+    catch(x){ attMsg="Couldn't save: "+esc(friendlyError(x)); render(true); }
+  }
+});
+$("#view").addEventListener("click",async e=>{
+  if(tab!=="attendance") return;
+  const b=e.target.closest("[data-att-cards],[data-att-newcard],[data-att-remove],[data-att-pay],[data-att-out],[data-att-del]"); if(!b) return;
+  const d=b.dataset;
+  try{
+    if(d.attCards) printCards(d.attCards==="all"?crew:crew.filter(c=>c.id===d.attCards));
+    else if(d.attNewcard){ const c=crew.find(x=>x.id===d.attNewcard);
+      if(c && confirm(`Make a new QR card for ${c.name}? The old card stops working.`)){ const code=newCode(); await updateDoc(doc(db,"crew",c.id),{code}); printCards([{...c,code}]); } }
+    else if(d.attRemove){ const c=crew.find(x=>x.id===d.attRemove);
+      if(c && confirm(`Remove ${c.name}? Their card stops working. Their past duties stay in the pay list.`)) await deleteDoc(doc(db,"crew",c.id)); }
+    else if(d.attPay){ const p=payPeriods().find(x=>x.key===attPeriod);
+      const list=duties.filter(x=>x.crewId===d.attPay && !x.paidAt && (dms(x.inAt)??0)>=p.from && (dms(x.inAt)??0)<p.to);
+      const sum=list.reduce((t,x)=>t+(x.rate||0),0);
+      if(list.length && confirm(`Mark ${list.length} dut${list.length===1?"y":"ies"} of ${list[0].name} as paid (${peso(sum)})?`)){
+        const bt=writeBatch(db); list.forEach(x=>bt.update(doc(db,"attendance",x.id),{paidAt:serverTimestamp()})); await bt.commit(); } }
+    else if(d.attOut){ const x=duties.find(y=>y.id===d.attOut); if(!x) return;
+      const a=new Date(dms(x.inAt)??Date.now()), now=new Date(), dflt=(now-a<16*3600000?now:new Date(+a+8*3600000));
+      const v=prompt(`${x.name} timed in ${a.toLocaleString("en-PH",{dateStyle:"medium",timeStyle:"short"})} and didn't scan out. Time out (24-hour, e.g. 17:30):`,
+        String(dflt.getHours()).padStart(2,"0")+":"+String(dflt.getMinutes()).padStart(2,"0"));
+      if(v==null) return;
+      const m=String(v).trim().match(/^(\d{1,2}):(\d{2})$/); if(!m||+m[1]>23||+m[2]>59){ attMsg="Type the time like 17:30."; return render(true); }
+      let out=new Date(a.getFullYear(),a.getMonth(),a.getDate(),+m[1],+m[2]); if(out<=a) out=new Date(+out+86400000); // past midnight: the next day
+      if(out>now){ attMsg="The time out can't be later than now."; return render(true); }
+      await updateDoc(doc(db,"attendance",x.id),{outAt:Timestamp.fromDate(out),outBy:auth.currentUser.uid,outByName:"Owner"}); }
+    else if(d.attDel){ const x=duties.find(y=>y.id===d.attDel);
+      if(x && confirm(`Delete ${x.name}'s duty on ${new Date(dms(x.inAt)??Date.now()).toLocaleDateString("en-PH",{month:"short",day:"numeric"})}? It won't be paid.`)) await deleteDoc(doc(db,"attendance",x.id)); }
+    attMsg="";
+  }catch(x){ attMsg="Couldn't save: "+esc(friendlyError(x)); render(true); }
+});
 async function showSalesHint(){
   const day=$("#sv-date")?.value; if(!day) return;
   const hint=$("#sv-hint"); hint.textContent="Checking sales…";

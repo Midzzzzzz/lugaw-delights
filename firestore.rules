@@ -436,6 +436,43 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    // Staff attendance (owner.html sets up the staff, seller.html scans their QR cards).
+    // crew: each staff member, their pay per duty and the secret code on their QR card. Only the
+    // owner adds or changes them; the counter reads them to know whose card was scanned.
+    match /crew/{crewId} {
+      allow read: if isStaff();
+      allow create, update: if isAdmin()
+        && request.resource.data.keys().hasOnly(['name','rate','code','active','createdAt'])
+        && str(request.resource.data.name, 60) && request.resource.data.name.size() > 0
+        && amount(request.resource.data.rate)
+        && request.resource.data.code is string && request.resource.data.code.matches('[A-Z0-9]{8,16}')
+        && request.resource.data.active is bool;
+      allow delete: if isAdmin();
+    }
+    // attendance: one record per duty. The counter times a staff member in (with their pay per duty
+    // at that moment) and times them out once; the owner can correct, mark paid or delete.
+    match /attendance/{dutyId} {
+      allow read: if isStaff();
+      allow create: if isStaff()
+        && request.resource.data.keys().hasOnly(['crewId','name','rate','inAt','outAt','inBy','inByName'])
+        && exists(/databases/$(database)/documents/crew/$(request.resource.data.crewId))
+        && get(/databases/$(database)/documents/crew/$(request.resource.data.crewId)).data.active == true
+        && request.resource.data.rate == get(/databases/$(database)/documents/crew/$(request.resource.data.crewId)).data.rate
+        && str(request.resource.data.name, 60)
+        && request.resource.data.inAt == request.time && request.resource.data.outAt == null
+        && request.resource.data.inBy == uid() && str(request.resource.data.inByName, 80);
+      allow update: if (isStaff() && resource.data.outAt == null
+          && changed().hasOnly(['outAt','outBy','outByName'])
+          && request.resource.data.outAt == request.time
+          && request.resource.data.outBy == uid() && str(request.resource.data.outByName, 80))
+        || (isAdmin()
+          && changed().hasOnly(['rate','outAt','outBy','outByName','paidAt','fixedNote'])
+          && amount(request.resource.data.rate)
+          && (!('paidAt' in request.resource.data) || request.resource.data.paidAt == null || request.resource.data.paidAt is timestamp)
+          && (!('fixedNote' in request.resource.data) || str(request.resource.data.fixedNote, 120)));
+      allow delete: if isAdmin();
+    }
+
     // Cashier shifts (seller.html): opened with the starting cash, cash paid in or out during the
     // shift is added to its list (never edited or removed), and closed once with the counted cash
     // and the shift's totals. A closed shift can't change. The owner sees all and can delete.
