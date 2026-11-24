@@ -135,6 +135,7 @@ import { auth, db, isConfigured, ITEMS, MENU_SECTIONS, applyMenu, trackerCount, 
 
 const $=s=>document.querySelector(s);
 let splitOffset=null; // savings: the owner's correction of where the money is (still counted in the amounts)
+let staffPays=[]; // part payments not yet settled (staffPays where applied == false)
 let crew=[], duties=[], attErr="", attMsg="", attPeriod=null, attStaff=""; // staff attendance (see "Staff attendance & pay")
 let ledger=[], ledgerErr="", agreements={}, store={}, deliveryFees=null, feesSaved=false, feesErr="", reports=[], reportsErr="", subs=[], ordersSub=null, orders=[], sellers=[], kitchen=[], riders=[], contacts={}, open=null, teamErr="";
 let range="shift", pickedShift=null, tab="sales", filter="all", search="";
@@ -178,6 +179,7 @@ $("#create").onclick=async()=>{ lerr();
 
 function start(){
   subs.push(onSnapshot(doc(db,"savingsSplit","offset"), s=>{ splitOffset=s.exists()?s.data():null; if(tab==="savings") render(); }, ()=>{}));
+  subs.push(onSnapshot(query(collection(db,"staffPays"),where("applied","==",false)), s=>{ staffPays=s.docs.map(d=>({id:d.id,...d.data()})); if(tab==="attendance") render(); }, ()=>{}));
   // Staff attendance: the staff list and the duties of the last year (pay is per duty)
   subs.push(onSnapshot(collection(db,"crew"), s=>{ crew=s.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>a.name.localeCompare(b.name)); attErr=""; render(); },
     e=>{ attErr="Couldn't load staff: "+friendlyError(e); if(tab==="attendance") render(); }));
@@ -855,6 +857,8 @@ function renderAttendance(){
   const inP=duties.filter(d=>inPayPeriod(d,p) && (!attStaff || d.crewId===attStaff)).sort((a,b)=>(dms(b.inAt)??Infinity)-(dms(a.inAt)??Infinity));
   const by=new Map();
   inP.forEach(d=>{ const g=by.get(d.crewId)||{id:d.crewId,name:crew.find(c=>c.id===d.crewId)?.name||d.name,count:0,pay:0,paid:0}; g.count++; g.pay+=d.rate||0; if(d.paidAt) g.paid+=d.rate||0; by.set(d.crewId,g); });
+  // part payments not settled yet count as paid (they come off what's still to pay)
+  by.forEach(g=>{ g.parts=staffPays.filter(x=>x.crewId===g.id); g.paid+=Math.min(g.pay-g.paid,g.parts.reduce((t,x)=>t+x.amount,0)); });
   const groups=[...by.values()].sort((a,b)=>a.name.localeCompare(b.name));
   const tot=groups.reduce((t,g)=>({count:t.count+g.count,pay:t.pay+g.pay,paid:t.paid+g.paid}),{count:0,pay:0,paid:0});
   const onNow=duties.filter(d=>!d.outAt && !d.byOwner); // a duty the owner recorded without a time out isn't "on duty now"
@@ -892,7 +896,8 @@ function renderAttendance(){
     <p class="muted" style="margin:8px 0 0;font-size:.85rem"><b>Mark paid</b> also takes the amount from <b>Savings</b> as a Salaries expense.</p>
     <div class="tablewrap"><table class="orders"><thead><tr><th>Staff</th><th class="n">Duties</th><th class="n">Pay</th><th class="n">Still to pay</th><th></th></tr></thead><tbody>
     ${groups.map(g=>`<tr><td><b>${esc(g.name)}</b></td><td class="n">${g.count}</td><td class="n">${peso(g.pay)}</td><td class="n">${peso(g.pay-g.paid)}</td>
-      <td>${g.pay-g.paid>0?`<button class="btn small" type="button" data-att-pay="${esc(g.id)}">Mark paid</button>`:`<span class="pill go">Paid</span>`}</td></tr>`).join("")
+      <td>${g.pay-g.paid>0?`<div class="btnrow"><button class="btn ghost small" type="button" data-att-part="${esc(g.id)}">Pay part</button><button class="btn small" type="button" data-att-pay="${esc(g.id)}">Mark paid</button></div>`:`<span class="pill go">Paid</span>`}
+        ${g.parts.map(x=>`<div class="muted" style="font-size:.82rem;margin-top:4px">Part paid ${peso(x.amount)}${x.at?.toDate?` · ${esc(x.at.toDate().toLocaleDateString("en-PH",{month:"short",day:"numeric"}))}`:""} <button class="btn ghost small" type="button" data-att-undo="${esc(x.id)}" style="padding:1px 8px">Undo</button></div>`).join("")}</td></tr>`).join("")
       ||`<tr><td colspan="5" class="muted">No duties in ${esc(p.label)}${attStaff?" for this staff member":""}.</td></tr>`}</tbody></table></div>
     ${crew.length?`<form id="dutyForm" novalidate style="margin-top:14px;display:grid;gap:8px;border-top:2px dashed var(--line);padding-top:10px">
       <h3 style="margin:0">Record a duty</h3>
@@ -920,14 +925,15 @@ function renderAttendance(){
 // QR cards to print: the shop's name, the staff member's name, the QR and the code under it
 // Paying a staff member: their duties are marked paid and the amount is taken from the savings book
 // as a Salaries expense, in one save. list: duties of one staff member (some may already be paid).
-async function paySalary(list){
-  const sum=list.reduce((t,x)=>t+(x.rate||0),0), name=list[0].name;
+async function paySalary(list,parts=[]){ // parts: part payments given before (only the rest is taken now)
+  const full=list.reduce((t,x)=>t+(x.rate||0),0), before=parts.reduce((t,x)=>t+x.amount,0), sum=Math.max(0,full-before), name=list[0].name;
   const days=list.map(x=>dms(x.inAt)??Date.now()).sort((a,b)=>a-b), sh=t=>new Date(t).toLocaleDateString("en-PH",{month:"short",day:"numeric"});
   const span=sh(days[0])+(sh(days[0])!==sh(days[days.length-1])?" – "+sh(days[days.length-1]):"");
   const bt=writeBatch(db), lref=sum>0?doc(collection(db,"ledger")):null;
-  if(lref) bt.set(lref,{type:"expense",amount:sum,date:todayStr(),category:"Salaries",paidFrom:"cash",note:`Salary: ${name}, ${list.length} dut${list.length===1?"y":"ies"} (${span})`.slice(0,120),
+  if(lref) bt.set(lref,{type:"expense",amount:sum,date:todayStr(),category:"Salaries",paidFrom:"cash",note:`Salary: ${name}, ${list.length} dut${list.length===1?"y":"ies"} (${span})${before?`, ${peso(before)} paid before`:""}`.slice(0,120),
     createdAt:serverTimestamp(),createdBy:auth.currentUser.uid});
-  list.forEach(x=>bt.update(doc(db,"attendance",x.id),{...(x.paidAt?{}:{paidAt:serverTimestamp()}),paidLedger:lref?lref.id:"none"}));
+  list.forEach(x=>bt.update(doc(db,"attendance",x.id),{...(x.paidAt?{}:{paidAt:serverTimestamp()}),paidLedger:lref?lref.id:(parts[0]?.ledgerId||"none")}));
+  parts.forEach(x=>bt.update(doc(db,"staffPays",x.id),{applied:true,appliedAt:serverTimestamp()}));
   await bt.commit();
 }
 const loadQrLib=()=>window.qrcode?Promise.resolve():new Promise((ok,bad)=>{ const sc=document.createElement("script"); sc.src="qrcode.js"; sc.onload=ok; sc.onerror=bad; document.head.append(sc); });
@@ -1019,7 +1025,7 @@ ${note[0].toUpperCase()+note.slice(1)}.`:""}`)) return;
 });
 $("#view").addEventListener("click",async e=>{
   if(tab!=="attendance") return;
-  const b=e.target.closest("[data-att-cards],[data-att-newcard],[data-att-remove],[data-att-pay],[data-att-oldpay],[data-att-out],[data-att-del]"); if(!b) return;
+  const b=e.target.closest("[data-att-cards],[data-att-newcard],[data-att-remove],[data-att-pay],[data-att-part],[data-att-undo],[data-att-oldpay],[data-att-out],[data-att-del]"); if(!b) return;
   const d=b.dataset;
   try{
     if(d.attCards) printCards(d.attCards==="all"?crew:crew.filter(c=>c.id===d.attCards));
@@ -1029,10 +1035,24 @@ $("#view").addEventListener("click",async e=>{
       if(c && confirm(`Remove ${c.name}? Their card stops working. Their past duties stay in the pay list.`)) await deleteDoc(doc(db,"crew",c.id)); }
     else if(d.attPay){ const p=payPeriods().find(x=>x.key===attPeriod);
       const list=duties.filter(x=>x.crewId===d.attPay && !x.paidAt && inPayPeriod(x,p)); // also unpaid ones carried over
-      const sum=list.reduce((t,x)=>t+(x.rate||0),0);
-      if(list.length && confirm(`Mark ${list.length} dut${list.length===1?"y":"ies"} of ${list[0].name} as paid (${peso(sum)})?
+      const parts=staffPays.filter(x=>x.crewId===d.attPay), before=parts.reduce((t,x)=>t+x.amount,0), full=list.reduce((t,x)=>t+(x.rate||0),0), sum=Math.max(0,full-before);
+      if(list.length && confirm(`Mark ${list.length} dut${list.length===1?"y":"ies"} of ${list[0].name} as paid (${peso(full)}${before?`, ${peso(before)} already paid: ${peso(sum)} left`:""})?
 
-${peso(sum)} is taken from Savings as a Salaries expense.`)){ await paySalary(list); attMsg=""; } }
+${peso(sum)} is taken from Savings as a Salaries expense.`)){ await paySalary(list,parts); attMsg=""; } }
+    else if(d.attPart){ // part of the pay now; the rest later
+      const c=d.attPart, owed=duties.filter(x=>x.crewId===c && !x.paidAt).reduce((t,x)=>t+(x.rate||0),0)-staffPays.filter(x=>x.crewId===c).reduce((t,x)=>t+x.amount,0);
+      const name=crew.find(x=>x.id===c)?.name||duties.find(x=>x.crewId===c)?.name||"";
+      const v=prompt(`How much to pay ${name} now? (still to pay: ${peso(owed)})`,""); if(v==null) return;
+      const amount=Math.floor(Number(String(v).replace(/[₱,\s]/g,"")));
+      if(!(amount>0)){ attMsg="Type the amount to pay, e.g. 3500."; return render(true); }
+      if(amount>owed){ attMsg=`That's more than the ${peso(owed)} still to pay. Use Mark paid to pay everything.`; return render(true); }
+      const bt=writeBatch(db), lref=doc(collection(db,"ledger"));
+      bt.set(lref,{type:"expense",amount,date:todayStr(),category:"Salaries",paidFrom:"cash",note:`Salary (part): ${name}, ${peso(amount)} of ${peso(owed)}`.slice(0,120),createdAt:serverTimestamp(),createdBy:auth.currentUser.uid});
+      bt.set(doc(collection(db,"staffPays")),{crewId:c,name,amount,at:serverTimestamp(),ledgerId:lref.id,applied:false});
+      await bt.commit(); attMsg=""; }
+    else if(d.attUndo){ const x=staffPays.find(y=>y.id===d.attUndo); if(!x) return;
+      if(confirm(`Undo the ${peso(x.amount)} part payment to ${x.name}? It's put back in Savings.`)){
+        const bt=writeBatch(db); bt.delete(doc(db,"staffPays",x.id)); bt.delete(doc(db,"ledger",x.ledgerId)); await bt.commit(); attMsg=""; } }
     else if(d.attOldpay!=null){ // duties marked paid before pay was taken from savings
       const old=duties.filter(x=>x.paidAt && !x.paidLedger), sum=old.reduce((t,x)=>t+(x.rate||0),0);
       if(old.length && confirm(`Take ${peso(sum)} from Savings for ${old.length} dut${old.length===1?"y":"ies"} already marked paid? One Salaries expense per staff member.`)){

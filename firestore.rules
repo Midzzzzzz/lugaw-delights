@@ -506,6 +506,20 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // Part of a staff member's pay given ahead (owner.html → Attendance → Pay part). Taken from the savings
+    // (ledgerId: that expense). When the rest is paid (Mark paid) it's marked applied; Undo deletes it.
+    match /staffPays/{payId} {
+      allow read, delete: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasOnly(['crewId','name','amount','at','ledgerId','applied'])
+        && request.resource.data.crewId is string && str(request.resource.data.name, 60)
+        && request.resource.data.amount is int && request.resource.data.amount > 0 && request.resource.data.amount < 1000000
+        && request.resource.data.at == request.time && str(request.resource.data.ledgerId, 128)
+        && request.resource.data.applied == false;
+      allow update: if isAdmin() && changed().hasOnly(['applied','appliedAt'])
+        && request.resource.data.applied == true && request.resource.data.appliedAt == request.time;
+    }
+
     // Cashier shifts (seller.html): opened with the starting cash, cash paid in or out during the
     // shift is added to its list (never edited or removed), and closed once with the counted cash
     // and the shift's totals. A closed shift can't change. The owner sees all and can delete.

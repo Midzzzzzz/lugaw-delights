@@ -55,6 +55,15 @@ await t("duty in the future refused", () => assertFails(setDoc(doc(o, "attendanc
 await t("time out before time in refused", () => assertFails(setDoc(doc(o, "attendance/p5"), past({ outAt: Timestamp.fromMillis(Date.now() - 60 * 3600000) }))));
 await t("past duty for someone not on the list refused", () => assertFails(setDoc(doc(o, "attendance/p6"), past({ crewId: "nobody" }))));
 await t("seller can't record a past duty", () => assertFails(setDoc(doc(s, "attendance/p7"), past({ inBy: "s1", inByName: "S" }))));
+const part = (over = {}) => ({ crewId: "ana", name: "Ana", amount: 3500, at: serverTimestamp(), ledgerId: "L1", applied: false, ...over });
+await t("owner pays part of the pay", () => assertSucceeds(setDoc(doc(o, "staffPays/sp1"), part())));
+await t("part payment of ₱0 refused", () => assertFails(setDoc(doc(o, "staffPays/sp2"), part({ amount: 0 }))));
+await t("part payment already applied refused", () => assertFails(setDoc(doc(o, "staffPays/sp3"), part({ applied: true }))));
+await t("seller can't see part payments", () => assertFails(getDoc(doc(s, "staffPays/sp1"))));
+await t("seller can't pay part", () => assertFails(setDoc(doc(s, "staffPays/sp4"), part())));
+await t("owner can't change the amount", () => assertFails(updateDoc(doc(o, "staffPays/sp1"), { amount: 100 })));
+await t("owner marks it applied when the rest is paid", () => assertSucceeds(updateDoc(doc(o, "staffPays/sp1"), { applied: true, appliedAt: serverTimestamp() })));
+await t("owner undoes a part payment", () => assertSucceeds(deleteDoc(doc(o, "staffPays/sp1"))));
 await t("owner deletes a wrong duty", () => assertSucceeds(deleteDoc(doc(o, "attendance/d1"))));
 await t("owner removes a staff member", () => assertSucceeds(deleteDoc(doc(o, "crew/ben"))));
 console.log(`\n${pass} passed, ${fail} failed`);
